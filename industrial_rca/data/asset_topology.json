@@ -1,0 +1,179 @@
+{
+  "isa95_hierarchy": {
+    "enterprise": "Global PetroChem Refining Corp",
+    "site": "Site Alpha - Baytown Complex",
+    "area": "Area 03 - Steam & Power Generation",
+    "unit": "Unit 300 - High Pressure Boiler Feedwater System"
+  },
+  "equipment_nodes": [
+    {
+      "id": "TK-300",
+      "name": "Deaerator Storage Tank",
+      "type": "Vessel",
+      "isa95_level": "Equipment",
+      "description": "Feedwater storage and thermal deaeration tank supplying boiler feed pumps",
+      "operating_specs": {
+        "design_pressure_bar": 4.5,
+        "operating_pressure_bar": 2.8,
+        "operating_temperature_c": 130.0
+      },
+      "sensors": []
+    },
+    {
+      "id": "STR-301A",
+      "name": "Suction Strainer 301A",
+      "type": "Strainer",
+      "isa95_level": "Equipment",
+      "description": "Dual basket 20-mesh particulate strainer protecting Pump P-301A",
+      "operating_specs": {
+        "mesh_size": "20-mesh (840 micron)",
+        "design_clean_dp_bar": 0.12,
+        "max_allowable_dp_bar": 1.00
+      },
+      "sensors": [
+        {
+          "tag": "DPS-30101",
+          "description": "Strainer Differential Pressure",
+          "unit": "bar",
+          "type": "DifferentialPressure",
+          "range": [0.0, 3.0]
+        }
+      ]
+    },
+    {
+      "id": "LINE-30101",
+      "name": "Suction Feed Piping Header",
+      "type": "Piping",
+      "isa95_level": "Equipment",
+      "description": "12-inch carbon steel suction line connecting strainer to pump inlet nozzle",
+      "operating_specs": {
+        "diameter_in": 12.0,
+        "schedule": "Std 40"
+      },
+      "sensors": [
+        {
+          "tag": "PT-30101",
+          "description": "Pump Suction Line Pressure",
+          "unit": "bar",
+          "type": "Pressure",
+          "range": [0.0, 5.0]
+        }
+      ]
+    },
+    {
+      "id": "P-301A",
+      "name": "Centrifugal Boiler Feed Pump A",
+      "type": "CentrifugalPump",
+      "isa95_level": "Equipment",
+      "description": "Multi-stage centrifugal high-pressure boiler feed pump",
+      "operating_specs": {
+        "stages": 6,
+        "rated_speed_rpm": 2980.0,
+        "rated_flow_m3h": 185.0,
+        "rated_head_m": 680.0,
+        "npsh_r_bar": 1.20,
+        "design_suction_bar": 2.40,
+        "design_discharge_bar": 63.50,
+        "bearing_type": "Hydrodynamic sleeve bearings with forced oil lubrication"
+      },
+      "sensors": [
+        {
+          "tag": "VI-301-R",
+          "description": "Drive-End Radial Vibration RMS",
+          "unit": "mm/s",
+          "type": "VibrationRMS",
+          "range": [0.0, 25.0]
+        },
+        {
+          "tag": "TI-301-DE",
+          "description": "Drive-End Bearing Temperature",
+          "unit": "deg C",
+          "type": "Temperature",
+          "range": [0.0, 150.0]
+        }
+      ]
+    },
+    {
+      "id": "M-301A",
+      "name": "Induction Motor Drive A",
+      "type": "ElectricMotor",
+      "isa95_level": "Equipment",
+      "description": "3.3kV Squirrel-cage induction motor driver",
+      "operating_specs": {
+        "rated_power_kw": 450.0,
+        "rated_voltage_v": 3300.0,
+        "rated_current_a": 115.0,
+        "rated_speed_rpm": 2980.0
+      },
+      "sensors": [
+        {
+          "tag": "IT-30101",
+          "description": "Drive Motor Phase Current",
+          "unit": "A",
+          "type": "Current",
+          "range": [0.0, 200.0]
+        }
+      ]
+    },
+    {
+      "id": "CV-30101",
+      "name": "Discharge Check Valve 30101",
+      "type": "CheckValve",
+      "isa95_level": "Equipment",
+      "description": "Non-return tilting disc check valve protecting against backflow",
+      "operating_specs": {
+        "rating_class": "ANSI 600"
+      },
+      "sensors": []
+    },
+    {
+      "id": "HDR-300",
+      "name": "High-Pressure Feedwater Header",
+      "type": "Header",
+      "isa95_level": "Equipment",
+      "description": "High pressure boiler distribution manifold",
+      "operating_specs": {
+        "operating_pressure_bar": 64.0
+      },
+      "sensors": []
+    }
+  ],
+  "topology_edges": [
+    {
+      "source": "TK-300",
+      "target": "STR-301A",
+      "relation": "PROCESS_FLOW_UPSTREAM_TO_DOWNSTREAM",
+      "medium": "Deaerated Feedwater (130C)"
+    },
+    {
+      "source": "STR-301A",
+      "target": "LINE-30101",
+      "relation": "PROCESS_FLOW_UPSTREAM_TO_DOWNSTREAM",
+      "medium": "Filtered Feedwater"
+    },
+    {
+      "source": "LINE-30101",
+      "target": "P-301A",
+      "relation": "SUCTION_SUCTION_LINE",
+      "medium": "Pump Inflow"
+    },
+    {
+      "source": "M-301A",
+      "target": "P-301A",
+      "relation": "MECHANICAL_COUPLING",
+      "medium": "Flexible Disc Shaft Coupling"
+    },
+    {
+      "source": "P-301A",
+      "target": "CV-30101",
+      "relation": "DISCHARGE_FLOW",
+      "medium": "High-Pressure Feedwater"
+    },
+    {
+      "source": "CV-30101",
+      "target": "HDR-300",
+      "relation": "MANIFOLD_INJECTION",
+      "medium": "High-Pressure Feedwater"
+    }
+  ]
+}

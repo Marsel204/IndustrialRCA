@@ -1,0 +1,269 @@
+"""
+Synthetic Telemetry Generator for Industrial RCA System.
+Generates 60 minutes of 1 Hz telemetry and high-frequency vibration waveforms
+for Normal Baseline and Fault Scenarios (Boiler Feed Pump P-301A).
+"""
+
+from dataclasses import dataclass
+from typing import Dict, Any, Tuple
+import numpy as np
+import pandas as pd
+
+from industrial_rca.config import (
+    EQUIPMENT_ID,
+    SAMPLING_RATE_HZ,
+    HIGH_FREQ_SAMPLING_RATE_HZ,
+    SIMULATION_DURATION_SEC,
+    SCENARIO_START_TIME,
+    RUNNING_FREQUENCY_1X_HZ,
+    RUNNING_FREQUENCY_2X_HZ,
+)
+
+
+@dataclass
+class TelemetryDataset:
+    scenario_name: str
+    df_1hz: pd.DataFrame
+    metadata: Dict[str, Any]
+    normal_waveform: Dict[str, np.ndarray]  # {"t": ..., "signal": ...}
+    fault_waveform: Dict[str, np.ndarray]    # {"t": ..., "signal": ...}
+
+    def get_tag_series(self, tag: str) -> np.ndarray:
+        """Retrieve numpy array of 1 Hz floats for tag."""
+        if tag in self.df_1hz.columns:
+            return self.df_1hz[tag].to_numpy()
+        raise KeyError(f"Sensor tag '{tag}' not found in dataset. Available: {list(self.df_1hz.columns)}")
+
+    def get_timestamps(self) -> np.ndarray:
+        """Retrieve seconds since start (0 to 3599)."""
+        return self.df_1hz["timestamp_sec"].to_numpy()
+
+
+class TelemetryStore:
+    """In-memory registry decoupling raw TSDB datasets from serializable LangGraph state."""
+    _store: Dict[str, TelemetryDataset] = {}
+
+    @classmethod
+    def register(cls, dataset: TelemetryDataset, custom_id: Optional[str] = None) -> str:
+        ds_id = custom_id or f"ds_{dataset.scenario_name.lower().replace(' ', '_')}_{id(dataset)}"
+        cls._store[ds_id] = dataset
+        return ds_id
+
+    @classmethod
+    def get(cls, dataset_id: str) -> TelemetryDataset:
+        if dataset_id not in cls._store:
+            raise KeyError(f"Dataset '{dataset_id}' not found in TelemetryStore. Available: {list(cls._store.keys())}")
+        return cls._store[dataset_id]
+
+    @classmethod
+    def clear(cls) -> None:
+        cls._store.clear()
+
+
+def generate_high_frequency_vibration(
+    is_cavitating: bool = False,
+    duration_sec: float = 1.0,
+    sampling_rate_hz: float = HIGH_FREQ_SAMPLING_RATE_HZ,
+    seed: int = 42,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Synthesize high-frequency piezoelectric accelerometer vibration signal (in mm/s velocity).
+
+    - Normal state: Prominent 1X (49.67 Hz) and small 2X (99.33 Hz) shaft speed peaks.
+                    Broadband noise floor (2 kHz - 8 kHz) is minimal.
+    - Cavitation state: Explosive broadband noise floor (2 kHz - 8 kHz) caused by
+                        imploding vapor micro-bubbles, plus harmonic distortion.
+    """
+    rng = np.random.default_rng(seed)
+    n_samples = int(duration_sec * sampling_rate_hz)
+    t = np.linspace(0.0, duration_sec, n_samples, endpoint=False)
+
+    f1 = RUNNING_FREQUENCY_1X_HZ  # 49.67 Hz
+    f2 = RUNNING_FREQUENCY_2X_HZ  # 99.33 Hz
+
+    if not is_cavitating:
+        # Healthy baseline: 1.8 mm/s overall RMS
+        # 1X peak ~ 1.6 mm/s, 2X harmonic ~ 0.3 mm/s, broadband white noise ~ 0.15 mm/s
+        signal = (
+            1.6 * np.sqrt(2.0) * np.sin(2.0 * np.pi * f1 * t)
+            + 0.3 * np.sqrt(2.0) * np.sin(2.0 * np.pi * f2 * t + 0.5)
+            + rng.normal(0.0, 0.15, n_samples)
+        )
+    else:
+        # Cavitating fault state: 11.4 mm/s overall RMS
+        # Shaft 1X/2X modulation + intense broadband noise in 2-8 kHz band
+        shaft_base = (
+            2.8 * np.sqrt(2.0) * np.sin(2.0 * np.pi * f1 * t)
+            + 1.2 * np.sqrt(2.0) * np.sin(2.0 * np.pi * f2 * t + 1.1)
+        )
+        # Broadband cavitation noise synthesized using multiple high-frequency acoustic modes (2kHz - 8kHz)
+        # and filtered white noise
+        raw_noise = rng.normal(0.0, 1.0, n_samples)
+        # Bandpass frequency-domain weighting in 2000 - 8000 Hz band
+        fft_noise = np.fft.rfft(raw_noise)
+        freqs = np.fft.rfftfreq(n_samples, d=1.0 / sampling_rate_hz)
+        cav_mask = (freqs >= 2000.0) & (freqs <= 8000.0)
+        fft_noise[~cav_mask] *= 0.12  # Suppress outside cavitation band
+        fft_noise[cav_mask] *= 3.8    # Amplify cavitation acoustic floor
+        cavitation_broadband = np.fft.irfft(fft_noise, n=n_samples)
+
+        # Scale broadband noise so total RMS matches ~11.4 mm/s
+        signal = shaft_base + cavitation_broadband
+        # Normalize to target RMS
+        current_rms = np.sqrt(np.mean(signal**2))
+        signal = signal * (11.4 / (current_rms + 1e-6))
+
+    return t, signal
+
+
+def generate_normal_scenario(duration_sec: int = SIMULATION_DURATION_SEC, seed: int = 101) -> TelemetryDataset:
+    """
+    Synthesizes 60 minutes of 1 Hz normal operating baseline telemetry for Boiler Feed Pump P-301A.
+    All parameters remain strictly within healthy OEM operational envelopes.
+    """
+    rng = np.random.default_rng(seed)
+    t = np.arange(0, duration_sec, 1)
+
+    # PT-30101: Suction pressure steady at 2.40 bar +/- 0.05 bar
+    pt_30101 = 2.40 + rng.normal(0.0, 0.015, duration_sec)
+    pt_30101 = np.clip(pt_30101, 2.30, 2.50)
+
+    # DPS-30101: Clean strainer Delta-P steady at 0.12 bar
+    dps_30101 = 0.12 + rng.normal(0.0, 0.005, duration_sec)
+    dps_30101 = np.clip(dps_30101, 0.10, 0.15)
+
+    # VI-301-R: Radial vibration RMS steady at healthy 1.80 mm/s
+    vi_301_r = 1.80 + rng.normal(0.0, 0.08, duration_sec)
+    vi_301_r = np.clip(vi_301_r, 1.60, 2.10)
+
+    # TI-301-DE: Drive-end bearing temperature steady at 48.5 deg C
+    ti_301_de = 48.5 + rng.normal(0.0, 0.2, duration_sec)
+
+    # IT-30101: Motor current steady at 84.2 A
+    it_30101 = 84.2 + rng.normal(0.0, 0.4, duration_sec)
+
+    df = pd.DataFrame({
+        "timestamp_sec": t,
+        "PT-30101": pt_30101,
+        "DPS-30101": dps_30101,
+        "VI-301-R": vi_301_r,
+        "TI-301-DE": ti_301_de,
+        "IT-30101": it_30101,
+    })
+
+    t_wf_norm, sig_norm = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
+    t_wf_cav, sig_cav = generate_high_frequency_vibration(is_cavitating=True, seed=seed)
+
+    return TelemetryDataset(
+        scenario_name="Baseline Normal Operation",
+        df_1hz=df,
+        metadata={
+            "asset_id": EQUIPMENT_ID,
+            "duration_sec": duration_sec,
+            "condition": "HEALTHY",
+            "anomaly_expected": False,
+        },
+        normal_waveform={"t": t_wf_norm, "signal": sig_norm},
+        fault_waveform={"t": t_wf_cav, "signal": sig_cav},
+    )
+
+
+def generate_fault_scenario(duration_sec: int = SIMULATION_DURATION_SEC, seed: int = 202) -> TelemetryDataset:
+    """
+    Synthesizes 60 minutes of 1 Hz fault scenario telemetry:
+    - T0 to T30m (0 - 1800s): Normal baseline
+    - T30m to T50m (1800 - 3000s): Marine fouling in STR-301A. Delta-P ramps 0.12 -> 1.85 bar.
+    - T45m (2700s): Suction pressure plunges below NPSHr (1.2 bar) to 0.58 bar.
+    - T48m (2880s): Impeller cavitates. Vibration spikes to 11.4 mm/s RMS, broadband 2-8 kHz noise explosion,
+                    motor current oscillates +/- 22%.
+    - T55m (3300s): Drive-end bearing temp TI-301-DE elevates past trip limit (92.3 C), tripping DCS at 03:14 AM.
+    - T55m to T60m (3300 - 3600s): Post-trip shutdown / coastdown.
+    """
+    rng = np.random.default_rng(seed)
+    t = np.arange(0, duration_sec, 1)
+
+    # Initialize with normal baseline arrays
+    pt_30101 = np.full(duration_sec, 2.40) + rng.normal(0.0, 0.015, duration_sec)
+    dps_30101 = np.full(duration_sec, 0.12) + rng.normal(0.0, 0.005, duration_sec)
+    vi_301_r = np.full(duration_sec, 1.80) + rng.normal(0.0, 0.08, duration_sec)
+    ti_301_de = np.full(duration_sec, 48.5) + rng.normal(0.0, 0.15, duration_sec)
+    it_30101 = np.full(duration_sec, 84.2) + rng.normal(0.0, 0.4, duration_sec)
+
+    # 1. T30m to T50m (1800s to 3000s): Strainer Fouling Delta-P Ramp
+    # Ramps smoothly from 0.12 bar to 1.85 bar
+    idx_30 = 1800
+    idx_50 = 3000
+    ramp_steps = idx_50 - idx_30
+    dp_ramp = np.linspace(0.12, 1.85, ramp_steps) + rng.normal(0.0, 0.02, ramp_steps)
+    dps_30101[idx_30:idx_50] = dp_ramp
+    # After T50m, Delta-P remains severely choked around 1.85 bar until trip
+    idx_55 = 3300
+    dps_30101[idx_50:idx_55] = 1.85 + rng.normal(0.0, 0.03, idx_55 - idx_50)
+    # Post trip (pump off, flow stops, dP collapses)
+    dps_30101[idx_55:] = 0.02 + rng.normal(0.0, 0.005, duration_sec - idx_55)
+
+    # 2. T45m (2700s): Suction Pressure Plunges below NPSHr (1.2 bar)
+    # Gradual suction depression from T35m (2100s), sharp drop below NPSHr at 2700s down to 0.58 bar
+    idx_35 = 2100
+    idx_45 = 2700
+    # Between 2100s and 2700s, suction drops from 2.38 bar to 1.20 bar
+    pt_30101[idx_35:idx_45] = np.linspace(2.38, 1.20, idx_45 - idx_35) + rng.normal(0.0, 0.02, idx_45 - idx_35)
+    # From 2700s to 2880s (T48m), drops further to 0.58 bar (deep starvation)
+    idx_48 = 2880
+    pt_30101[idx_45:idx_48] = np.linspace(1.20, 0.58, idx_48 - idx_45) + rng.normal(0.0, 0.03, idx_48 - idx_45)
+    # Stays severely depressed (0.58 bar) until trip at 3300s
+    pt_30101[idx_48:idx_55] = 0.58 + rng.normal(0.0, 0.02, idx_55 - idx_48)
+    # Post trip, suction equalizes back toward static deaerator head (~2.4 bar)
+    post_trip_len = duration_sec - idx_55
+    pt_30101[idx_55:] = np.linspace(0.60, 2.35, post_trip_len) + rng.normal(0.0, 0.02, post_trip_len)
+
+    # 3. T48m (2880s): Impeller Cavitates -> Vibration spikes to 11.4 mm/s RMS
+    # Prior to cavitation, slight elevation due to suction turbulence (1.8 -> 3.2 mm/s between 2700 and 2880)
+    vi_301_r[idx_45:idx_48] = np.linspace(1.8, 3.2, idx_48 - idx_45) + rng.normal(0.0, 0.15, idx_48 - idx_45)
+    # Cavitation erupts at 2880s: sudden spike to 11.4 mm/s RMS with erratic pulsations
+    cav_len = idx_55 - idx_48
+    vi_301_r[idx_48:idx_55] = 11.4 + rng.normal(0.0, 0.9, cav_len)
+    # Post trip: vibration coasts down immediately to near 0 (0.1 mm/s)
+    vi_301_r[idx_55:] = 0.15 * np.exp(-np.linspace(0, 5, post_trip_len)) + rng.normal(0.0, 0.02, post_trip_len)
+
+    # 4. Motor Current: T48m (2880s) to T55m (3300s) fluctuates by +/- 22% due to unstable two-phase fluid load
+    fluctuation_profile = np.sin(np.linspace(0, 40 * np.pi, cav_len)) * 18.5 + rng.normal(0.0, 3.0, cav_len)
+    it_30101[idx_48:idx_55] = 84.2 + fluctuation_profile
+    # Post trip: circuit breaker trips, current drops to 0.0 A
+    it_30101[idx_55:] = 0.0
+
+    # 5. Bearing Temp TI-301-DE: Heat generation accelerates from T48m (high friction/vibration)
+    # Ramps from 48.5 C up past trip limit (90.0 C) reaching 92.3 C at T55m (3300s)
+    ti_301_de[idx_48:idx_55] = np.linspace(48.5, 92.3, cav_len) + rng.normal(0.0, 0.2, cav_len)
+    # Post trip: slow thermal cooling
+    ti_301_de[idx_55:] = 92.3 - np.linspace(0, 14.0, post_trip_len) + rng.normal(0.0, 0.2, post_trip_len)
+
+    df = pd.DataFrame({
+        "timestamp_sec": t,
+        "PT-30101": pt_30101,
+        "DPS-30101": dps_30101,
+        "VI-301-R": vi_301_r,
+        "TI-301-DE": ti_301_de,
+        "IT-30101": it_30101,
+    })
+
+    t_wf_norm, sig_norm = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
+    t_wf_cav, sig_cav = generate_high_frequency_vibration(is_cavitating=True, seed=seed)
+
+    return TelemetryDataset(
+        scenario_name="Strainer Clogging Induced Cavitation Trip",
+        df_1hz=df,
+        metadata={
+            "asset_id": EQUIPMENT_ID,
+            "duration_sec": duration_sec,
+            "condition": "FAULT_TRIP",
+            "anomaly_expected": True,
+            "trip_timestamp_sec": idx_55,
+            "trip_time_str": "03:14:00 AM",
+            "primary_trip_sensor": "TI-301-DE",
+            "trip_value": 92.3,
+            "trip_setpoint": 90.0,
+        },
+        normal_waveform={"t": t_wf_norm, "signal": sig_norm},
+        fault_waveform={"t": t_wf_cav, "signal": sig_cav},
+    )
