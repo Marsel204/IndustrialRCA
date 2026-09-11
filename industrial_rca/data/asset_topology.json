@@ -3,7 +3,8 @@
     "enterprise": "Global PetroChem Refining Corp",
     "site": "Site Alpha - Baytown Complex",
     "area": "Area 03 - Steam & Power Generation",
-    "unit": "Unit 300 - High Pressure Boiler Feedwater System"
+    "unit": "Unit 300 - High Pressure Boiler Feedwater System",
+    "test_bench": "Bench 01 - Variable Frequency Drive Test Rig"
   },
   "equipment_nodes": [
     {
@@ -136,6 +137,114 @@
         "operating_pressure_bar": 64.0
       },
       "sensors": []
+    },
+    {
+      "id": "HMI_TOUCH_01",
+      "name": "HMI Touch Screen / V-Box Gateway",
+      "type": "HMI",
+      "isa95_level": "ControlDevice",
+      "description": "Local operator touch interface commanding speed and monitoring live telemetry via Modbus RTU",
+      "operating_specs": {
+        "protocol": "Modbus RTU Master",
+        "comm_port": "RS-485 (9600 8-N-1)",
+        "poll_rate_ms": 1000
+      },
+      "sensors": [
+        {
+          "tag": "HMI_FREQ_SP",
+          "description": "Operator Target Frequency Setpoint (Register 2001H)",
+          "unit": "Hz",
+          "type": "FrequencySetpoint",
+          "range": [0.0, 50.0]
+        }
+      ]
+    },
+    {
+      "id": "VFD_VM_01",
+      "name": "WECON VM Series Variable Frequency Drive",
+      "type": "VariableFrequencyDrive",
+      "isa95_level": "Equipment",
+      "description": "3-Phase AC Variable Frequency Inverter Drive with Modbus RTU interface",
+      "operating_specs": {
+        "model": "WECON VM-0R7G-4",
+        "rated_power_kw": 0.75,
+        "rated_current_a": 2.5,
+        "rated_input_voltage_v": 380.0,
+        "max_dc_bus_voltage_v": 700.0,
+        "comm_protocol": "Modbus RTU (Slave ID 1, 9600 8-N-1)"
+      },
+      "sensors": [
+        {
+          "tag": "VFD_F_OUT",
+          "register": "3000H",
+          "description": "VFD Output Operating Frequency",
+          "unit": "Hz",
+          "type": "Frequency",
+          "range": [0.0, 50.0]
+        },
+        {
+          "tag": "VFD_F_TARGET",
+          "register": "3001H",
+          "description": "VFD Target Set Frequency",
+          "unit": "Hz",
+          "type": "Frequency",
+          "range": [0.0, 50.0]
+        },
+        {
+          "tag": "VFD_I_OUT",
+          "register": "3002H",
+          "description": "VFD Motor Output Current",
+          "unit": "A",
+          "type": "Current",
+          "range": [0.0, 10.0]
+        },
+        {
+          "tag": "VFD_V_OUT",
+          "register": "3003H",
+          "description": "VFD Motor Output Voltage",
+          "unit": "V",
+          "type": "Voltage",
+          "range": [0.0, 380.0]
+        },
+        {
+          "tag": "VFD_V_DC",
+          "register": "3004H",
+          "description": "VFD DC Bus Voltage",
+          "unit": "V",
+          "type": "DCVoltage",
+          "range": [0.0, 800.0]
+        },
+        {
+          "tag": "VFD_FAULT_CODE",
+          "register": "700BH",
+          "description": "VFD Active Trip Code",
+          "unit": "code",
+          "type": "FaultCode",
+          "range": [0, 99]
+        }
+      ]
+    },
+    {
+      "id": "MOTOR_M01",
+      "name": "Test Bench 3-Phase Induction Motor",
+      "type": "ElectricMotor",
+      "isa95_level": "Equipment",
+      "description": "Small 3-phase squirrel-cage induction motor driven by WECON VM VFD",
+      "operating_specs": {
+        "rated_power_kw": 0.37,
+        "rated_voltage_v": 380.0,
+        "rated_current_a": 1.15,
+        "rated_speed_rpm": 1440.0
+      },
+      "sensors": [
+        {
+          "tag": "MTR_SPEED_RPM",
+          "description": "Rotor Shaft Speed",
+          "unit": "RPM",
+          "type": "Speed",
+          "range": [0.0, 1500.0]
+        }
+      ]
     }
   ],
   "topology_edges": [
@@ -174,6 +283,18 @@
       "target": "HDR-300",
       "relation": "MANIFOLD_INJECTION",
       "medium": "High-Pressure Feedwater"
+    },
+    {
+      "source": "HMI_TOUCH_01",
+      "target": "VFD_VM_01",
+      "relation": "OPERATOR_COMMAND_MODBUS",
+      "medium": "RS-485 Modbus RTU (Registers 2000H, 2001H)"
+    },
+    {
+      "source": "VFD_VM_01",
+      "target": "MOTOR_M01",
+      "relation": "ELECTRICAL_POWER_DRIVE",
+      "medium": "3-Phase PWM AC Power (U, V, W)"
     }
   ]
 }
