@@ -20,7 +20,7 @@ from industrial_rca.data.oem_manuals import (
 )
 from industrial_rca.tools.topology_tracer import AssetTopologyTracer
 from industrial_rca.data.telemetry_generator import TelemetryStore
-from app import api_app
+from industrial_rca.hil_api import api_app
 
 
 def test_vfd_oem_spec():
