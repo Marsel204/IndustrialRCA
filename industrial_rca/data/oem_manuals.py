@@ -251,6 +251,19 @@ WECON_VM_VFD_SPEC: Dict[str, Any] = {
         "function_code_write": 6,
     },
     "registers": {
+        # ── 1000H Monitoring Group (OEM Manual Specification) ──
+        "1001H": {"dec": 4097, "name": "Running Frequency", "unit": "Hz", "scale": 0.01, "access": "RO"},
+        "1002H": {"dec": 4098, "name": "Set Frequency", "unit": "Hz", "scale": 0.01, "access": "RO"},
+        "1003H": {"dec": 4099, "name": "Bus Voltage (DC)", "unit": "V", "scale": 0.1, "access": "RO"},
+        "1004H": {"dec": 4100, "name": "Output Voltage", "unit": "V", "scale": 0.1, "access": "RO"},
+        "1005H": {"dec": 4101, "name": "Output Current", "unit": "A", "scale": 0.01, "access": "RO"},
+        "1008H": {"dec": 4104, "name": "DI Input Status", "unit": "bitmask", "scale": 1, "access": "RO"},
+        "100AH": {"dec": 4106, "name": "AI Input Voltage", "unit": "V", "scale": 0.1, "access": "RO"},
+        "100CH": {"dec": 4108, "name": "Keypad Potentiometer Voltage", "unit": "V", "scale": 0.1, "access": "RO"},
+        "100DH": {"dec": 4109, "name": "IGBT Temperature", "unit": "C", "scale": 0.1, "access": "RO"},
+        "100FH": {"dec": 4111, "name": "Motor RPM", "unit": "RPM", "scale": 0.1, "access": "RO"},
+        "1012H": {"dec": 4114, "name": "PLC Stage", "unit": "stage", "scale": 1, "access": "RO"},
+        # ── 3000H / 2000H Control & Legacy Aliases ──
         "3000H": {"dec": 12288, "name": "Output Frequency", "unit": "Hz", "scale": 0.01, "access": "RO"},
         "3001H": {"dec": 12289, "name": "Target Set Frequency", "unit": "Hz", "scale": 0.01, "access": "RO"},
         "3002H": {"dec": 12290, "name": "Output Current", "unit": "A", "scale": 0.01, "access": "RO"},

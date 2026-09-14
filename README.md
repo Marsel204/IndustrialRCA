@@ -141,12 +141,14 @@ Configure your HMI screen controls using the following mappings:
 | **Momentary / Toggle Button** | **STOP (Decel to Stop)** | **`2000H`** | **`4x8192`** (`8192`) | 16-bit Int | Constant value **`5`** | **Write Only** |
 | **Momentary Button** | **EMERGENCY COAST STOP** | **`2000H`** | **`4x8192`** (`8192`) | 16-bit Int | Constant value **`6`** | **Write Only** |
 | **Momentary Button** | **FAULT RESET** | **`2000H`** | **`4x8192`** (`8192`) | 16-bit Int | Constant value **`7`** | **Write Only** |
-| **Meter / Numeric Display** | **Operating Frequency** | **`3000H`** | **`4x12288`** (`12288`) | 16-bit Unsigned | `0.01` ($0 - 50.00\text{ Hz}$) | **Read Only** |
-| **Numeric Display** | **Commanded Frequency** | **`3001H`** | **`4x12289`** (`12289`) | 16-bit Unsigned | `0.01` ($0 - 50.00\text{ Hz}$) | **Read Only** |
-| **Meter / Numeric Display** | **Motor Line Current** | **`3002H`** | **`4x12290`** (`12290`) | 16-bit Unsigned | `0.01` ($142 = 1.42\text{ A}$) | **Read Only** |
-| **Numeric Display** | **Output Voltage** | **`3003H`** | **`4x12291`** (`12291`) | 16-bit Unsigned | `1` ($0 - 380\text{ V}$) | **Read Only** |
-| **Meter / Numeric Display** | **DC Bus Voltage** | **`3004H`** | **`4x12292`** (`12292`) | 16-bit Unsigned | `0.1` ($3124 = 312.4\text{ V}$) | **Read Only** |
-| **Alarm / Text Display** | **Active Fault Code** | **`700BH`** | **`4x28683`** (`28683`) | 16-bit Unsigned | `1` (`0`=Normal, `6`=Err06, `11`=Err11) | **Read Only** |
+| **Meter / Numeric Display** | **Running Frequency** | **`1001H`** | **`4x4098`** (`4097`) | 16-bit Unsigned | `0.01` (2 decimals: $4500 = 45.00\text{ Hz}$) | **Read Only** |
+| **Numeric Display** | **Set Frequency** | **`1002H`** | **`4x4099`** (`4098`) | 16-bit Unsigned | `0.01` (2 decimals: $4500 = 45.00\text{ Hz}$) | **Read Only** |
+| **Meter / Numeric Display** | **DC Bus Voltage** | **`1003H`** | **`4x4100`** (`4099`) | 16-bit Unsigned | `0.1` (1 decimal: $3120 = 312.0\text{ V}$) | **Read Only** |
+| **Numeric Display** | **Output Voltage** | **`1004H`** | **`4x4101`** (`4100`) | 16-bit Unsigned | `0.1` (1 decimal: $2200 = 220.0\text{ V}$) | **Read Only** |
+| **Meter / Numeric Display** | **Output Current** | **`1005H`** | **`4x4102`** (`4101`) | 16-bit Unsigned | `0.01` (2 decimals: $142 = 1.42\text{ A}$) | **Read Only** |
+| **Numeric Display** | **IGBT Temperature** | **`100DH`** | **`4x4110`** (`4109`) | 16-bit Unsigned | `0.1` (1 decimal: $425 = 42.5^\circ\text{C}$) | **Read Only** |
+| **Numeric Display** | **Motor RPM** | **`100FH`** | **`4x4112`** (`4111`) | 16-bit Unsigned | `0.1` (1 decimal: $13800 = 1380.0\text{ RPM}$) | **Read Only** |
+| **Alarm / Text Display** | **Active Fault Code** | **`700BH` / `1013H`** | **`4x28683`** / **`4x4116`** | 16-bit Unsigned | `1` (`0`=No Error, `6`=Err06, `11`=Err11) | **Read Only** |
 
 ---
 
