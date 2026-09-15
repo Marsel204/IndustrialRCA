@@ -60,20 +60,38 @@ async def _custom_broadcast(self, session, topic, data, force_qos=None):
     print(f"\n[MQTT-LIVE] [{now_str}] Client: {cid} | Topic: {topic}", flush=True)
     print(f"   Payload: {raw_text}", flush=True)
 
-    # Forward to FastAPI live feed if JSON
+    # Forward to FastAPI live feed
     try:
-        if raw_text.startswith("{") and raw_text.endswith("}"):
-            parsed = json.loads(raw_text)
+        payload_dict = None
+        trimmed = raw_text.strip()
+        if trimmed.startswith("{") and trimmed.endswith("}"):
+            parsed = json.loads(trimmed)
             if isinstance(parsed, dict):
-                import urllib.request
-                req = urllib.request.Request(
-                    "http://127.0.0.1:8000/api/v1/telemetry/live/feed",
-                    data=json.dumps(parsed).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=0.5):
-                    pass
+                payload_dict = parsed
+        elif "error" in topic.lower() or "fault" in topic.lower():
+            try:
+                code_val = int(float(trimmed))
+                payload_dict = {"fault_code": code_val, "topic": topic}
+            except ValueError:
+                payload_dict = {"fault_description": trimmed, "fault_code": 2 if "02" in trimmed else 6, "topic": topic}
+        elif "trigger" in topic.lower() or "d_var" in topic.lower():
+            try:
+                code_val = int(float(trimmed))
+                payload_dict = {"d_trigger": code_val, "fault_code": code_val, "topic": topic}
+            except ValueError:
+                payload_dict = {"d_trigger": trimmed, "topic": topic}
+
+        if payload_dict is not None:
+            payload_dict["_mqtt_topic"] = topic
+            import urllib.request
+            req = urllib.request.Request(
+                "http://127.0.0.1:8000/api/v1/telemetry/live/feed",
+                data=json.dumps(payload_dict).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=0.5):
+                pass
     except Exception:
         pass
 

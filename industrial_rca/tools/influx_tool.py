@@ -236,9 +236,9 @@ class InfluxDBTelemetryTool:
         now = time.time()
         t_sec = np.arange(count)
         f_out = 40.0 + 0.3 * np.sin(t_sec * 0.05) + np.random.normal(0, 0.05, count)
-        v_dc = 312.0 + 2.5 * np.cos(t_sec * 0.03) + np.random.normal(0, 0.4, count)
-        current = 1.35 + 0.05 * np.sin(t_sec * 0.08) + np.random.normal(0, 0.02, count)
-        rpm = f_out * 29.0 + np.random.normal(0, 1.0, count)
+        v_dc = 182.0 + 1.5 * np.cos(t_sec * 0.03) + np.random.normal(0, 0.4, count)
+        current = 1.15 + 0.03 * np.sin(t_sec * 0.08) + np.random.normal(0, 0.02, count)
+        rpm = f_out * 29.9 + np.random.normal(0, 1.0, count)
         v_out = np.full(count, 220.0) + np.random.normal(0, 0.5, count)
 
         df = pd.DataFrame({
@@ -303,9 +303,9 @@ class InfluxDBTelemetryTool:
                 return {
                     "asset_id": asset_id,
                     "f_out": float(merged_fields.get("f_out", 40.0)),
-                    "v_dc": float(merged_fields.get("v_dc", 312.0)),
-                    "current": float(merged_fields.get("current", 1.35)),
-                    "rpm": float(merged_fields.get("rpm", 1160.0)),
+                    "v_dc": float(merged_fields.get("v_dc", 182.0)),
+                    "current": float(merged_fields.get("current", 1.15)),
+                    "rpm": float(merged_fields.get("rpm", 1199.0)),
                     "fault_code": fault_code,
                     "status": status,
                     "timestamp": float(latest_ts) if isinstance(latest_ts, (int, float)) else time.time(),
@@ -316,8 +316,8 @@ class InfluxDBTelemetryTool:
 
         now = time.time()
         f_out = round(40.0 + 0.3 * math.sin(now * 0.1), 2)
-        v_dc = round(312.0 + 1.8 * math.cos(now * 0.08), 1)
-        current = round(1.35 + 0.04 * math.sin(now * 0.15), 2)
+        v_dc = round(182.0 + 1.8 * math.cos(now * 0.08), 1)
+        current = round(1.15 + 0.04 * math.sin(now * 0.15), 2)
         rpm = round(f_out * 29.0, 1)
         fault_code = 0
         return {

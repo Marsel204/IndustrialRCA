@@ -33,7 +33,7 @@ def test_vfd_oem_spec():
     assert "700BH" in spec["registers"]
     assert spec["registers"]["3004H"]["name"] == "DC Bus Voltage"
     assert spec["registers"]["700BH"]["dec"] == 28683
-    assert spec["dc_bus_overvoltage_threshold_v"] == 700.0
+    assert spec["dc_bus_overvoltage_threshold_v"] == 195.0
 
 
 def test_vfd_fault_taxonomy():
@@ -62,8 +62,8 @@ def test_topology_traversal_hil_bench():
     """Verify ISA-95 topology tracer identifies HMI, VFD, and Motor nodes."""
     tracer = AssetTopologyTracer()
     
-    # Motor M01 exists
-    motor = tracer.get_equipment("MOTOR_M01")
+    # Motor IND_MOTOR_01 exists
+    motor = tracer.get_equipment("IND_MOTOR_01")
     assert motor is not None
     assert motor["type"] == "ElectricMotor"
 
@@ -73,7 +73,7 @@ def test_topology_traversal_hil_bench():
     assert len(vfd["sensors"]) == 6
 
     # Trace upstream from Motor
-    upstream = tracer.trace_upstream("MOTOR_M01")
+    upstream = tracer.trace_upstream("IND_MOTOR_01")
     upstream_ids = [u["asset_id"] for u in upstream]
     assert "VFD_VM_01" in upstream_ids
     assert "HMI_TOUCH_01" in upstream_ids

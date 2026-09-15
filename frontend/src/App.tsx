@@ -30,7 +30,7 @@ import {
 
 export function App() {
   const [inspectorTab, setInspectorTab] = useState<string>('telemetry');
-  const [activeScenarioId, setActiveScenarioId] = useState<string>('fault');
+  const [activeScenarioId, setActiveScenarioId] = useState<string>('live_stream');
   const [deepseekModel, setDeepseekModel] = useState<string>('deepseek-chat');
   const [isReviewModalOpen, setIsReviewModalOpen] = useState<boolean>(false);
 
@@ -79,7 +79,7 @@ export function App() {
       }
 
       // 4. Fetch Topology
-      const topo = await fetchTopology('P-301A');
+      const topo = await fetchTopology('VFD_VM_01');
       setTopology(topo);
     } catch (err: any) {
       console.error('Initialization error:', err);
@@ -97,12 +97,7 @@ export function App() {
         setErrorMessage(null);
 
         // Target asset determination based on active scenario
-        const targetAssetId =
-          scenarioId === 'live_stream' ||
-          scenarioId === 'hil' ||
-          scenarioId.startsWith('ds_hil')
-            ? 'VFD_VM_01'
-            : 'P-301A';
+        const targetAssetId = 'VFD_VM_01';
 
         // Fetch timeseries, spectrum, and topology for target asset
         const [telData, specData, topoData] = await Promise.all([
@@ -153,14 +148,22 @@ export function App() {
     const unsubscribe = subscribeTelemetryEvents(
       (eventData) => {
         if (eventData.event === 'hil_incident_detected') {
+          const incData = eventData.data;
           setLatestIncident({
             has_incident: true,
-            incident_data: eventData.data,
+            incident_data: incData,
             received_at: new Date().toLocaleTimeString(),
             pipeline_status: 'TRIGGERED',
           });
           // Refresh scenario list
           fetchScenarios().then(setScenarios).catch(console.error);
+
+          // Hands-free auto-switch to the live incident
+          if (incData?.dataset_id) {
+            setActiveScenarioId(incData.dataset_id);
+            setActiveThreadId(`rca-live-${incData.incident_id || Date.now()}`);
+            setInspectorTab('telemetry');
+          }
         } else if (eventData.event === 'hil_pipeline_completed') {
           if (latestIncident?.incident_data) {
             setLatestIncident((prev) =>

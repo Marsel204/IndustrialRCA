@@ -14,56 +14,48 @@ import { RCAState } from '../../types';
 
 const DEFAULT_HYPOTHESES = [
   {
-    hypothesis_id: 'H2',
-    name: 'NPSH Starvation Induced Impeller Cavitation via Upstream Restriction',
+    hypothesis_id: 'H_VFD_ERR06',
+    name: 'Overfrequency Deceleration Overvoltage (WECON VM Err06)',
     status: 'CONFIRMED',
     confidence: 0.98,
     falsification_rationale:
-      'DPS-30101 spiked to 1.85 bar, PT-30101 dropped to 0.58 bar (< 1.20 bar NPSHr), 20 kHz FFT showed 48.9% broadband floor elevation.',
+      'Frequency setpoint exceeded 40.00 Hz operational ceiling toward 50.00 Hz, driving DC bus voltage to 202.5 V (> 195.0 V trip limit) with unpopulated dynamic braking resistor terminals P+/PB.',
     evidence: [
-      { check: 'NPSH Margin', observation: 'PT-30101 (0.58 bar) < NPSHr (1.20 bar). Margin negative by 0.62 bar.', status: 'CONFIRMED' },
-      { check: 'Strainer Differential Pressure', observation: 'DPS-30101 = 1.85 bar (> 1.00 bar trip limit). Severe upstream restriction.', status: 'CONFIRMED' },
-      { check: 'High-Frequency Acoustic Floor', observation: 'Broadband ratio = 48.9% in 2-8 kHz band. Characteristic acoustic signature of cavitation.', status: 'CONFIRMED' },
+      { check: 'DC Bus Voltage (Reg 1003H / 3004H)', observation: 'V_dc surged to 202.5 V (trip threshold: 195.0 V, nominal: 182.0 V, ~207 V at 50 Hz).', status: 'CONFIRMED' },
+      { check: 'Output Frequency (Reg 1001H / 3000H)', observation: 'f_out ramped past 40.00 Hz to 48.50 Hz, exceeding test bench ceiling.', status: 'CONFIRMED' },
+      { check: 'Braking Resistor Circuit (P+/PB)', observation: 'Dynamic braking resistor absent (open circuit); kinetic back-EMF energy trapped in DC capacitor bank.', status: 'CONFIRMED' },
+      { check: 'VFD Fault Register (Reg 700BH)', observation: 'Modbus register 700BH latched fault code 6 (Err06 - Overvoltage during deceleration/overfrequency).', status: 'CONFIRMED' },
     ],
     proposed_actions: [
-      'Overhaul and flush Suction Strainer STR-301A 20-mesh dual basket element',
-      'Boroscopic inspection of first-stage impeller suction eye for cavitation pitting',
-      'Inspect DE sleeve bearing shell clearances and replenish ISO VG 46 lube oil',
+      'Clamp maximum output frequency parameter F0.10 to 40.00 Hz in Wecon VM VFD',
+      'Install dynamic braking resistor (nominal 70-100 Ohm, 100-150W) across terminals P+ and PB',
+      'Configure high DC bus pre-alarm in HMI at 190.0 V (trip limit: 195.0 V)',
+      'Increase parameter F0.18 deceleration ramp time to >= 5.0 seconds',
     ],
   },
   {
-    hypothesis_id: 'H1',
-    name: 'Drive-End Bearing Lubrication Starvation / Degradation',
-    status: 'SECONDARY_SYMPTOM',
-    confidence: 0.45,
-    falsification_rationale:
-      'TI-301-DE reached 92.3°C, but temperature rose 120s AFTER high vibration and pressure drop occurred. Thermal spike was a secondary symptom of severe vibration.',
-    evidence: [
-      { check: 'Vibration vs Temperature Onset', observation: 'High vibration preceded bearing temperature rise by 120s. Thermal spike was secondary.', status: 'SUPPORTED' },
-    ],
-    proposed_actions: ['Replace bearing sleeve shells during scheduled overhaul'],
-  },
-  {
-    hypothesis_id: 'H3',
-    name: 'Electric Drive Motor Rotor/Stator Electrical Overload',
+    hypothesis_id: 'H_VFD_ERR02',
+    name: 'Forced Sudden Deceleration Overcurrent (WECON VM Err02)',
     status: 'REFUTED',
-    confidence: 0.08,
+    confidence: 0.03,
     falsification_rationale:
-      'Motor line current IT-30101 remained at 98.2 A, well below continuous rated FLA of 115.0 A. Zero phase imbalance detected.',
+      'Continuous motor current remained within normal operating limits (peak 1.15 A < 2.50 A trip limit). No abrupt PLC On/Off stop actuation commanded in this scenario.',
     evidence: [
-      { check: 'Motor Current FLA', observation: 'IT-30101 average 98.2 A vs 115.0 A FLA limit.', status: 'PASSED' },
+      { check: 'Motor Output Current (Reg 1005H / 3002H)', observation: 'Continuous current average 1.15 A (peak < 2.50 A trip threshold).', status: 'PASSED' },
+      { check: 'PLC Stop Trigger (D Variable / MQTT Error Topic)', observation: 'No instantaneous hard-stop de-energization commanded in this run.', status: 'PASSED' },
     ],
     proposed_actions: [],
   },
   {
-    hypothesis_id: 'H_VFD_ERR06',
-    name: 'Deceleration Overvoltage (WECON VM Err06)',
+    hypothesis_id: 'H_VFD_ERR03',
+    name: 'Deceleration Overcurrent (WECON VM Err03)',
     status: 'REFUTED',
     confidence: 0.02,
     falsification_rationale:
-      'DC bus voltage v_dc remained nominal at 312.0 V (< 740.0 V trip limit). Inverter brake chopper not triggered.',
+      'Modbus fault code register Reg 700BH did not report Err03. Current ramp remained within normal linear envelope.',
     evidence: [
-      { check: 'DC Bus Voltage', observation: 'v_dc = 312.0 V (healthy baseline range 310 - 325 V).', status: 'PASSED' },
+      { check: 'Deceleration Ramp Current', observation: 'Current remained within normal linear slope envelope.', status: 'PASSED' },
+      { check: 'Fault Register (Reg 700BH)', observation: 'Reported fault code 6, not Err03.', status: 'PASSED' },
     ],
     proposed_actions: [],
   },
@@ -71,23 +63,12 @@ const DEFAULT_HYPOTHESES = [
     hypothesis_id: 'H_VFD_ERR11',
     name: 'Motor Thermal Overload (WECON VM Err11)',
     status: 'REFUTED',
-    confidence: 0.05,
+    confidence: 0.04,
     falsification_rationale:
-      'Motor load current remained below rated thermal overload curve. Inverter thermal model at 42% capacity.',
+      'Motor continuous current (1.15 A) remained well below parameter F2.03 rated motor thermal limit (2.50 A). Inverter I2t accumulator at 38%.',
     evidence: [
-      { check: 'Inverter Thermal Model', observation: 'Thermal accumulator at 42% (< 100% trip threshold).', status: 'PASSED' },
-    ],
-    proposed_actions: [],
-  },
-  {
-    hypothesis_id: 'H_VFD_ERR02',
-    name: 'Acceleration Overcurrent (WECON VM Err02)',
-    status: 'REFUTED',
-    confidence: 0.03,
-    falsification_rationale:
-      'Output current did not spike beyond inverter peak limit. Ramp acceleration profile followed nominal curve.',
-    evidence: [
-      { check: 'Peak Current Trip', observation: 'Instantaneous peak did not exceed 150% drive rating.', status: 'PASSED' },
+      { check: 'Motor Thermal Current I2t', observation: 'Inverter thermal model accumulator at 38% (< 100% trip threshold).', status: 'PASSED' },
+      { check: 'Motor Shaft Free Rotation', observation: 'Shaft rotation normal; zero mechanical binding detected.', status: 'PASSED' },
     ],
     proposed_actions: [],
   },
@@ -96,38 +77,38 @@ const DEFAULT_HYPOTHESES = [
 const DEFAULT_5_WHYS = [
   {
     level: 'Why 1',
-    question: 'Why did Boiler Feed Pump P-301A experience an emergency trip?',
-    answer: 'Drive-End bearing temperature sensor TI-301-DE surged past the 90.0°C shutdown threshold, reaching 92.3°C at T=2880s.',
-    evidence: 'TI-301-DE reached 92.3°C at T=2880s',
-    asset_involved: 'P-301A',
+    question: 'Why did Wecon VM Series VFD (VFD_VM_01) trip with fault code Err06?',
+    answer: 'DC link bus voltage exceeded the calibrated hardware protection ceiling (reached 202.5 V vs 195.0 V trip limit, operating up to ~207 V at 50 Hz).',
+    evidence: 'Modbus DC Bus Voltage (Reg 1003H / 3004H) surged past 195.0 V trip setpoint at T_trip. Inverter IGBT firing cut off immediately.',
+    asset_involved: 'DC_BUS_LINK',
   },
   {
     level: 'Why 2',
-    question: 'Why did the DE sleeve bearing overheat so rapidly?',
-    answer: 'Severe high-frequency radial vibration (11.4 mm/s RMS) wiped the hydrodynamic lube oil wedge, causing metal-to-metal boundary friction.',
-    evidence: 'VI-301-R exceeded ISO Zone D trip threshold (7.1 mm/s)',
-    asset_involved: 'P-301A',
+    question: 'Why did the DC bus voltage elevate past the 195.0 V trip limit?',
+    answer: 'VFD output frequency setpoint was increased past the 40.00 Hz operational ceiling toward 50.00 Hz without dynamic regenerative absorption.',
+    evidence: 'Output frequency Reg 1001H climbed from 40.00 Hz to 48.50 Hz, driving intermediate capacitor bank voltage from 182.0 V to > 200 V.',
+    asset_involved: 'VFD_VM_01',
   },
   {
     level: 'Why 3',
-    question: 'Why did the pump experience violent radial vibration?',
-    answer: 'Catastrophic acoustic cavitation inception inside the first-stage impeller caused violent vapor bubble collapse against the suction vanes.',
-    evidence: '48.9% broadband noise floor elevation in 2.0 - 8.0 kHz band',
-    asset_involved: 'P-301A',
+    question: 'Why didn\'t the dynamic braking unit dissipate the excess DC bus voltage?',
+    answer: 'No external braking resistor is connected across terminals P+ and PB (open circuit). Regenerative energy had nowhere to dissipate.',
+    evidence: 'Topology node BRK_RESISTOR_01 physical inspection confirms terminals P+ and PB are unpopulated. Braking chopper duty cycle unutilized.',
+    asset_involved: 'BRK_RESISTOR_01',
   },
   {
     level: 'Why 4',
-    question: 'Why did the pump undergo acoustic cavitation?',
-    answer: 'Pump suction pressure PT-30101 plummeted to 0.58 bar, breaching the minimum required NPSHr limit of 1.20 bar by 0.62 bar.',
-    evidence: 'PT-30101 fell from 2.45 bar to 0.58 bar at T=2880s',
-    asset_involved: 'LINE-30101',
+    question: 'Why did output frequency exceed the 40.00 Hz limit?',
+    answer: 'Experiment 2 command was sent from the PLC / HMI (192.168.1.104), raising frequency target above 40.00 Hz toward 50.00 Hz.',
+    evidence: 'HMI setpoint command in Modbus register 3001H / PLC D-variable registered step increase toward 50.00 Hz.',
+    asset_involved: 'HMI_TOUCH_01',
   },
   {
-    level: 'Why 5',
-    question: 'Why did suction pressure drop below NPSHr?',
-    answer: 'Upstream Suction Strainer STR-301A basket blinded with marine biofouling and particulate debris (DPS-30101 reached 1.85 bar) due to deferred preventative maintenance PM WM-2026-0831.',
-    evidence: 'DPS-30101 spiked to 1.85 bar (> 1.00 bar trip limit); CMMS work order WM-2026-0831 was deferred',
-    asset_involved: 'STR-301A',
+    level: 'Why 5 (Root Cause)',
+    question: 'Why was the VFD able to exceed 40.00 Hz and overcharge the DC bus?',
+    answer: 'Parameter F0.10 (Upper Limit Frequency) in the Wecon VM VFD was left unclamped at factory default (50.00 Hz) instead of being locked to the test bench limit of 40.00 Hz, and dynamic braking resistor was absent.',
+    evidence: 'CMMS parameter audit confirms Parameter F0.10 = 50.00 Hz. Bench operational limit is 40.00 Hz max continuous without braking resistor.',
+    asset_involved: 'PLC_LX_01',
   },
 ];
 
@@ -136,7 +117,7 @@ interface FMEAMatrixTabProps {
 }
 
 export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
-  const [expandedHypId, setExpandedHypId] = useState<string>('H2');
+  const [expandedHypId, setExpandedHypId] = useState<string>('H_VFD_ERR06');
 
   const rawHypotheses = rcaState?.hypothesis_results;
   const hypotheses = rawHypotheses && rawHypotheses.length > 0 ? rawHypotheses : DEFAULT_HYPOTHESES;
@@ -190,7 +171,7 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
               ISO 14224 FMEA Hypothesis Falsification Matrix
             </div>
             <div className="text-[11px] text-slate-500">
-              Parallel Multi-Branch Evidence Elimination · 6 Hypotheses Tested Against Physical Telemetry
+              Parallel Multi-Branch Evidence Elimination · Wecon VM VFD Hypotheses Tested Against Physical Telemetry
             </div>
           </div>
         </div>
@@ -204,7 +185,7 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
         )}
       </div>
 
-      {/* 6 Hypotheses Cards Grid */}
+      {/* Hypotheses Cards Grid */}
       <div className="space-y-2.5">
         {hypotheses.length > 0 ? (
           hypotheses.map((h) => {

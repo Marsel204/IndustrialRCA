@@ -45,10 +45,10 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
       id: 'init-msg',
       role: 'assistant',
       content:
-        'I have finished evaluating the 6 candidate failure modes for **Boiler Feed Pump P-301A** against continuous sensor telemetry and the 20 kHz vibration FFT spectrum. ' +
-        'Root cause identified as **NPSH Starvation induced Cavitation** triggered by upstream strainer blinding (`STR-301A`). ' +
-        'Deliverables are compiled and ready for authorization.',
-      timestamp: '03:15 AM',
+        'Continuous telemetry ingested from **Wecon VM VFD & Induction Motor Test Bench (VFD_VM_01)**. ' +
+        'Monitoring 1 Hz Modbus registers: Output Frequency (`f_out`), DC Bus Voltage (`v_dc`), Motor Current (`current`), RPM, and Trip Codes. ' +
+        'Ready to analyze real telemetry, detect trips (>195 Vdc or forced decel), and evaluate failure modes (Err02, Err06, Err03, Err11).',
+      timestamp: 'Just now',
     },
   ]);
   const [inputPrompt, setInputPrompt] = useState<string>('');
@@ -137,20 +137,21 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     );
   };
 
+  const isVfd = true;
+
   const quickPrompts = [
-    'Why was motor overload (H3) ruled out?',
-    'Show acoustic proof of cavitation in 2-8 kHz FFT',
-    'What does CMMS work order WM-2026-0831 state?',
+    'Why does DC bus reach ~207V at 50 Hz and trip Err06 above 195V?',
+    'What caused the instantaneous Err02 current spike on PLC On/Off stop?',
+    'What braking resistor (P+/PB) is needed to prevent overvoltage trips?',
+    'How does increasing parameter F0.18 prevent regeneration trips?',
   ];
 
   const defaultThinking =
-    "1. Ingesting 3,600 telemetry points at 1 Hz from Unit 300...\n" +
-    "2. Vectorized cumulative sum change-point detector identified sudden step-change at T=2880s.\n" +
-    "3. Sensor PT-30101 plummeted from 2.45 bar to 0.58 bar, breaching NPSHr threshold (1.20 bar).\n" +
-    "4. Upstream Differential Pressure transmitter DPS-30101 spiked to 1.85 bar (> 1.00 bar trip limit).\n" +
-    "5. 20 kHz vibration spectrum shows 48.9% broadband floor energy elevation in 2.0-8.0 kHz range, uniquely matching acoustic cavitation.\n" +
-    "6. Cross-referenced ISA-95 topology and CMMS work order WM-2026-0831; verified suction strainer flush was deferred.\n" +
-    "7. Synthesized root cause: Suction Strainer STR-301A blinding causing NPSH starvation and catastrophic cavitation.";
+    "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
+    "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
+    "3. Trip setpoint evaluated: DC bus limit at 195.0 V DC (reaches ~207V at 50 Hz), current limit at 2.50 A.\n" +
+    "4. Evaluated failure hypotheses: H_VFD_ERR06 (Overfrequency > 40 Hz) and H_VFD_ERR02 (Forced Decel Stop).\n" +
+    "5. OEM corrective action: Install dynamic braking resistor on terminals P+/PB and tune parameter F0.18.";
 
   const isPaused = rcaState?.is_paused_at_hitl || false;
   const isFinalized = rcaState?.pipeline_status === 'COMPLETED';
@@ -162,7 +163,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
 
   const displayedDiagnosis =
     rcaState?.root_cause_description ||
-    'Primary failure initiated by Suction Strainer STR-301A blinding due to deferred maintenance PM WM-2026-0831. High differential pressure (1.85 bar) starved pump inlet pressure below NPSHr (0.58 bar < 1.20 bar), inducing severe acoustic cavitation (48.9% 2-8 kHz FFT noise floor) and bearing thermal runaway (91.4°C).';
+    'Real-time telemetry and FMEA matrix actively monitored for Wecon VM Series VFD (VFD_VM_01). Operational baseline calibrated at 40.00 Hz and 182.0 V DC bus. Emergency trips calibrated at 195.0 V DC (Err06) and 2.50 A (Err02).';
 
   return (
     <div className="flex flex-col h-full bg-slate-50/50 border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
@@ -190,7 +191,11 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
         <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-semibold text-slate-800 flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <Sparkles className="w-4 h-4 text-teal-600 flex-shrink-0" />
-            <span>Analyze emergency trip on Boiler Feed Pump P-301A</span>
+            <span>
+              {isVfd
+                ? 'Investigate hardware overvoltage trip on Wecon VFD VM 01'
+                : 'Analyze emergency trip on Boiler Feed Pump P-301A'}
+            </span>
           </div>
           <span className="text-[10px] font-mono text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
             Autonomous RCA
@@ -282,7 +287,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                   OK
                 </span>
                 <span className="font-semibold text-slate-800">ChangePointDetector</span>
-                <span className="text-slate-500">on P-301A (Found step change at T=2880s)</span>
+                <span className="text-slate-500">on VFD_VM_01 (DC bus voltage & motor current transients)</span>
               </div>
               <button
                 onClick={() => onSelectInspectorTab('telemetry')}
@@ -300,7 +305,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                   OK
                 </span>
                 <span className="font-semibold text-slate-800">TopologyTracer</span>
-                <span className="text-slate-500">on STR-301A</span>
+                <span className="text-slate-500">on PLC_LX_01 → VFD_VM_01</span>
               </div>
               <button
                 onClick={() => onSelectInspectorTab('topology')}
@@ -318,7 +323,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                   OK
                 </span>
                 <span className="font-semibold text-slate-800">FMEAEngine</span>
-                <span className="text-slate-500">evaluating 6 hypotheses</span>
+                <span className="text-slate-500">evaluating VFD modes (Err02, Err06, Err03, Err11)</span>
               </div>
               <button
                 onClick={() => onSelectInspectorTab('hypotheses')}
@@ -336,7 +341,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                   OK
                 </span>
                 <span className="font-semibold text-slate-800">CMMSConnector</span>
-                <span className="text-slate-500">verifying work order WM-2026-0831</span>
+                <span className="text-slate-500">verifying work order WO-VFD-2026-0042</span>
               </div>
               <button
                 onClick={() => onSelectInspectorTab('deliverables')}

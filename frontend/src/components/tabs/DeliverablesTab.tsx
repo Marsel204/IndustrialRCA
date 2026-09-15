@@ -17,47 +17,46 @@ interface DeliverablesTabProps {
 const DEFAULT_OPERATIONS = [
   {
     operation_number: '0010',
-    work_center: 'MECH',
-    duration_hours: 4.0,
-    description: 'Strainer STR-301A Overhaul & Chemical Flush',
-    details: 'Depressurize, unbolt cover, pull 20-mesh basket, inspect for marine biofouling and particulate cake. Chemically flush with citric acid.',
+    work_center: 'ELEC-01',
+    duration_hours: 1.0,
+    description: 'Lock-Out/Tag-Out (LOTO) & DC Bus Safe Discharge Verification',
+    details: 'Open main circuit breaker CB_01. Measure DC link voltage on terminals + and - with calibrated DMM; verify V_dc < 24.0V before servicing.',
   },
   {
     operation_number: '0020',
-    work_center: 'MECH',
-    duration_hours: 3.5,
-    description: 'First-Stage Impeller Suction Eye Boroscopy',
-    details: 'Insert flexible boroscope through suction casing port. Inspect suction vanes for cavitation erosion pitting depth (<0.5mm allowable).',
+    work_center: 'ELEC-01',
+    duration_hours: 2.0,
+    description: 'Dynamic Braking Resistor Inspection & Installation (P+/PB)',
+    details: 'Inspect braking transistor chopper. Install 70-Ohm 150W ceramic dynamic braking resistor across terminals P+ and PB to dissipate regenerative decel energy.',
   },
   {
     operation_number: '0030',
-    work_center: 'MECH',
-    duration_hours: 4.5,
-    description: 'Drive-End Sleeve Bearing Clearance & Shell Inspection',
-    details: 'Disassemble DE bearing housing. Measure radial clearance using Plastigage (Target: 0.12 - 0.18 mm). Inspect Babbitt surface.',
+    work_center: 'AUTO-01',
+    duration_hours: 1.5,
+    description: 'Inverter & PLC Parameter Reprogramming',
+    details: 'Program deceleration ramp parameter F0.18 to controlled 5.0s (prevent rapid stop current spike). Set max frequency clamp F0.10 <= 40.00 Hz and enable DC overvoltage stall prevention F3.08.',
   },
   {
     operation_number: '0040',
-    work_center: 'LUBE',
+    work_center: 'ELEC-01',
     duration_hours: 1.5,
-    description: 'Lube Oil Reservoir Drain, Solvent Flush & Charge',
-    details: 'Drain degraded oil reservoir. Solvent-flush housing. Charge 40 L fresh ISO VG 46 synthetic turbine lube oil.',
+    description: 'Induction Motor Megger & Phase Balance Testing',
+    details: 'Perform 500V DC megger test on motor phases U, V, W to PE (>50 M-Ohm required). Measure phase-to-phase resistance balance (<1% unbalance).',
   },
   {
     operation_number: '0050',
-    work_center: 'ELEC',
+    work_center: 'OPS-01',
     duration_hours: 1.5,
-    description: 'Motor Stator Insulation Megger & Laser Alignment',
-    details: 'Megger 3.3 kV motor stator windings (>100 MΩ). Perform laser shaft alignment (angular < 0.05 mm, parallel offset < 0.05 mm).',
+    description: 'Step-Speed Commissioning & Decel Load Sign-Off',
+    details: 'Energize drive, step speed across 10 Hz, 25 Hz, 40 Hz. Verify DC bus voltage remains within 170.0V - 190.0V envelope during controlled stop without trip.',
   },
 ];
 
 const DEFAULT_MATERIALS = [
-  { material_id: 'MAT-STR-20M', description: '20-Mesh Dual Basket Element (316L SS)', quantity: 1, unit: 'EA' },
-  { material_id: 'MAT-BRG-SLV-DE', description: 'Babbitt Sleeve Bearing Shell Pair DE', quantity: 1, unit: 'SET' },
-  { material_id: 'MAT-OIL-VG46', description: 'Mobil DTE 846 ISO VG 46 Turbine Lube Oil', quantity: 40, unit: 'L' },
-  { material_id: 'MAT-GSK-300', description: 'Spiral Wound Casing Gasket 12" Class 600', quantity: 2, unit: 'EA' },
-  { material_id: 'MAT-PLAST-GRN', description: 'Plastigage Green (0.025 - 0.075 mm)', quantity: 1, unit: 'PK' },
+  { material_id: 'MAT-VFD-BRK70', description: '70-Ohm 150W Wirewound Dynamic Braking Resistor Unit', quantity: 1, unit: 'EA' },
+  { material_id: 'MAT-CBL-4C25', description: '4-Core 2.5mm2 Shielded VFD Inverter Motor Cable', quantity: 5, unit: 'M' },
+  { material_id: 'MAT-BRK-MCCB16', description: '16A 2-Pole Molded Case Circuit Breaker (MCCB)', quantity: 1, unit: 'EA' },
+  { material_id: 'MAT-COMM-RS485', description: 'Shielded Twisted Pair RS-485 Modbus RTU Comm Cable', quantity: 2, unit: 'M' },
 ];
 
 export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) => {
@@ -177,10 +176,10 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
                 Global 8D Standard Root Cause Corrective Action (RCCA)
               </div>
               <h2 className="text-base font-bold text-slate-900">
-                Incident Investigation Report: {report8D?.incident_id || 'INC-2026-0904'}
+                Incident Investigation Report: {report8D?.incident_id || 'INC-2026-0915-VFD'}
               </h2>
               <div className="text-xs font-mono text-slate-500 mt-0.5">
-                Asset: {report8D?.asset_id || 'P-301A'} ({report8D?.asset_name || 'HP Boiler Feed Pump'}) · Classification: Level 1 Critical Plant Machinery Trip
+                Asset: {report8D?.asset_id || 'VFD_VM_01'} ({report8D?.asset_name || 'Wecon VM Series Variable Frequency Drive'}) · Classification: Level 1 Critical Test Rig Inverter Trip
               </div>
             </div>
 
@@ -188,7 +187,7 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
               <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold block mb-1">
                 STATUS: CLOSED & APPROVED
               </span>
-              <span>Date: 2026-09-04 · Area 03</span>
+              <span>Date: 2026-09-15 · Automation Test Facility</span>
             </div>
           </div>
 
@@ -202,19 +201,19 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs font-mono pt-1 text-slate-700">
                 <div>
                   <span className="text-slate-500 block text-[10px]">Incident Lead</span>
-                  <span className="font-semibold">{report8D?.d1_team?.lead || 'J. Reynolds (Reliability Lead)'}</span>
+                  <span className="font-semibold">{report8D?.d1_team?.lead || 'M. Al-Hassan (Lead Automation Specialist)'}</span>
                 </div>
                 <div>
                   <span className="text-slate-500 block text-[10px]">Operations Lead</span>
-                  <span className="font-semibold">{report8D?.d1_team?.operations || 'K. Patel (Feedwater Unit Lead)'}</span>
+                  <span className="font-semibold">{report8D?.d1_team?.operations || 'A. Chen (PLC Controls Engineer)'}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block text-[10px]">Hydraulic Specialist</span>
-                  <span className="font-semibold">{report8D?.d1_team?.process_eng || 'Dr. S. Thorne (Senior Hydraulic Eng)'}</span>
+                  <span className="text-slate-500 block text-[10px]">Electrical Specialist</span>
+                  <span className="font-semibold">{report8D?.d1_team?.process_eng || 'E. Zhao (Power Electronics Engineer)'}</span>
                 </div>
                 <div>
                   <span className="text-slate-500 block text-[10px]">CMMS Planner</span>
-                  <span className="font-semibold">{report8D?.d1_team?.cmms_planner || 'M. Alvarez (Maintenance Coord)'}</span>
+                  <span className="font-semibold">{report8D?.d1_team?.cmms_planner || 'K. Vance (Lab Maintenance Coordinator)'}</span>
                 </div>
               </div>
             </div>
@@ -226,14 +225,14 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
               </div>
               <div className="text-xs text-slate-700 space-y-1 leading-relaxed font-sans">
                 <p>
-                  <strong>What:</strong> {report8D?.d2_problem_description?.what || 'Unplanned trip of Boiler Feed Pump P-301A on high drive-end bearing temperature.'}
+                  <strong>What:</strong> {report8D?.d2_problem_description?.what || 'Unplanned trip of Wecon VM Series VFD (VFD_VM_01) with fault code Err06 (Overfrequency Deceleration Overvoltage).'}
                 </p>
                 <p>
-                  <strong>When & Where:</strong> {report8D?.d2_problem_description?.when || '2026-09-04 03:14:00 AM'} · {report8D?.d2_problem_description?.where || 'Site Alpha, Area 03, Unit 300'}
+                  <strong>When & Where:</strong> {report8D?.d2_problem_description?.when || '2026-09-15 14:10:00'} · {report8D?.d2_problem_description?.where || 'Industrial Automation Test Facility - Bench 01 (PLC LX3V + Wecon VM VFD)'}
                 </p>
                 <p>
-                  <strong>Impact:</strong> {report8D?.d2_problem_description?.how_much || 'Total loss of primary boiler feedwater injection (185 m3/h). Header pressure dipped 4.2 bar.'}{' '}
-                  {report8D?.d2_problem_description?.operational_impact || 'Automatic cut-in of auxiliary standby pump P-301B prevented total boiler flame-out.'}
+                  <strong>Impact:</strong> {report8D?.d2_problem_description?.how_much || 'Frequency setpoint exceeded 40.00 Hz ceiling toward 50.00 Hz, driving DC bus voltage to 202.5 V (> 195.0 V trip limit).'}{' '}
+                  {report8D?.d2_problem_description?.operational_impact || 'Inverter IGBT gate drive inhibited to protect power module and induction motor from thermal damage.'}
                 </p>
               </div>
             </div>
@@ -244,9 +243,9 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
                 D3: Interim Containment Actions (ICA)
               </div>
               <ul className="list-disc pl-5 text-xs text-slate-700 space-y-0.5 font-sans">
-                <li>Verify auto-start and stable discharge pressure on standby boiler feed pump P-301B.</li>
-                <li>Electrical isolation & LOTO: Lock out 3.3 kV breaker <code>33-SWG-P301A</code> at substation switchgear.</li>
-                <li>Close suction isolation valve MOV-30101 and discharge non-return check valve MOV-30102.</li>
+                <li>Verify VFD display indicates trip code Err06 and output current/voltage have dropped to 0.</li>
+                <li>Confirm DC bus voltage has safely discharged below 24 V before opening enclosure.</li>
+                <li>Toggle PLC reset trigger (D-variable / MQTT error topic) to clear fault latch after root cause diagnosis.</li>
               </ul>
             </div>
 
@@ -259,19 +258,19 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
                 <p>
                   <strong>Root Cause Origin:</strong>{' '}
                   <span className="font-mono text-rose-800 font-bold">
-                    {report8D?.d4_root_cause_analysis?.root_cause_asset || 'STR-301A (Suction Strainer)'}
+                    {report8D?.d4_root_cause_analysis?.root_cause_asset || 'PLC_LX_01 (PLC Controller) / VFD_VM_01 Parameter F0.10'}
                   </span>
                 </p>
                 <p>
                   <strong>Failure Mechanism:</strong>{' '}
                   <span className="font-mono text-blue-800">
-                    {report8D?.d4_root_cause_analysis?.failure_mechanism || 'Cavitation erosion / Hydraulic flow starvation'}
+                    {report8D?.d4_root_cause_analysis?.failure_mechanism || 'Overfrequency excursion / Regenerative kinetic energy without braking resistor'}
                   </span>{' '}
-                  (ISO 14224: <code>{report8D?.d4_root_cause_analysis?.iso_14224_code || 'ISO-14224-PU-HYD-CAV'}</code>)
+                  (ISO 14224: <code>{report8D?.d4_root_cause_analysis?.iso_14224_code || 'ISO-14224-DR-ELC-OVV'}</code>)
                 </p>
                 <p className="pt-0.5 text-slate-700 leading-relaxed">
                   {report8D?.d4_root_cause_analysis?.root_cause_statement ||
-                    'Upstream Suction Strainer STR-301A 20-mesh basket fouled with marine biofouling/particulates due to deferred preventative maintenance flush, causing excessive Delta-P (1.85 bar), starving pump suction below NPSHr (0.58 bar < 1.20 bar), and inducing catastrophic cavitation and bearing thermal trip.'}
+                    'Output frequency setpoint was ramped past the 40.00 Hz operational ceiling toward 50.00 Hz, causing DC bus voltage to escalate to 202.5 V (breaching the calibrated 195.0 V trip limit) because Wecon VM parameter F0.10 was unclamped and dynamic braking resistor terminals P+/PB were unpopulated.'}
                 </p>
               </div>
             </div>
@@ -283,9 +282,10 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
                   D5: Permanent Corrective Actions (PCA)
                 </div>
                 <ul className="list-disc pl-5 text-xs text-slate-700 space-y-0.5 font-sans">
-                  <li>Pull, inspect, and chemically clean STR-301A 20-mesh dual basket element.</li>
-                  <li>Perform boroscopic inspection of P-301A first-stage impeller suction eye.</li>
-                  <li>Inspect sleeve bearing clearances; flush and refill lube oil (ISO VG 46).</li>
+                  <li>Lock parameter F0.10 (Upper Frequency Limit) to 40.00 Hz in Wecon VM VFD.</li>
+                  <li>Install dynamic braking resistor (nominal 70-100 Ohm, 100-150W) across terminals P+ and PB.</li>
+                  <li>Configure high DC bus pre-alarm in HMI at 190.0 V (trip limit: 195.0 V).</li>
+                  <li>Adjust parameter F0.18 deceleration ramp time to &gt;= 5.0 seconds.</li>
                 </ul>
               </div>
 
@@ -295,10 +295,10 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
                 </div>
                 <div className="text-xs text-slate-700 space-y-0.5 font-sans">
                   <p>
-                    <strong>Validation Protocol:</strong> Baseline 4-hour re-commissioning test under full load.
+                    <strong>Validation Protocol:</strong> Baseline 15-minute steady-state run at 40.00 Hz followed by controlled start/stop cycles.
                   </p>
                   <p>
-                    <strong>Acceptance Criteria:</strong> PT-30101 &gt; 2.30 bar, DPS-30101 &lt; 0.15 bar, VI-301-R &lt; 2.1 mm/s RMS, TI-301-DE &lt; 55.0°C.
+                    <strong>Acceptance Criteria:</strong> DC bus voltage stable at ~182 V (never exceeding 190 V alarm / 195 V trip limit), current &lt; 1.50 A, zero trip codes.
                   </p>
                 </div>
               </div>
@@ -311,8 +311,9 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
                   D7: Systemic Prevention
                 </div>
                 <ul className="list-disc pl-5 text-xs text-slate-700 space-y-0.5 font-sans">
-                  <li>Reclassify Suction Strainer PM flush schedule to 'Safety/Reliability Critical' in SAP PM.</li>
-                  <li>Enforce mandatory DCS interlock preventing deferred PM without authorization.</li>
+                  <li>Standardize PLC program template with ramped stop routines across all test benches.</li>
+                  <li>Require dynamic braking resistor installation for any bench configured for variable deceleration.</li>
+                  <li>Store parameter backups in CMMS (WO-VFD-2026-0042) to prevent unauthorized frequency setpoint adjustments.</li>
                 </ul>
               </div>
 
@@ -322,9 +323,9 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
                   <span>D8: Engineer Authorization</span>
                 </div>
                 <div className="text-xs font-mono text-slate-700 space-y-0.5">
-                  <p>Reviewed by: <strong className="text-slate-900">{report8D?.d8_sign_off?.reviewed_by || 'J. Reynolds (Machinery Reliability Specialist)'}</strong></p>
+                  <p>Reviewed by: <strong className="text-slate-900">{report8D?.d8_sign_off?.reviewed_by || 'M. Al-Hassan (Lead Automation Specialist)'}</strong></p>
                   <p>Status: <span className="text-emerald-700 font-bold">APPROVED & RELEASED</span></p>
-                  <p className="text-slate-500 text-[11px]">Notes: {report8D?.d8_sign_off?.review_notes || 'Verified by multi-sensor FFT acoustic convergence.'}</p>
+                  <p className="text-slate-500 text-[11px]">Notes: {report8D?.d8_sign_off?.review_notes || 'Root cause verified by multi-sensor Modbus telemetry and PLC state correlation.'}</p>
                 </div>
               </div>
             </div>
@@ -342,10 +343,10 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
                 SAP S/4HANA Plant Maintenance (PM) Order PM01
               </div>
               <h2 className="text-base font-bold text-slate-900">
-                Work Order #{sapOrder?.order_number || '40019284'} · Notification #{sapOrder?.notification_number || '10082914'}
+                Work Order #{sapOrder?.order_number || '40092841'} · Notification #{sapOrder?.notification_number || '10082914'}
               </h2>
               <div className="text-xs font-mono text-slate-500 mt-0.5">
-                Equipment: {sapOrder?.equipment_id || '10049201'} - {sapOrder?.equipment_name || 'Sulzer Boiler Feed Pump P-301A'}
+                Equipment: {sapOrder?.equipment_id || '10049201'} - {sapOrder?.equipment_name || 'VFD_VM_01 Wecon VM Series Inverter & Motor Bench'}
               </div>
             </div>
 
@@ -365,24 +366,24 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
             </div>
             <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
               <span className="text-slate-500 block text-[10px]">Functional Location</span>
-              <span className="font-bold text-slate-800">{sapOrder?.functional_location || 'PLNT-B03-FW300-P301A'}</span>
+              <span className="font-bold text-slate-800">{sapOrder?.functional_location || 'FLOC: PLNT-B01-VFD-BENCH01'}</span>
             </div>
             <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
               <span className="text-slate-500 block text-[10px]">Cost Center</span>
-              <span className="font-bold text-slate-800">{sapOrder?.cost_center || 'CC-UTIL-300'}</span>
+              <span className="font-bold text-slate-800">{sapOrder?.cost_center || 'CC-ELEC-01'}</span>
             </div>
             <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
               <span className="text-slate-500 block text-[10px]">Total Est. Hours</span>
-              <span className="font-bold text-teal-700">{sapOrder?.total_estimated_hours || 15.0} Hours</span>
+              <span className="font-bold text-teal-700">{sapOrder?.total_estimated_hours || 7.5} Hours</span>
             </div>
           </div>
 
           {/* Short Text / Scope */}
           <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1 text-xs">
             <div className="font-mono text-slate-500 font-bold">Scope of Work:</div>
-            <div className="font-semibold text-slate-900">{sapOrder?.short_text || 'Emergency Overhaul: STR-301A Strainer Clean, Impeller Boroscopy & Bearing Flush'}</div>
+            <div className="font-semibold text-slate-900">{sapOrder?.short_text || 'RCA Remediation: VFD_VM_01 Drive Trip Recovery & Dynamic Braking Resistor Retrofit'}</div>
             <div className="text-slate-600 font-sans text-xs pt-0.5 leading-relaxed">
-              {sapOrder?.long_text || 'Disassemble and inspect Suction Strainer STR-301A following cavitation-induced trip. Inspect first-stage impeller for cavitation erosion pitting. Measure DE bearing clearances with Plastigage. Refill oil reservoir with fresh ISO VG 46.'}
+              {sapOrder?.long_text || 'Root Cause: DC bus voltage surged past 195.0 V during overfrequency excursion (>40 Hz) with missing dynamic braking resistor. Action Required: Install dynamic braking resistor on terminals P+/PB, adjust parameter F0.18 to controlled ramp, clamp max frequency F0.10 <= 40.0 Hz, and verify under step-speed commissioning.'}
             </div>
           </div>
 
@@ -457,13 +458,13 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-5">
           <div className="border-b border-slate-100 pb-3">
             <div className="text-[11px] font-mono text-teal-700 font-bold tracking-wider uppercase">
-              Standard Operating Procedure (SOP-FW-301)
+              Standard Operating Procedure (SOP-VFD-001)
             </div>
             <h2 className="text-base font-bold text-slate-900">
-              Feedwater Pump P-301A Cavitation Incident Recovery & Re-commissioning
+              Wecon VM Series VFD Overvoltage Trip Recovery & Dynamic Braking Resistor Retrofit
             </h2>
             <div className="text-xs font-mono text-slate-500 mt-0.5">
-              Safety Class: Critical Pressure System · LOTO Verification Required
+              Safety Class: Critical Power Electronics · LOTO & DC Bus Capacitor Discharge Verification Required
             </div>
           </div>
 
@@ -471,28 +472,28 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
             {[
               {
                 id: 'sop-1',
-                title: 'Phase 1: Lockout/Tagout (LOTO) & Energy Isolation',
-                desc: 'Rack out 3.3 kV breaker 33-SWG-P301A. Verify zero voltage on motor leads. Close and chain MOV-30101 and MOV-30102.',
+                title: 'Phase 1: Lockout/Tagout (LOTO) & DC Bus Discharge Verification',
+                desc: 'Open main breaker CB_01. Measure DC link voltage on terminals + and - with calibrated DMM; verify V_dc < 24.0V before servicing.',
               },
               {
                 id: 'sop-2',
-                title: 'Phase 2: Suction Strainer STR-301A Inspection',
-                desc: 'Open drain valve to depressurize strainer body. Unbolt top cover, pull 20-mesh dual basket. Wash out biofouling debris and inspect mesh integrity.',
+                title: 'Phase 2: Dynamic Braking Resistor Installation (Terminals P+/PB)',
+                desc: 'Mount 70-Ohm 150W wirewound dynamic braking resistor on DIN rail with ceramic standoffs. Wire to terminals P+ and PB using 2.5mm2 shielded silicone cable.',
               },
               {
                 id: 'sop-3',
-                title: 'Phase 3: Impeller Boroscopy Inspection',
-                desc: 'Insert flexible boroscope through suction inspection port. Photograph first-stage impeller eye. Verify pitting depth is < 0.5 mm per OEM limits.',
+                title: 'Phase 3: Parameter Reprogramming & Frequency Clamping',
+                desc: 'Connect Wecon HMI/keypad. Set max frequency clamp F0.10 <= 40.00 Hz. Configure F0.18 deceleration ramp time to 5.0s. Enable stall prevention F3.08.',
               },
               {
                 id: 'sop-4',
-                title: 'Phase 4: Sleeve Bearing Clearance & Lube Oil Renewal',
-                desc: 'Remove upper bearing cap. Measure diametral clearance using Plastigage (Target: 0.12 - 0.18 mm). Drain reservoir, flush with clean oil, refill with 40L ISO VG 46.',
+                title: 'Phase 4: Induction Motor Stator Megger & Phase Balance Testing',
+                desc: 'Perform 500V DC megger test on motor phases U, V, W to PE (> 50 M-Ohm required). Measure phase resistance balance (< 1% unbalance).',
               },
               {
                 id: 'sop-5',
-                title: 'Phase 5: Re-commissioning & Online Baseline Validation',
-                desc: 'Prime pump suction. Start pump with discharge valve throttled. Confirm PT-30101 > 2.35 bar, VI-301-R < 2.0 mm/s RMS, and FFT broadband ratio < 10%.',
+                title: 'Phase 5: Step-Speed Commissioning & Decel Load Sign-Off',
+                desc: 'Energize drive, step speed across 10 Hz, 25 Hz, 40 Hz. Verify DC bus voltage remains within 170.0V - 190.0V envelope during controlled stop without trip.',
               },
             ].map((step) => {
               const isChecked = sopChecked[step.id];

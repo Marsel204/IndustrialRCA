@@ -1,288 +1,226 @@
 {
   "isa95_hierarchy": {
-    "enterprise": "Global PetroChem Refining Corp",
-    "site": "Site Alpha - Baytown Complex",
-    "area": "Area 03 - Steam & Power Generation",
-    "unit": "Unit 300 - High Pressure Boiler Feedwater System",
-    "test_bench": "Bench 01 - Variable Frequency Drive Test Rig"
+    "enterprise": "Industrial Automation & Mechatronics Lab",
+    "site": "Electrical Test Facility - Bench 01",
+    "area": "Area 01 - Power Electronics & Motion Control",
+    "unit": "Bench 01 - Variable Frequency Drive Test Rig",
+    "test_bench": "Wecon VM Inverter & Induction Motor System"
   },
   "equipment_nodes": [
     {
-      "id": "TK-300",
-      "name": "Deaerator Storage Tank",
-      "type": "Vessel",
-      "isa95_level": "Equipment",
-      "description": "Feedwater storage and thermal deaeration tank supplying boiler feed pumps",
+      "id": "GRID_AC_220V",
+      "name": "Single-Phase 220V AC Mains Supply",
+      "type": "PowerSource",
+      "isa95_level": "Area",
+      "description": "220V AC 50Hz single-phase electrical utility supply line feeding test bench MCCB",
       "operating_specs": {
-        "design_pressure_bar": 4.5,
-        "operating_pressure_bar": 2.8,
-        "operating_temperature_c": 130.0
+        "rated_voltage_vac": 220.0,
+        "frequency_hz": 50.0,
+        "max_current_a": 16.0
       },
       "sensors": []
     },
     {
-      "id": "STR-301A",
-      "name": "Suction Strainer 301A",
-      "type": "Strainer",
+      "id": "CB_01",
+      "name": "Main Contactor & MCCB Circuit Breaker",
+      "type": "CircuitBreaker",
       "isa95_level": "Equipment",
-      "description": "Dual basket 20-mesh particulate strainer protecting Pump P-301A",
+      "description": "Molded case circuit breaker and magnetic contactor providing bench electrical isolation",
       "operating_specs": {
-        "mesh_size": "20-mesh (840 micron)",
-        "design_clean_dp_bar": 0.12,
-        "max_allowable_dp_bar": 1.00
-      },
-      "sensors": [
-        {
-          "tag": "DPS-30101",
-          "description": "Strainer Differential Pressure",
-          "unit": "bar",
-          "type": "DifferentialPressure",
-          "range": [0.0, 3.0]
-        }
-      ]
-    },
-    {
-      "id": "LINE-30101",
-      "name": "Suction Feed Piping Header",
-      "type": "Piping",
-      "isa95_level": "Equipment",
-      "description": "12-inch carbon steel suction line connecting strainer to pump inlet nozzle",
-      "operating_specs": {
-        "diameter_in": 12.0,
-        "schedule": "Std 40"
-      },
-      "sensors": [
-        {
-          "tag": "PT-30101",
-          "description": "Pump Suction Line Pressure",
-          "unit": "bar",
-          "type": "Pressure",
-          "range": [0.0, 5.0]
-        }
-      ]
-    },
-    {
-      "id": "P-301A",
-      "name": "Centrifugal Boiler Feed Pump A",
-      "type": "CentrifugalPump",
-      "isa95_level": "Equipment",
-      "description": "Multi-stage centrifugal high-pressure boiler feed pump",
-      "operating_specs": {
-        "stages": 6,
-        "rated_speed_rpm": 2980.0,
-        "rated_flow_m3h": 185.0,
-        "rated_head_m": 680.0,
-        "npsh_r_bar": 1.20,
-        "design_suction_bar": 2.40,
-        "design_discharge_bar": 63.50,
-        "bearing_type": "Hydrodynamic sleeve bearings with forced oil lubrication"
-      },
-      "sensors": [
-        {
-          "tag": "VI-301-R",
-          "description": "Drive-End Radial Vibration RMS",
-          "unit": "mm/s",
-          "type": "VibrationRMS",
-          "range": [0.0, 25.0]
-        },
-        {
-          "tag": "TI-301-DE",
-          "description": "Drive-End Bearing Temperature",
-          "unit": "deg C",
-          "type": "Temperature",
-          "range": [0.0, 150.0]
-        }
-      ]
-    },
-    {
-      "id": "M-301A",
-      "name": "Induction Motor Drive A",
-      "type": "ElectricMotor",
-      "isa95_level": "Equipment",
-      "description": "3.3kV Squirrel-cage induction motor driver",
-      "operating_specs": {
-        "rated_power_kw": 450.0,
-        "rated_voltage_v": 3300.0,
-        "rated_current_a": 115.0,
-        "rated_speed_rpm": 2980.0
-      },
-      "sensors": [
-        {
-          "tag": "IT-30101",
-          "description": "Drive Motor Phase Current",
-          "unit": "A",
-          "type": "Current",
-          "range": [0.0, 200.0]
-        }
-      ]
-    },
-    {
-      "id": "CV-30101",
-      "name": "Discharge Check Valve 30101",
-      "type": "CheckValve",
-      "isa95_level": "Equipment",
-      "description": "Non-return tilting disc check valve protecting against backflow",
-      "operating_specs": {
-        "rating_class": "ANSI 600"
+        "trip_rating_a": 16.0,
+        "breaking_capacity_ka": 6.0
       },
       "sensors": []
     },
     {
-      "id": "HDR-300",
-      "name": "High-Pressure Feedwater Header",
-      "type": "Header",
-      "isa95_level": "Equipment",
-      "description": "High pressure boiler distribution manifold",
+      "id": "PLC_LX_01",
+      "name": "Wecon LX Series PLC Controller",
+      "type": "ProgrammableLogicController",
+      "isa95_level": "ControlDevice",
+      "description": "Programmable logic controller executing ladder logic and experiment injection triggers via D registers",
       "operating_specs": {
-        "operating_pressure_bar": 64.0
+        "model": "Wecon LX3V Series",
+        "comm_protocol": "Modbus RTU / Ethernet",
+        "d_trigger_registers": "D100 (On/Off Forced Decel), D200 (Frequency Limit)"
       },
-      "sensors": []
+      "sensors": [
+        {
+          "tag": "PLC_TRIGGER_D",
+          "description": "Experiment Injection Trigger Register",
+          "unit": "state",
+          "type": "TriggerFlag",
+          "range": [
+            0,
+            1
+          ]
+        }
+      ]
     },
     {
       "id": "HMI_TOUCH_01",
-      "name": "HMI Touch Screen / V-Box Gateway",
+      "name": "Wecon Touch Screen HMI Gateway",
       "type": "HMI",
       "isa95_level": "ControlDevice",
-      "description": "Local operator touch interface commanding speed and monitoring live telemetry via Modbus RTU",
+      "description": "Wecon PIStudio touch interface (192.168.1.104) publishing 1 Hz telemetry to MQTT broker",
       "operating_specs": {
-        "protocol": "Modbus RTU Master",
-        "comm_port": "RS-485 (9600 8-N-1)",
+        "ip_address": "192.168.1.104",
+        "protocol": "MQTT over Port 8883 / Modbus RTU RS-485",
         "poll_rate_ms": 1000
       },
       "sensors": [
         {
           "tag": "HMI_FREQ_SP",
-          "description": "Operator Target Frequency Setpoint (Register 2001H)",
+          "description": "Operator Target Frequency Setpoint",
           "unit": "Hz",
           "type": "FrequencySetpoint",
-          "range": [0.0, 50.0]
+          "range": [
+            0.0,
+            50.0
+          ]
         }
       ]
     },
     {
       "id": "VFD_VM_01",
-      "name": "WECON VM Series Variable Frequency Drive",
+      "name": "Wecon VM Series Variable Frequency Drive",
       "type": "VariableFrequencyDrive",
       "isa95_level": "Equipment",
-      "description": "3-Phase AC Variable Frequency Inverter Drive with Modbus RTU interface",
+      "description": "Single-phase 220V AC input, 3-phase output inverter drive driving induction motor",
       "operating_specs": {
-        "model": "WECON VM-0R7G-4",
+        "model": "Wecon VM-0R7G-2",
         "rated_power_kw": 0.75,
         "rated_current_a": 2.5,
-        "rated_input_voltage_v": 380.0,
-        "max_dc_bus_voltage_v": 700.0,
+        "nominal_dc_bus_v": 182.0,
+        "max_dc_bus_v": 195.0,
         "comm_protocol": "Modbus RTU (Slave ID 1, 9600 8-N-1)"
       },
       "sensors": [
         {
-          "tag": "VFD_F_OUT",
+          "tag": "f_out",
           "register": "3000H",
-          "description": "VFD Output Operating Frequency",
+          "description": "VFD Output Frequency",
           "unit": "Hz",
           "type": "Frequency",
-          "range": [0.0, 50.0]
+          "range": [
+            0.0,
+            50.0
+          ]
         },
         {
-          "tag": "VFD_F_TARGET",
-          "register": "3001H",
-          "description": "VFD Target Set Frequency",
-          "unit": "Hz",
-          "type": "Frequency",
-          "range": [0.0, 50.0]
-        },
-        {
-          "tag": "VFD_I_OUT",
-          "register": "3002H",
-          "description": "VFD Motor Output Current",
-          "unit": "A",
-          "type": "Current",
-          "range": [0.0, 10.0]
-        },
-        {
-          "tag": "VFD_V_OUT",
-          "register": "3003H",
-          "description": "VFD Motor Output Voltage",
-          "unit": "V",
-          "type": "Voltage",
-          "range": [0.0, 380.0]
-        },
-        {
-          "tag": "VFD_V_DC",
+          "tag": "v_dc",
           "register": "3004H",
           "description": "VFD DC Bus Voltage",
           "unit": "V",
           "type": "DCVoltage",
-          "range": [0.0, 800.0]
+          "range": [
+            150.0,
+            250.0
+          ]
         },
         {
-          "tag": "VFD_FAULT_CODE",
+          "tag": "current",
+          "register": "3002H",
+          "description": "Motor Output Current",
+          "unit": "A",
+          "type": "Current",
+          "range": [
+            0.0,
+            5.0
+          ]
+        },
+        {
+          "tag": "v_out",
+          "register": "3003H",
+          "description": "Motor Output Voltage",
+          "unit": "V",
+          "type": "Voltage",
+          "range": [
+            0.0,
+            250.0
+          ]
+        },
+        {
+          "tag": "rpm",
+          "register": "100FH",
+          "description": "Motor Shaft Speed",
+          "unit": "RPM",
+          "type": "Speed",
+          "range": [
+            0.0,
+            1800.0
+          ]
+        },
+        {
+          "tag": "fault_code",
           "register": "700BH",
-          "description": "VFD Active Trip Code",
+          "description": "Active Trip Fault Code",
           "unit": "code",
           "type": "FaultCode",
-          "range": [0, 99]
+          "range": [
+            0,
+            99
+          ]
         }
       ]
     },
     {
-      "id": "MOTOR_M01",
-      "name": "Test Bench 3-Phase Induction Motor",
+      "id": "DC_BUS_LINK",
+      "name": "DC Intermediate Bus & Capacitor Bank",
+      "type": "DCLink",
+      "isa95_level": "Equipment",
+      "description": "Intermediate DC bus filter capacitors with voltage protection monitoring (195V trip ceiling)",
+      "operating_specs": {
+        "nominal_voltage_v": 182.0,
+        "trip_threshold_v": 195.0
+      },
+      "sensors": []
+    },
+    {
+      "id": "BRK_RESISTOR_01",
+      "name": "Dynamic Braking Resistor Unit (P+/PB)",
+      "type": "BrakingResistor",
+      "isa95_level": "Equipment",
+      "description": "External dynamic braking resistor connected to inverter terminals P+ and PB for decel energy dissipation",
+      "operating_specs": {
+        "resistance_ohm": 70.0,
+        "power_rating_w": 150.0
+      },
+      "sensors": []
+    },
+    {
+      "id": "IND_MOTOR_01",
+      "name": "3-Phase AC Induction Motor",
       "type": "ElectricMotor",
       "isa95_level": "Equipment",
-      "description": "Small 3-phase squirrel-cage induction motor driven by WECON VM VFD",
+      "description": "4-Pole squirrel-cage induction motor driven by Wecon VM inverter",
       "operating_specs": {
         "rated_power_kw": 0.37,
-        "rated_voltage_v": 380.0,
+        "rated_voltage_v": 220.0,
         "rated_current_a": 1.15,
-        "rated_speed_rpm": 1440.0
+        "rated_speed_rpm": 1440.0,
+        "poles": 4
       },
-      "sensors": [
-        {
-          "tag": "MTR_SPEED_RPM",
-          "description": "Rotor Shaft Speed",
-          "unit": "RPM",
-          "type": "Speed",
-          "range": [0.0, 1500.0]
-        }
-      ]
+      "sensors": []
     }
   ],
   "topology_edges": [
     {
-      "source": "TK-300",
-      "target": "STR-301A",
-      "relation": "PROCESS_FLOW_UPSTREAM_TO_DOWNSTREAM",
-      "medium": "Deaerated Feedwater (130C)"
+      "source": "GRID_AC_220V",
+      "target": "CB_01",
+      "relation": "ELECTRICAL_POWER_SUPPLY",
+      "medium": "Single-Phase 220V AC Power (L, N, PE)"
     },
     {
-      "source": "STR-301A",
-      "target": "LINE-30101",
-      "relation": "PROCESS_FLOW_UPSTREAM_TO_DOWNSTREAM",
-      "medium": "Filtered Feedwater"
+      "source": "CB_01",
+      "target": "VFD_VM_01",
+      "relation": "SWITCHGEAR_FEED",
+      "medium": "Single-Phase 220V AC"
     },
     {
-      "source": "LINE-30101",
-      "target": "P-301A",
-      "relation": "SUCTION_SUCTION_LINE",
-      "medium": "Pump Inflow"
-    },
-    {
-      "source": "M-301A",
-      "target": "P-301A",
-      "relation": "MECHANICAL_COUPLING",
-      "medium": "Flexible Disc Shaft Coupling"
-    },
-    {
-      "source": "P-301A",
-      "target": "CV-30101",
-      "relation": "DISCHARGE_FLOW",
-      "medium": "High-Pressure Feedwater"
-    },
-    {
-      "source": "CV-30101",
-      "target": "HDR-300",
-      "relation": "MANIFOLD_INJECTION",
-      "medium": "High-Pressure Feedwater"
+      "source": "PLC_LX_01",
+      "target": "HMI_TOUCH_01",
+      "relation": "PLC_HMI_COMMUNICATION",
+      "medium": "RS-485 Modbus / Ethernet"
     },
     {
       "source": "HMI_TOUCH_01",
@@ -292,7 +230,19 @@
     },
     {
       "source": "VFD_VM_01",
-      "target": "MOTOR_M01",
+      "target": "DC_BUS_LINK",
+      "relation": "INTERNAL_DC_RECTIFICATION",
+      "medium": "Rectified DC Bus (182V nominal)"
+    },
+    {
+      "source": "DC_BUS_LINK",
+      "target": "BRK_RESISTOR_01",
+      "relation": "DYNAMIC_BRAKE_CHOPPER",
+      "medium": "Terminals P+ and PB"
+    },
+    {
+      "source": "VFD_VM_01",
+      "target": "IND_MOTOR_01",
       "relation": "ELECTRICAL_POWER_DRIVE",
       "medium": "3-Phase PWM AC Power (U, V, W)"
     }

@@ -202,9 +202,20 @@ class EmbeddedTSDB:
     def check_trip_trigger(self, metric: Dict[str, Any]) -> Optional[int]:
         """
         Evaluates whether an incoming metric triggers an emergency trip.
+        Checks explicit fault codes, DC bus overvoltage (>195.0 V), or decel overcurrent (>2.50 A).
         Prevents redundant cascading triggers within a 15-second debounce window.
         """
         fault_code = int(metric.get("fault_code", 0) or 0)
+        v_dc = float(metric.get("v_dc", 0.0) or 0.0)
+        current = float(metric.get("current", 0.0) or 0.0)
+        f_out = float(metric.get("f_out", 0.0) or 0.0)
+
+        if fault_code == 0:
+            if v_dc >= 195.0 or (f_out >= 42.0 and v_dc >= 190.0):
+                fault_code = 6  # Err06 Overfrequency / Deceleration Overvoltage trip
+            elif current >= 2.50:
+                fault_code = 2  # Err02 Forced Sudden Deceleration Overcurrent trip
+
         if fault_code > 0:
             now = time.time()
             if now - self._last_trip_time > 15.0:

@@ -14,7 +14,7 @@ interface TopologyTabProps {
 }
 
 export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
-  const [selectedNodeId, setSelectedNodeId] = useState<string>('STR-301A');
+  const [selectedNodeId, setSelectedNodeId] = useState<string>('VFD_VM_01');
   const [treeExpanded, setTreeExpanded] = useState<Record<string, boolean>>({
     enterprise: true,
     site: true,
@@ -29,20 +29,20 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
   const nodes = topology?.graph?.nodes || [];
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) || nodes[0];
 
-  // Process stream nodes ordered upstream to downstream
-  const processFlowOrder = [
-    { id: 'TK-300', label: 'Deaerator Vessel', sub: '2.8 bar · 130°C' },
-    { id: 'LINE-30101', label: 'Suction Header', sub: '12" Feed Line' },
-    { id: 'STR-301A', label: 'Suction Strainer', sub: '20-Mesh Dual' },
-    { id: 'P-301A', label: 'HP Feed Pump', sub: 'Sulzer GSG 150-360' },
-    { id: 'CV-30101', label: 'Check Valve', sub: 'Discharge Isolation' },
-    { id: 'HDR-300', label: 'HP Header', sub: '65 bar Steam Supply' },
+  // Control & Power Supply Branch
+  const controlSupplyOrder = [
+    { id: 'GRID_AC_220V', label: '220V AC Grid', sub: 'Single-Phase 50Hz' },
+    { id: 'CB_01', label: 'MCCB Breaker', sub: '16A Thermal-Mag' },
+    { id: 'PLC_LX_01', label: 'Wecon LX PLC', sub: 'D-Variable Logic' },
+    { id: 'HMI_TOUCH_01', label: 'Operator HMI', sub: '192.168.1.104' },
   ];
 
-  const electricalBranchOrder = [
-    { id: 'HMI_TOUCH_01', label: 'Operator HMI', sub: 'Touch Panel 01' },
-    { id: 'VFD_VM_01', label: 'WECON VFD', sub: 'VM Series Inverter' },
-    { id: 'M-301A', label: 'Drive Motor', sub: '450 kW Induction' },
+  // Drive & Motion Power Branch
+  const vfdPowerOrder = [
+    { id: 'VFD_VM_01', label: 'Wecon VM VFD', sub: '0.75kW Inverter' },
+    { id: 'DC_BUS_LINK', label: 'DC Bus Link', sub: '182V nom · 195V trip' },
+    { id: 'BRK_RESISTOR_01', label: 'Braking Resistor', sub: 'P+/PB Terminals' },
+    { id: 'IND_MOTOR_01', label: 'Induction Motor', sub: '4-Pole 1440 RPM' },
   ];
 
   return (
@@ -55,20 +55,20 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
           </div>
           <div>
             <div className="text-xs font-bold font-mono text-slate-800 uppercase">
-              ISA-95 Plant Topology & Process Flow Graph
+              ISA-95 Plant Topology & Electrical Control Graph
             </div>
             <div className="text-[11px] text-slate-500">
-              Correlated Directed Traversal · Unit 300 High-Pressure Boiler Feedwater
+              Correlated Directed Traversal · Bench 01 Wecon VFD & Induction Motor Rig
             </div>
           </div>
         </div>
 
         <div className="flex items-center space-x-2 text-[11px] font-mono">
           <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
-            Root Origin: <strong>STR-301A</strong>
+            Root Origin: <strong>PLC_LX_01</strong>
           </span>
           <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
-            Tripped Asset: <strong>P-301A</strong>
+            Tripped Asset: <strong>VFD_VM_01</strong>
           </span>
         </div>
       </div>
@@ -77,21 +77,22 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
       <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-2">
           <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-800">
-            Interactive Single-Line Process Flow (Click Asset to Inspect)
+            Interactive Electrical & Control Diagram (Click Node to Inspect)
           </span>
           <span className="text-[11px] font-mono text-slate-500">
-            Deaerator Vessel → Feedwater Header
+            220V AC Mains → PLC / HMI → Wecon VM Inverter → Induction Motor
           </span>
         </div>
 
-        {/* Electrical Drive Branch */}
+        {/* Electrical & PLC Control Branch */}
         <div className="space-y-1.5">
           <span className="text-[11px] font-mono text-purple-700 font-semibold uppercase tracking-wider">
-            ⚡ Electrical Control & Drive Branch (3.3 kV)
+            ⚡ AC Mains Supply & PLC Control Branch (Modbus RTU / MQTT)
           </span>
           <div className="flex flex-wrap items-center gap-2">
-            {electricalBranchOrder.map((item, idx) => {
+            {controlSupplyOrder.map((item, idx) => {
               const isSelected = selectedNodeId === item.id;
+              const isRoot = item.id === 'PLC_LX_01';
               return (
                 <React.Fragment key={item.id}>
                   <button
@@ -99,6 +100,8 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
                     className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer min-w-[145px] ${
                       isSelected
                         ? 'bg-purple-50 border-purple-400 ring-1 ring-purple-400/30'
+                        : isRoot
+                        ? 'bg-rose-50/50 border-rose-300'
                         : 'bg-slate-50/60 border-slate-200 hover:border-slate-300'
                     }`}
                   >
@@ -106,14 +109,16 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
                       <span className="font-mono text-xs font-bold text-purple-900">
                         {item.id}
                       </span>
-                      <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-purple-100 text-purple-700">
-                        ELECTRICAL
+                      <span className={`text-[9px] font-mono px-1 py-0.2 rounded font-bold ${
+                        isRoot ? 'bg-rose-100 text-rose-800' : 'bg-purple-100 text-purple-700'
+                      }`}>
+                        {isRoot ? 'ROOT TRIGGER' : 'CONTROL'}
                       </span>
                     </div>
                     <div className="text-xs font-medium text-slate-800">{item.label}</div>
                     <div className="text-[10px] font-mono text-slate-500">{item.sub}</div>
                   </button>
-                  {idx < electricalBranchOrder.length - 1 && (
+                  {idx < controlSupplyOrder.length - 1 && (
                     <ArrowRight className="w-3.5 h-3.5 text-purple-300 flex-shrink-0" />
                   )}
                 </React.Fragment>
@@ -122,32 +127,26 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
           </div>
         </div>
 
-        {/* Hydraulic Feedwater Stream */}
+        {/* VFD Inverter Drive & Motion Branch */}
         <div className="space-y-1.5 pt-1">
           <span className="text-[11px] font-mono text-teal-700 font-semibold uppercase tracking-wider">
-            💧 Main Feedwater Hydraulic Stream (Demineralized Water · 185 m³/h)
+            ⚙️ Wecon VM Inverter, DC Link & Induction Motor Branch
           </span>
           <div className="flex flex-wrap items-center gap-2">
-            {processFlowOrder.map((item, idx) => {
+            {vfdPowerOrder.map((item, idx) => {
               const isSelected = selectedNodeId === item.id;
-              const isRoot = item.id === 'STR-301A';
-              const isTripped = item.id === 'P-301A';
+              const isTripped = item.id === 'VFD_VM_01';
 
               let borderColor = 'border-slate-200';
               let badgeBg = 'bg-slate-100 text-slate-600';
               let badgeText = 'HEALTHY';
               let cardBg = 'bg-slate-50/60';
 
-              if (isRoot) {
-                borderColor = isSelected ? 'border-rose-500 ring-2 ring-rose-500/20' : 'border-rose-300';
-                cardBg = 'bg-rose-50/40';
-                badgeBg = 'bg-rose-100 text-rose-800';
-                badgeText = 'ROOT CAUSE';
-              } else if (isTripped) {
+              if (isTripped) {
                 borderColor = isSelected ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-amber-300';
                 cardBg = 'bg-amber-50/40';
                 badgeBg = 'bg-amber-100 text-amber-800';
-                badgeText = 'TRIPPED';
+                badgeText = 'TRIPPED ASSET';
               } else if (isSelected) {
                 borderColor = 'border-blue-500 ring-2 ring-blue-500/20';
                 cardBg = 'bg-blue-50/40';
@@ -170,7 +169,7 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
                     <div className="text-xs font-medium text-slate-800">{item.label}</div>
                     <div className="text-[10px] font-mono text-slate-500">{item.sub}</div>
                   </button>
-                  {idx < processFlowOrder.length - 1 && (
+                  {idx < vfdPowerOrder.length - 1 && (
                     <div className="flex items-center space-x-0.5 flex-shrink-0">
                       <ArrowRight className="w-3.5 h-3.5 text-teal-600" />
                     </div>

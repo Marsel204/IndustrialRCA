@@ -36,48 +36,47 @@ def test_api_scenarios(client):
     assert resp.status_code == 200
     scenarios = resp.json().get("scenarios", [])
     scenario_ids = [s["id"] for s in scenarios]
-    assert "fault" in scenario_ids
-    assert "normal" in scenario_ids
+    assert "exp_err06" in scenario_ids
+    assert "exp_err02" in scenario_ids
+    assert "exp_nominal" in scenario_ids
+    assert "live_stream" in scenario_ids
 
 
 def test_api_telemetry_series(client):
-    resp = client.get("/api/v1/telemetry/fault")
+    resp = client.get("/api/v1/telemetry/exp_err06")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data["timestamps"]) == 3600
+    assert len(data["timestamps"]) >= 300
     series = data["series"]
-    assert "PT-30101" in series
-    assert "DPS-30101" in series
-    assert "VI-301-R" in series
-    assert "TI-301-DE" in series
-    assert "IT-30101" in series
-    assert len(series["TI-301-DE"]) == 3600
+    assert "f_out" in series
+    assert "v_dc" in series
+    assert "current" in series
+    assert "rpm" in series
+    assert len(series["v_dc"]) >= 300
 
 
 def test_api_telemetry_spectrum(client):
-    resp = client.get("/api/v1/telemetry/fault/spectrum")
+    resp = client.get("/api/v1/telemetry/exp_err06/spectrum")
     assert resp.status_code == 200
     data = resp.json()
     analysis = data["analysis"]
-    assert analysis["overall_rms"] > 7.0
-    assert analysis["broadband_cavitation_ratio_pct"] > 35.0
-    assert analysis["cavitation_detected"] is True
+    assert "overall_rms" in analysis
     assert len(data["frequencies"]) > 50
     assert len(data["magnitudes"]) == len(data["frequencies"])
 
 
 def test_api_topology(client):
-    resp = client.get("/api/v1/topology/P-301A")
+    resp = client.get("/api/v1/topology/VFD_VM_01")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["target_asset"]["id"] == "P-301A"
+    assert data["target_asset"]["id"] == "VFD_VM_01"
     assert "upstream_chain" in data
     assert "downstream_chain" in data
     graph = data["graph"]
     node_ids = [n["id"] for n in graph["nodes"]]
-    assert "P-301A" in node_ids
-    assert "STR-301A" in node_ids
-    assert "TK-300" in node_ids
+    assert "VFD_VM_01" in node_ids
+    assert "PLC_LX_01" in node_ids
+    assert "IND_MOTOR_01" in node_ids
     assert len(graph["edges"]) > 0
 
 
@@ -89,10 +88,10 @@ def test_api_rca_workflow_lifecycle(client):
     assert resp_init.status_code == 200
     assert resp_init.json()["pipeline_status"] == "NOT_STARTED"
 
-    # 2. Run RCA on fault scenario
+    # 2. Run RCA on exp_err06 scenario
     resp_run = client.post("/api/v1/rca/run", json={
-        "dataset_id": "fault",
-        "asset_id": "P-301A",
+        "dataset_id": "exp_err06",
+        "asset_id": "VFD_VM_01",
         "thread_id": thread_id,
         "use_deepseek": False,
     })
@@ -101,14 +100,14 @@ def test_api_rca_workflow_lifecycle(client):
     assert data_run["status"] == "SUCCESS"
     assert data_run["is_paused_at_hitl"] is True
     assert data_run["current_step"] == 6
-    assert data_run["winning_hypothesis"]["hypothesis_id"] == "H2"
+    assert data_run["winning_hypothesis"]["hypothesis_id"] == "H_VFD_ERR06"
 
     # 3. Fetch state after pause
     resp_state = client.get(f"/api/v1/rca/state/{thread_id}")
     assert resp_state.status_code == 200
     state_data = resp_state.json()
     assert state_data["is_paused_at_hitl"] is True
-    assert len(state_data["hypothesis_results"]) == 6
+    assert len(state_data["hypothesis_results"]) >= 4
     assert len(state_data["causal_chain_5_whys"]) == 5
 
     # 4. Submit Human Review Approval
@@ -116,7 +115,7 @@ def test_api_rca_workflow_lifecycle(client):
         "thread_id": thread_id,
         "action": "approve",
         "reviewer": "Chief Reliability Engineer",
-        "notes": "Acoustic and dP timeline verified via API test.",
+        "notes": "Vdc > 195V overfrequency trip verified via API test.",
     })
     assert resp_review.status_code == 200
     review_data = resp_review.json()

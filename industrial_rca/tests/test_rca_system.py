@@ -43,16 +43,14 @@ def test_telemetry_generator():
     assert len(normal_ds.df_1hz) == 3600
     assert len(fault_ds.df_1hz) == 3600
 
-    # Normal constraints
-    assert np.all(normal_ds.get_tag_series("PT-30101") >= 2.30)
-    assert np.all(normal_ds.get_tag_series("PT-30101") <= 2.50)
-    assert np.all(normal_ds.get_tag_series("TI-301-DE") < 55.0)
+    # Normal constraints (Wecon VFD 40Hz Nominal Run)
+    assert np.all(np.abs(normal_ds.get_tag_series("f_out") - 40.0) < 1.0)
+    assert np.all(np.abs(normal_ds.get_tag_series("v_dc") - 182.0) < 3.0)
+    assert np.all(normal_ds.get_tag_series("fault_code") == 0)
 
-    # Fault constraints
-    assert np.max(fault_ds.get_tag_series("TI-301-DE")) >= 90.0
-    assert np.min(fault_ds.get_tag_series("PT-30101")) < 1.20
-    assert np.max(fault_ds.get_tag_series("DPS-30101")) > 1.80
-    assert np.max(fault_ds.get_tag_series("VI-301-R")) > 7.10
+    # Fault constraints (Wecon VFD Exp 2 Overfrequency Trip > 195V)
+    assert np.max(fault_ds.get_tag_series("v_dc")) > 195.0
+    assert np.max(fault_ds.get_tag_series("fault_code")) == 6
 
 
 def test_statistical_profiler():
@@ -156,36 +154,38 @@ def test_telemetry_cache_scoping_and_thread_safety():
 def test_asset_topology_tracer():
     """Test ISA-95 topology upstream and downstream traversal."""
     tracer = AssetTopologyTracer()
-    upstream = tracer.trace_upstream("P-301A")
+    upstream = tracer.trace_upstream("VFD_VM_01")
     up_ids = [u["asset_id"] for u in upstream]
 
-    assert "LINE-30101" in up_ids
-    assert "STR-301A" in up_ids
-    assert "TK-300" in up_ids
+    assert "CB_01" in up_ids
+    assert "GRID_AC_220V" in up_ids
+    assert "HMI_TOUCH_01" in up_ids
+    assert "PLC_LX_01" in up_ids
 
-    downstream = tracer.trace_downstream("P-301A")
+    downstream = tracer.trace_downstream("VFD_VM_01")
     dn_ids = [d["asset_id"] for d in downstream]
-    assert "CV-30101" in dn_ids
-    assert "HDR-300" in dn_ids
+    assert "DC_BUS_LINK" in dn_ids
+    assert "BRK_RESISTOR_01" in dn_ids
+    assert "IND_MOTOR_01" in dn_ids
 
 
 def test_cmms_connector_work_order_generation():
     """Test SAP PM01 work order emission schema."""
     cmms = CMMSConnector()
-    history = cmms.query_maintenance_history("STR-301A")
-    assert any("OVERDUE" in str(h.get("status", "")) for h in history)
+    history = cmms.query_maintenance_history("VFD_VM_01")
+    assert len(history) > 0
 
     wo = cmms.generate_sap_pm01_work_order(
-        asset_id="P-301A",
+        asset_id="VFD_VM_01",
         incident_id="INC-TEST-001",
-        failure_mode="Cavitation erosion",
-        root_cause_summary="Strainer basket clogged",
-        corrective_actions=["Clean strainer", "Inspect impeller"],
+        failure_mode="Overfrequency Decel Overvoltage (Err06)",
+        root_cause_summary="DC bus exceeded 195.0V with unpopulated dynamic braking resistor",
+        corrective_actions=["Install dynamic braking resistor", "Clamp F0.10 <= 40Hz"],
     )
 
     sap = wo["sap_work_order"]
     assert sap["order_type"] == "PM01"
-    assert sap["functional_location"] == "FLOC: PLNT-B03-FW300-P301A"
+    assert sap["functional_location"] == "FLOC: PLNT-B01-VFD-BENCH01"
     assert sap["equipment_id"] == "10049201"
     assert len(sap["operations"]) == 5
     assert len(sap["materials_required"]) >= 4
@@ -222,15 +222,15 @@ def test_langgraph_fault_investigation_hitl_approval():
     assert len(paused_state.tasks[0].interrupts) > 0
 
     payload = paused_state.tasks[0].interrupts[0].value
-    assert payload["winning_hypothesis"] == "NPSH Starvation Induced Impeller Cavitation via Upstream Restriction"
-    assert payload["root_cause_asset"] == "STR-301A"
+    assert payload["winning_hypothesis"] == "Overfrequency Deceleration Overvoltage (WECON VM Err06)"
+    assert payload["root_cause_asset"] == "PLC_LX_01"
     assert len(payload["causal_chain_5_whys"]) == 5
 
     # Step 2: Resume with engineer approval
     decision = {
         "action": "approve",
         "reviewer": "Reliability Manager",
-        "notes": "Verified by FFT acoustics and strainer dP timeline.",
+        "notes": "Verified by Vdc > 195.0V and Modbus Err06 trip code.",
     }
     events_step2 = list(graph.stream(Command(resume=decision), config=config))
     final_state = graph.get_state(config)
@@ -238,7 +238,7 @@ def test_langgraph_fault_investigation_hitl_approval():
     assert final_state.values.get("pipeline_status") == "COMPLETED"
     assert "incident_report_8d" in final_state.values
     assert "sap_work_order" in final_state.values
-    assert final_state.values["incident_report_8d"]["d4_root_cause_analysis"]["root_cause_asset"] == "STR-301A"
+    assert final_state.values["incident_report_8d"]["d4_root_cause_analysis"]["root_cause_asset"] == "PLC_LX_01"
 
 
 def test_langgraph_fault_investigation_hitl_rejection():

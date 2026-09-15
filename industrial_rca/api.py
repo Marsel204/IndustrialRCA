@@ -97,21 +97,28 @@ SCENARIOS_REGISTRY: Dict[str, str] = {}
 
 
 def _ensure_default_scenarios():
-    """Initializes and registers standard baseline, fault, and live stream scenarios if not present."""
-    if "fault" not in SCENARIOS_REGISTRY:
-        ds_fault = generate_fault_scenario()
-        ds_id_fault = TelemetryStore.register(ds_fault, "ds_fault")
-        SCENARIOS_REGISTRY["fault"] = ds_id_fault
-
-    if "normal" not in SCENARIOS_REGISTRY:
-        ds_norm = generate_normal_scenario()
-        ds_id_norm = TelemetryStore.register(ds_norm, "ds_normal")
-        SCENARIOS_REGISTRY["normal"] = ds_id_norm
-
+    """Initializes and registers real Wecon VFD hardware and experiment scenarios in TelemetryStore."""
     if "live_stream" not in SCENARIOS_REGISTRY:
         ds_live = generate_vfd_dataset(scenario="live_stream")
         ds_id_live = TelemetryStore.register(ds_live, "ds_live_stream")
         SCENARIOS_REGISTRY["live_stream"] = ds_id_live
+
+    if "exp_err02" not in SCENARIOS_REGISTRY:
+        ds_err02 = generate_vfd_dataset(scenario="exp_err02")
+        ds_id_err02 = TelemetryStore.register(ds_err02, "ds_exp_err02")
+        SCENARIOS_REGISTRY["exp_err02"] = ds_id_err02
+
+    if "exp_err06" not in SCENARIOS_REGISTRY:
+        ds_err06 = generate_vfd_dataset(scenario="exp_err06")
+        ds_id_err06 = TelemetryStore.register(ds_err06, "ds_exp_err06")
+        SCENARIOS_REGISTRY["exp_err06"] = ds_id_err06
+        SCENARIOS_REGISTRY["fault"] = ds_id_err06
+
+    if "exp_nominal" not in SCENARIOS_REGISTRY:
+        ds_nom = generate_vfd_dataset(scenario="exp_nominal")
+        ds_id_nom = TelemetryStore.register(ds_nom, "ds_exp_nominal")
+        SCENARIOS_REGISTRY["exp_nominal"] = ds_id_nom
+        SCENARIOS_REGISTRY["normal"] = ds_id_nom
 
 
 _ensure_default_scenarios()
@@ -162,7 +169,7 @@ class IncidentPayload(BaseModel):
 
 
 class RCARunRequest(BaseModel):
-    dataset_id: str = Field(default="fault", description="Dataset identifier or preset (fault, normal, hil)")
+    dataset_id: str = Field(default="exp_err06", description="Dataset identifier or preset (live_stream, exp_err02, exp_err06, exp_nominal)")
     asset_id: str = Field(default=EQUIPMENT_ID, description="Target asset ID")
     thread_id: Optional[str] = Field(default=None, description="Session thread ID for LangGraph checkpointer")
     use_deepseek: bool = Field(default=True, description="Enable DeepSeek AI evaluation")
@@ -317,7 +324,8 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
                 "dataset_id": ds_id,
                 "asset_id": incident.asset_id,
                 "has_active_trip": True,
-                "use_deepseek": False,
+                "use_deepseek": True,
+                "deepseek_model": "deepseek-reasoner",
             }
             for _ in GLOBAL_RCA_GRAPH.stream(init_state, config=config):
                 pass
@@ -470,14 +478,38 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
     raw_rpm = _unpack(metric.get("rpm", f_out * 29.0))
     rpm = round(raw_rpm, 1)
 
-    raw_v_dc = _unpack(metric.get("v_dc", metric.get("bus_voltage", 312.0)))
+    raw_v_dc = _unpack(metric.get("v_dc", metric.get("bus_voltage", 182.0)))
     v_dc = round(raw_v_dc, 1)
 
     raw_current = _unpack(metric.get("current", 0.0))
     current = round(raw_current / 100.0 if raw_current > 100.0 else raw_current, 2)
 
-    raw_fault = _unpack(metric.get("fault_code", metric.get("fault", 0)))
-    fault_code = int(raw_fault)
+    # Check for trip code in fault_code, fault, error, d_trigger, or PLC D-variables
+    raw_fault = metric.get("fault_code")
+    if raw_fault is None:
+        raw_fault = metric.get("fault")
+    if raw_fault is None:
+        raw_fault = metric.get("error")
+    if raw_fault is None:
+        raw_fault = metric.get("d_trigger")
+    if raw_fault is None:
+        for k, v in metric.items():
+            if k.upper().startswith("D") and (len(k) <= 5 or "VAR" in k.upper()):
+                try:
+                    val = int(float(v[0] if isinstance(v, (list, tuple)) else v))
+                    if val in (2, 3, 6, 11) or val > 0:
+                        raw_fault = val
+                        break
+                except (ValueError, TypeError):
+                    pass
+    if raw_fault is None:
+        topic_name = str(metric.get("_mqtt_topic", "")).lower()
+        if "err02" in topic_name or "error02" in topic_name:
+            raw_fault = 2
+        elif "err06" in topic_name or "error06" in topic_name:
+            raw_fault = 6
+
+    fault_code = int(_unpack(raw_fault, 0) if raw_fault is not None else 0)
     status = "TRIPPED" if fault_code > 0 else "RUNNING"
     asset_id = str(metric.get("asset_id", "VFD_VM_01"))
 
@@ -555,37 +587,48 @@ def list_scenarios():
     _ensure_default_scenarios()
     scenarios = [
         {
-            "id": "fault",
-            "dataset_id": SCENARIOS_REGISTRY.get("fault", "ds_fault"),
-            "name": "Fault: Strainer Clogging & Cavitation Trip",
-            "asset_id": EQUIPMENT_ID,
-            "condition": "FAULT_TRIP",
-            "description": "Marine biofouling in STR-301A basket triggers severe suction pressure collapse, impeller cavitation, and thermal trip at 03:14 AM.",
-            "duration_sec": 3600,
-            "has_trip": True,
-            "badge": "CRITICAL",
-        },
-        {
-            "id": "normal",
-            "dataset_id": SCENARIOS_REGISTRY.get("normal", "ds_normal"),
-            "name": "Baseline: Normal Stable Operation",
-            "asset_id": EQUIPMENT_ID,
-            "condition": "HEALTHY",
-            "description": "60 minutes of nominal operation strictly within healthy OEM operational envelopes. Zero alarms.",
-            "duration_sec": 3600,
-            "has_trip": False,
-            "badge": "HEALTHY",
-        },
-        {
             "id": "live_stream",
             "dataset_id": SCENARIOS_REGISTRY.get("live_stream", "ds_live_stream"),
-            "name": "Wecon VFD Live Telemetry (Node-RED / InfluxDB)",
+            "name": "⚡ LIVE: Wecon VFD Telemetry (Physical HMI)",
             "asset_id": "VFD_VM_01",
             "condition": "LIVE_STREAM",
-            "description": "Continuous 1 Hz live streaming telemetry from Node-RED edge broker, InfluxDB, and Wecon VFD hardware.",
+            "description": "Continuous 1 Hz real-time telemetry from physical Wecon HMI (192.168.1.104) and VFD test bench via MQTT broker.",
             "duration_sec": 300,
             "has_trip": False,
             "badge": "LIVE_EDGE",
+        },
+        {
+            "id": "exp_err02",
+            "dataset_id": SCENARIOS_REGISTRY.get("exp_err02", "ds_exp_err02"),
+            "name": "Experiment 1: Forced Sudden Deceleration (Err02 On/Off Button)",
+            "asset_id": "VFD_VM_01",
+            "condition": "HARDWARE_FAULT_TRIP",
+            "description": "Operator actuates PLC On/Off stop button (D-variable trigger); instantaneous back-EMF current surge trips inverter on Err02.",
+            "duration_sec": 3600,
+            "has_trip": True,
+            "badge": "EXPERIMENT_1",
+        },
+        {
+            "id": "exp_err06",
+            "dataset_id": SCENARIOS_REGISTRY.get("exp_err06", "ds_exp_err06"),
+            "name": "Experiment 2: Overfrequency Excursion > 40 Hz (Vdc > 195V Err06)",
+            "asset_id": "VFD_VM_01",
+            "condition": "HARDWARE_FAULT_TRIP",
+            "description": "Output frequency setpoint raised past 40 Hz ceiling toward 50 Hz; DC bus voltage crosses calibrated 195.0 V trip limit (~207V at 50Hz) without dynamic braking resistor.",
+            "duration_sec": 3600,
+            "has_trip": True,
+            "badge": "EXPERIMENT_2",
+        },
+        {
+            "id": "exp_nominal",
+            "dataset_id": SCENARIOS_REGISTRY.get("exp_nominal", "ds_exp_nominal"),
+            "name": "Baseline: 40 Hz Nominal Steady-State Run (182V DC)",
+            "asset_id": "VFD_VM_01",
+            "condition": "HEALTHY",
+            "description": "60 minutes continuous steady-state operation at 40.00 Hz, 182.0 V DC bus, 1.15 A current, 1199 RPM. Zero fault codes.",
+            "duration_sec": 3600,
+            "has_trip": False,
+            "badge": "NOMINAL",
         },
     ]
     if LATEST_HIL_INCIDENT.get("has_incident"):
@@ -614,19 +657,31 @@ def _resolve_ds(dataset_id: str) -> TelemetryDataset:
         SCENARIOS_REGISTRY["live_stream"] = "ds_live_stream"
         return ds
 
+    if dataset_id in ("exp_err02", "ds_exp_err02"):
+        ds = generate_vfd_dataset(scenario="exp_err02")
+        TelemetryStore.register(ds, "ds_exp_err02")
+        SCENARIOS_REGISTRY["exp_err02"] = "ds_exp_err02"
+        return ds
+
+    if dataset_id in ("exp_err06", "ds_exp_err06", "fault", "ds_fault"):
+        ds = generate_vfd_dataset(scenario="exp_err06")
+        TelemetryStore.register(ds, "ds_exp_err06")
+        SCENARIOS_REGISTRY["exp_err06"] = "ds_exp_err06"
+        return ds
+
+    if dataset_id in ("exp_nominal", "ds_exp_nominal", "normal", "ds_normal"):
+        ds = generate_vfd_dataset(scenario="exp_nominal")
+        TelemetryStore.register(ds, "ds_exp_nominal")
+        SCENARIOS_REGISTRY["exp_nominal"] = "ds_exp_nominal"
+        return ds
+
     actual_id = SCENARIOS_REGISTRY.get(dataset_id, dataset_id)
     try:
         return TelemetryStore.get(actual_id)
     except KeyError:
-        if dataset_id == "fault":
-            ds = generate_fault_scenario()
-            TelemetryStore.register(ds, "ds_fault")
-            return ds
-        elif dataset_id == "normal":
-            ds = generate_normal_scenario()
-            TelemetryStore.register(ds, "ds_normal")
-            return ds
-        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found in TelemetryStore.")
+        ds = generate_vfd_dataset(scenario="live_stream")
+        TelemetryStore.register(ds, actual_id)
+        return ds
 
 
 @api_app.get("/api/v1/telemetry/{dataset_id}")

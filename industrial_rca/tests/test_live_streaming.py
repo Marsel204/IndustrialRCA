@@ -44,7 +44,7 @@ def test_vfd_config_constants():
     assert "f_out" in VFD_OPERATIONAL_LIMITS
     assert "v_dc" in VFD_OPERATIONAL_LIMITS
     assert "current" in VFD_OPERATIONAL_LIMITS
-    assert VFD_OPERATIONAL_LIMITS["v_dc"]["trip_high"] == 700.0
+    assert VFD_OPERATIONAL_LIMITS["v_dc"]["trip_high"] == 195.0
     assert VFD_OPERATIONAL_LIMITS["current"]["trip_high"] == 2.50
 
 
@@ -87,7 +87,7 @@ def test_influx_tool_graceful_fallback():
     metric = tool.get_latest_metrics()
     assert metric["status"] == "RUNNING"
     assert 35.0 <= metric["f_out"] <= 45.0
-    assert 280.0 <= metric["v_dc"] <= 350.0
+    assert 170.0 <= metric["v_dc"] <= 210.0
     assert metric["fault_code"] == 0
     assert "timestamp" in metric
 
@@ -114,16 +114,18 @@ def test_generate_vfd_dataset_scenarios():
     assert len(ds_nom.df_1hz) == 60
     assert "PT-30101" in ds_nom.df_1hz.columns
 
-    # 2. Overfrequency
-    ds_over = generate_vfd_dataset(scenario="overfrequency", duration_sec=60)
-    assert ds_over.metadata["condition"] == "WARNING_OVERFREQUENCY"
+    # 2. Overfrequency / Decel Overvoltage (Err06)
+    ds_over = generate_vfd_dataset(scenario="exp_err06", duration_sec=60)
+    assert ds_over.metadata["condition"] == "HARDWARE_FAULT_TRIP"
+    assert ds_over.metadata["fault_code"] == 6
     assert ds_over.df_1hz["f_out"].max() > 42.0
+    assert ds_over.df_1hz["v_dc"].max() > 195.0
 
-    # 3. Decel Overvoltage (Err06)
+    # 3. Decel Overvoltage alias (Err06)
     ds_decel = generate_vfd_dataset(scenario="decel_overvoltage", duration_sec=60)
     assert ds_decel.metadata["condition"] == "HARDWARE_FAULT_TRIP"
     assert ds_decel.metadata["fault_code"] == 6
-    assert ds_decel.df_1hz["v_dc"].max() > 700.0
+    assert ds_decel.df_1hz["v_dc"].max() > 195.0
 
     # 4. Live Stream
     ds_live = generate_vfd_dataset(scenario="live_stream", duration_sec=60)
@@ -278,7 +280,7 @@ def test_vfd_decel_overvoltage_maintains_pump_baseline():
     ds = generate_vfd_dataset(scenario="decel_overvoltage", duration_sec=60)
     df = ds.df_1hz
     # Electrical tags trip
-    assert df["v_dc"].max() > 700.0
+    assert df["v_dc"].max() > 195.0
     assert ds.metadata["fault_code"] == 6
     # Pump tags remain strictly healthy baseline
     assert (df["PT-30101"] >= 2.0).all()

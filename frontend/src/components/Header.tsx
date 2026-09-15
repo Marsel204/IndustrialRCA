@@ -89,12 +89,10 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="hidden sm:flex items-center space-x-2 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-md text-xs">
             <span className={`w-2 h-2 rounded-full ${activeScenario?.id === 'live_stream' ? 'bg-emerald-500 animate-pulse' : 'bg-emerald-500'}`} />
             <span className="font-mono font-bold text-slate-800">
-              {activeScenario?.asset_id || 'P-301A'}
+              {activeScenario?.asset_id || 'VFD_VM_01'}
             </span>
             <span className="text-slate-500 text-[11px]">
-              {activeScenario?.asset_id === 'VFD_VM_01' || activeScenario?.id === 'live_stream'
-                ? 'WECON VM VFD Test Bench'
-                : 'HP Boiler Feed Pump'}
+              Wecon VM Series VFD & Motor Rig
             </span>
             <span className="text-[10px] font-mono text-slate-500 bg-white border border-slate-200 px-1 rounded">
               ISA-95 L2

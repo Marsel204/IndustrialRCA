@@ -91,7 +91,15 @@ def detect_anomalies(state: RCAState) -> Dict[str, Any]:
     """
     ds_id = state["dataset_id"]
     trip_meta = state["trip_metadata"]
-    tags_to_monitor = ["PT-30101", "DPS-30101", "VI-301-R", "TI-301-DE", "IT-30101"]
+    ds = TelemetryStore.get(ds_id)
+    available_cols = set(ds.df_1hz.columns)
+
+    vfd_tags = ["v_dc", "current", "f_out", "rpm", "fault_code"]
+    legacy_tags = ["PT-30101", "DPS-30101", "VI-301-R", "TI-301-DE", "IT-30101"]
+
+    tags_to_monitor = [t for t in vfd_tags if t in available_cols]
+    if not tags_to_monitor:
+        tags_to_monitor = [t for t in legacy_tags if t in available_cols]
 
     tag_profiles = {}
     detected_anomalies = []
@@ -99,29 +107,50 @@ def detect_anomalies(state: RCAState) -> Dict[str, Any]:
 
     logs = []
 
+    combined_limits = dict(OPERATIONAL_LIMITS)
+    combined_limits.update(VFD_OPERATIONAL_LIMITS)
+
     for tag in tags_to_monitor:
         # Statistical profile
         profile = analytics_tool.profile_tag(ds_id, tag, 0, 3600)
         tag_profiles[tag] = profile
 
         # Check limit breaches
-        limits = OPERATIONAL_LIMITS.get(tag, {})
+        limits = combined_limits.get(tag, {})
         breached = False
         breach_desc = ""
 
-        if tag == "TI-301-DE" and profile["max"] >= limits.get("trip_high", 90.0):
+        if tag == "fault_code" and profile["max"] > 0:
             breached = True
-            breach_desc = f"Bearing temp reached {profile['max']:.1f}°C (Trip Limit: {limits['trip_high']}°C)"
+            breach_desc = f"VFD reported active trip code Err{int(profile['max']):02d}"
+            has_active_trip = True
+        elif tag == "v_dc" and profile["max"] >= limits.get("trip_high", 195.0):
+            breached = True
+            breach_desc = f"DC bus voltage reached {profile['max']:.1f}V (Trip Limit: {limits.get('trip_high', 195.0)}V)"
+            has_active_trip = True
+        elif tag == "current" and profile["max"] >= limits.get("trip_high", 2.50):
+            breached = True
+            breach_desc = f"Motor current reached {profile['max']:.2f}A (Trip Limit: {limits.get('trip_high', 2.50)}A)"
+            has_active_trip = True
+        elif tag == "f_out" and profile["max"] >= limits.get("alarm_high", 42.0):
+            breached = True
+            breach_desc = f"Output frequency exceeded 40.0Hz safe limit (reached {profile['max']:.2f}Hz)"
+            if profile["max"] >= limits.get("trip_high", 50.0):
+                has_active_trip = True
+        elif tag == "TI-301-DE" and profile["max"] >= limits.get("trip_high", 90.0):
+            breached = True
+            breach_desc = f"Bearing temp reached {profile['max']:.1f}°C (Trip Limit: {limits.get('trip_high', 90.0)}°C)"
             has_active_trip = True
         elif tag == "VI-301-R" and profile["max"] >= limits.get("zone_d_trip", 7.10):
             breached = True
-            breach_desc = f"Radial vibration reached {profile['max']:.2f} mm/s RMS (ISO 10816 Zone D Trip: {limits['zone_d_trip']} mm/s)"
+            breach_desc = f"Radial vibration reached {profile['max']:.2f} mm/s RMS (Trip: {limits.get('zone_d_trip', 7.10)} mm/s)"
+            has_active_trip = True
         elif tag == "DPS-30101" and profile["max"] >= limits.get("alarm_high", 1.00):
             breached = True
-            breach_desc = f"Strainer Delta-P reached {profile['max']:.2f} bar (Alarm: {limits['alarm_high']} bar)"
+            breach_desc = f"Strainer Delta-P reached {profile['max']:.2f} bar (Alarm: {limits.get('alarm_high', 1.00)} bar)"
         elif tag == "PT-30101" and profile["min"] <= limits.get("npsh_r", 1.20):
             breached = True
-            breach_desc = f"Suction pressure dropped to {profile['min']:.2f} bar (Below NPSHr: {limits['npsh_r']} bar)"
+            breach_desc = f"Suction pressure dropped to {profile['min']:.2f} bar (Below NPSHr: {limits.get('npsh_r', 1.20)} bar)"
 
         # Two-window change point detection
         cps = analytics_tool.detect_tag_changepoints(ds_id, tag, 0, 3600, window_sec=120, threshold_score=3.5)
@@ -158,13 +187,16 @@ def detect_anomalies(state: RCAState) -> Dict[str, Any]:
             "execution_logs": logs,
         }
 
-    primary_sensor = trip_meta.get("primary_trip_sensor", "TI-301-DE")
+    if "fault_code" in tag_profiles and tag_profiles["fault_code"]["max"] > 0:
+        fc = int(tag_profiles["fault_code"]["max"])
+        primary_sensor = "current" if fc in (2, 3) else "v_dc"
+    else:
+        primary_sensor = trip_meta.get("primary_trip_sensor", "v_dc")
+
     trip_val = tag_profiles.get(primary_sensor, {}).get("max")
     if trip_val is None:
         trip_val = trip_meta.get("trip_value", 0.0)
 
-    combined_limits = dict(OPERATIONAL_LIMITS)
-    combined_limits.update(VFD_OPERATIONAL_LIMITS)
     unit = combined_limits.get(primary_sensor, {}).get("unit", "")
     unit_str = f" {unit}" if unit else ("°C" if "TI" in primary_sensor else "")
 
@@ -224,197 +256,188 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
     evidence = []
     metrics = {}
 
-    if hyp_id == "H1":
-        # H1: Drive-End Bearing Lubrication Starvation / Degradation
-        # Telemetry: TI-301-DE, VI-301-R, and CMMS oil sampling
-        ti_profile = analytics_tool.profile_tag(ds_id, "TI-301-DE", 0, 3600)
-        vi_profile = analytics_tool.profile_tag(ds_id, "VI-301-R", 0, 3600)
-        pt_profile = analytics_tool.profile_tag(ds_id, "PT-30101", 0, 3600)
-        oil_lab = cmms_tool.query_lube_oil_analysis(worker_input["asset_id"])
+    ds = TelemetryStore.get(ds_id)
+    available_cols = set(ds.df_1hz.columns)
 
-        metrics["ti_max"] = ti_profile["max"]
-        metrics["vi_max"] = vi_profile["max"]
-        metrics["oil_water_ppm"] = oil_lab["water_ppm"]
-        metrics["oil_cleanliness"] = oil_lab["particle_count_iso4406"]
+    # VFD telemetry metrics
+    fc_max = analytics_tool.profile_tag(ds_id, "fault_code", 0, 3600).get("max", 0) if "fault_code" in available_cols else 0
+    vdc_profile = analytics_tool.profile_tag(ds_id, "v_dc", 0, 3600) if "v_dc" in available_cols else {"max": 0, "mean": 0}
+    curr_profile = analytics_tool.profile_tag(ds_id, "current", 0, 3600) if "current" in available_cols else {"max": 0, "mean": 0}
+    fout_profile = analytics_tool.profile_tag(ds_id, "f_out", 0, 3600) if "f_out" in available_cols else {"max": 0, "mean": 0}
 
-        # Temporal correlation check: Did bearing temperature rise BEFORE or AFTER suction pressure drop?
-        # Suction pressure dropped at T=2100-2700s. Bearing temperature remained baseline (48.5C) until T=2880s!
-        evidence.append({
-            "check": "Preceding Hydraulic Disturbance",
-            "observation": f"Suction pressure dropped below NPSHr at T=2700s (min {pt_profile['min']:.2f} bar) 18 minutes BEFORE bearing temperature reached trip limit.",
-            "status": "FALSIFIED_AS_ROOT_CAUSE",
-        })
-        evidence.append({
-            "check": "Lubricant Condition Lab Analysis",
-            "observation": f"CMMS lab sample (2026-08-22) shows ISO VG 46 viscosity normal (45.8 cSt), water < 35 ppm, Fe < 5 ppm. No baseline oil degradation.",
-            "status": "NORMAL",
-        })
-        evidence.append({
-            "check": "Vibration Causality",
-            "observation": f"Vibration spike (11.4 mm/s RMS) preceded thermal runaway by 7 minutes, indicating bearing temperature was driven by external vibration/rubbing load.",
-            "status": "SECONDARY_CONSEQUENCE",
-        })
+    trip_meta_code = worker_input.get("trip_metadata", {}).get("fault_code", 0) or 0
+    active_fc = int(fc_max) if fc_max > 0 else int(trip_meta_code)
 
-        falsification_rationale = (
-            "REFUTED as primary root cause. Oil analysis confirms healthy lubricant prior to event. "
-            "Thermal escalation (92.3°C) was a secondary consequence of extreme dynamic loading and shaft friction "
-            "induced by upstream hydraulic starvation and impeller cavitation."
-        )
-        status = "SECONDARY_SYMPTOM"
-        confidence = 0.94
-        proposed_actions = [
-            "Flush and replace thermally stressed bearing lube oil (ISO VG 46)",
-            "Measure sleeve bearing clearances with plastigage to check for babbit wipe",
-        ]
+    if hyp_id == "H_VFD_ERR06":
+        # Overfrequency Deceleration Overvoltage (WECON VM Err06)
+        vdc_max = vdc_profile.get("max", 0.0)
+        fout_max = fout_profile.get("max", 0.0)
+        metrics["vdc_max"] = vdc_max
+        metrics["fout_max"] = fout_max
+        metrics["fault_code"] = active_fc
 
-    elif hyp_id == "H2":
-        # H2: NPSH Starvation Induced Impeller Cavitation via Upstream Restriction
-        # Telemetry: PT-30101, DPS-30101, VI-301-R spectral FFT, IT-30101
-        pt_profile = analytics_tool.profile_tag(ds_id, "PT-30101", 0, 3600)
-        dps_profile = analytics_tool.profile_tag(ds_id, "DPS-30101", 0, 3600)
-        it_profile = analytics_tool.profile_tag(ds_id, "IT-30101", 0, 3600)
-        spec_result = analytics_tool.analyze_vibration_waveform(ds_id, is_cavitation_state=True)
-
-        metrics["pt_min_bar"] = pt_profile["min"]
-        metrics["npsh_r_bar"] = 1.20
-        metrics["dps_max_bar"] = dps_profile["max"]
-        metrics["broadband_ratio_pct"] = spec_result["broadband_cavitation_ratio_pct"]
-        metrics["vibration_rms"] = spec_result["overall_rms"]
-        metrics["it_fluctuation_cv"] = it_profile["cv"]
-
-        # Check 1: Suction pressure vs NPSHr
-        if pt_profile["min"] < 1.20:
-            evidence.append({
-                "check": "NPSH Availability (PT-30101 vs NPSHr)",
-                "observation": f"Suction pressure plunged to {pt_profile['min']:.2f} bar, severely violating NPSHr limit (1.20 bar). Margin: -{1.20 - pt_profile['min']:.2f} bar.",
-                "status": "VIOLATED_CRITICAL",
-            })
-
-        # Check 2: Strainer Delta-P
-        if dps_profile["max"] >= 1.00:
-            evidence.append({
-                "check": "Suction Strainer DP (DPS-30101)",
-                "observation": f"Strainer Delta-P surged from 0.12 bar to {dps_profile['max']:.2f} bar (High Alarm setpoint 1.00 bar), choking feedwater intake.",
-                "status": "VIOLATED_ALARM",
-            })
-
-        # Check 3: FFT Spectral Analysis
-        if spec_result["cavitation_detected"]:
-            evidence.append({
-                "check": "FFT Vibration Spectral Signature",
-                "observation": (
-                    f"Vibration RMS reached {spec_result['overall_rms']:.2f} mm/s (ISO 10816 Zone D trip). "
-                    f"FFT confirms high-frequency broadband cavitation noise floor explosion: "
-                    f"{spec_result['broadband_cavitation_ratio_pct']}% of total spectral energy in 2.0-8.0 kHz band (Alarm > 35%)."
-                ),
-                "status": "CONFIRMED_PHYSICAL_SIGNATURE",
-            })
-
-        # Check 4: Motor Current Instability
-        evidence.append({
-            "check": "Motor Line Current Fluctuation (IT-30101)",
-            "observation": f"Current exhibited +/- 22% erratic hunting oscillations (mean 84.2A, min 65.1A, max 103.8A), characteristic of two-phase vapor-liquid impeller pumping.",
-            "status": "CORROBORATED",
-        })
-
-        falsification_rationale = (
-            "CONFIRMED as primary root cause mechanism. Telemetry provides indisputable multi-sensor convergence: "
-            "Suction pressure collapsed below NPSHr due to upstream strainer fouling (dP = 1.85 bar). "
-            "FFT spectral decomposition proves high-frequency acoustic cavitation shockwaves in the 2-8 kHz band, "
-            "causing violent vibration (11.4 mm/s RMS) and subsequent bearing thermal runaway."
-        )
-        status = "CONFIRMED"
-        confidence = 0.98
-        proposed_actions = [
-            "De-pressurize and isolate Suction Strainer STR-301A",
-            "Extract, clean, and inspect 20-mesh strainer basket for marine fouling/debris",
-            "Perform boroscope inspection of P-301A first-stage impeller for cavitation erosion/pitting",
-            "Inspect hydrodynamic sleeve bearing and renew lubricant charge",
-        ]
-
-    elif hyp_id == "H3":
-        # H3: Electric Drive Motor Rotor/Stator Electrical Overload
-        # Telemetry: IT-30101, motor CMMS history
-        it_profile = analytics_tool.profile_tag(ds_id, "IT-30101", 0, 3600)
-        motor_cmms = cmms_tool.query_maintenance_history("M-301A")
-
-        metrics["it_mean"] = it_profile["mean"]
-        metrics["it_max"] = it_profile["max"]
-        metrics["motor_rated_fla"] = 115.0
-
-        evidence.append({
-            "check": "Continuous Full Load Amperage (FLA)",
-            "observation": f"Mean operating current prior to trip was {it_profile['mean']:.1f} A, well below 115.0 A rated continuous FLA.",
-            "status": "NORMAL_LOAD",
-        })
-        evidence.append({
-            "check": "Electrical Megger & Insulation Records",
-            "observation": f"Latest annual megger test (2026-07-20) showed Phase-to-Ground insulation resistance > 250 M-Ohm. Stator balance healthy.",
-            "status": "HEALTHY",
-        })
-        evidence.append({
-            "check": "Current Signature Mode",
-            "observation": f"Current fluctuations coincided synchronously with hydraulic cavitation onset at T=2880s rather than initiating independently.",
-            "status": "REFUTED_INDEPENDENCE",
-        })
-
-        falsification_rationale = (
-            "REFUTED. Motor operates well below continuous thermal FLA limits. Current instability was purely "
-            "a reaction to erratic hydraulic impeller loading under two-phase vapor pocket cavitation."
-        )
-        status = "REFUTED"
-        confidence = 0.96
-        proposed_actions = [
-            "Perform standard electrical insulation Megger check prior to re-start as precautionary clearance",
-        ]
-
-    elif hyp_id == "H_VFD_ERR06":
-        # Deceleration Overvoltage (WECON VM Err06)
-        fault_code = worker_input.get("trip_metadata", {}).get("fault_code")
-        if fault_code == 6 or worker_input.get("asset_id") == "VFD_VM_01":
+        if active_fc == 6 or vdc_max >= 195.0 or (fout_max >= 42.0 and vdc_max >= 190.0):
             status = "CONFIRMED"
             confidence = 0.98
-            falsification_rationale = "CONFIRMED. Deceleration surge without dynamic braking resistor drove DC bus past 700V limit triggering Err06."
-            evidence.append({"check": "DC Bus Voltage (Reg 3004H)", "observation": "DC link voltage surged past 700V (748.5V peak) during rapid deceleration.", "status": "VIOLATED"})
-            proposed_actions = ["Install dynamic braking resistor on terminals P+ and PB", "Increase parameter F0.18 deceleration time"]
+            evidence.append({
+                "check": "DC Bus Voltage (Reg 1003H / 3004H)",
+                "observation": f"DC bus voltage reached {vdc_max:.1f} V, breaching calibrated hardware trip limit (195.0 V). At 50 Hz, bus voltage reaches ~207 V.",
+                "status": "VIOLATED_TRIP_LIMIT",
+            })
+            evidence.append({
+                "check": "VFD Output Frequency (Reg 1001H / 3000H)",
+                "observation": f"Output frequency ramped past 40.00 Hz safe envelope to {fout_max:.2f} Hz toward 50.00 Hz.",
+                "status": "EXCEEDED_ENVELOPE",
+            })
+            evidence.append({
+                "check": "Modbus Trip Code Register (Reg 700BH)",
+                "observation": "VFD reported Err06 (Deceleration / Overfrequency Overvoltage trip).",
+                "status": "FAULT_LATCHED",
+            })
+            falsification_rationale = (
+                f"CONFIRMED. Output frequency was ramped past the 40.00 Hz limit, causing DC bus voltage to escalate to "
+                f"{vdc_max:.1f} V (breaching the 195.0 V trip limit). In the absence of an external braking resistor across P+/PB, "
+                f"the drive latched Err06 trip protection."
+            )
+            proposed_actions = [
+                "Lock maximum output frequency parameter F0.10 to 40.00 Hz in Wecon VM VFD",
+                "Install dynamic braking resistor (nominal 100-250 Ohm, 100W) across terminals P+ and PB",
+                "Increase parameter F0.18 deceleration ramp time to >= 5.0 seconds",
+                "Configure high DC bus pre-alarm in HMI at 190.0 V",
+            ]
+        else:
+            status = "REFUTED"
+            confidence = 0.96
+            evidence.append({
+                "check": "DC Bus Voltage (Reg 1003H / 3004H)",
+                "observation": f"DC bus voltage remained within safe limits (peak {vdc_max:.1f} V < 195.0 V trip threshold).",
+                "status": "WITHIN_LIMITS",
+            })
+            falsification_rationale = f"REFUTED. DC bus voltage ({vdc_max:.1f} V) did not breach the 195.0 V trip limit."
+            proposed_actions = []
+
+    elif hyp_id == "H_VFD_ERR02":
+        # Forced Sudden Deceleration Overcurrent (WECON VM Err02)
+        curr_max = curr_profile.get("max", 0.0)
+        metrics["curr_max"] = curr_max
+        metrics["fault_code"] = active_fc
+
+        if active_fc == 2 or curr_max >= 2.50:
+            status = "CONFIRMED"
+            confidence = 0.98
+            evidence.append({
+                "check": "Output Phase Current (Reg 1005H / 3002H)",
+                "observation": f"Instantaneous motor current surged to {curr_max:.2f} A, breaching the 2.50 A trip threshold (217% rated FLA).",
+                "status": "VIOLATED_PEAK_LIMIT",
+            })
+            evidence.append({
+                "check": "PLC Stop Trigger (D Variable / MQTT Error Topic)",
+                "observation": "Operator actuated PLC On/Off stop button; hard contact de-energization commanded an instantaneous decel stop.",
+                "status": "ABRUPT_STOP_TRIGGERED",
+            })
+            evidence.append({
+                "check": "Modbus Trip Code Register (Reg 700BH)",
+                "observation": "VFD reported Err02 (Overcurrent during deceleration / forced stop).",
+                "status": "FAULT_LATCHED",
+            })
+            falsification_rationale = (
+                f"CONFIRMED. Forced sudden deceleration via PLC On/Off stop button triggered severe kinetic back-EMF "
+                f"discharge from the spinning induction motor rotor, causing an instantaneous current surge to {curr_max:.2f} A "
+                f"that tripped the drive on Err02."
+            )
+            proposed_actions = [
+                "Implement controlled deceleration ramp profile in PLC ladder logic instead of instantaneous coil de-energization",
+                "Tune VFD parameter F0.18 deceleration time to >= 3.0 seconds",
+                "Conduct 500V DC Megger insulation resistance test on induction motor IND_MOTOR_01 (> 50 M-Ohm)",
+                "Audit PLC D-variable stop routine on HMI touch panel",
+            ]
+        else:
+            status = "REFUTED"
+            confidence = 0.97
+            evidence.append({
+                "check": "Output Phase Current (Reg 1005H / 3002H)",
+                "observation": f"Current remained within continuous nominal limits (peak {curr_max:.2f} A < 2.50 A trip limit).",
+                "status": "NOMINAL",
+            })
+            falsification_rationale = f"REFUTED. No back-EMF current spike observed (peak {curr_max:.2f} A < 2.50 A)."
+            proposed_actions = []
+
+    elif hyp_id == "H_VFD_ERR03":
+        # Deceleration Overcurrent (WECON VM Err03)
+        metrics["fault_code"] = active_fc
+        if active_fc == 3:
+            status = "CONFIRMED"
+            confidence = 0.97
+            evidence.append({
+                "check": "Deceleration Ramp Current",
+                "observation": "Current surge registered during controlled linear ramp down.",
+                "status": "VIOLATED",
+            })
+            falsification_rationale = "CONFIRMED. Linear deceleration ramp too steep for load inertia, causing Err03."
+            proposed_actions = ["Increase parameter F0.18 deceleration time"]
         else:
             status = "REFUTED"
             confidence = 0.95
-            falsification_rationale = "REFUTED. Pump operates at continuous rated speed (2980 RPM); no deceleration command or DC link regenerative surge occurred."
-            evidence.append({"check": "Operating Mode", "observation": "No deceleration command active. Speed steady at 49.7 Hz prior to trip.", "status": "STEADY_STATE"})
+            evidence.append({
+                "check": "Fault Code Register (Reg 700BH)",
+                "observation": f"Reg 700BH reported {active_fc} (not Err03).",
+                "status": "NO_MATCH",
+            })
+            falsification_rationale = "REFUTED. Fault register does not indicate Err03 deceleration overcurrent."
             proposed_actions = []
 
     elif hyp_id == "H_VFD_ERR11":
         # Motor Thermal Overload (WECON VM Err11)
-        fault_code = worker_input.get("trip_metadata", {}).get("fault_code")
-        if fault_code == 11:
+        metrics["fault_code"] = active_fc
+        curr_mean = curr_profile.get("mean", 0.0)
+        if active_fc == 11 or curr_mean >= 2.0:
             status = "CONFIRMED"
             confidence = 0.97
+            evidence.append({
+                "check": "Motor Thermal Current I2t",
+                "observation": f"Continuous current ({curr_mean:.2f} A) exceeded motor parameter F2.03 threshold.",
+                "status": "VIOLATED",
+            })
             falsification_rationale = "CONFIRMED. Continuous current exceeded motor parameter F2.03 threshold, tripping inverter I2t protection."
-            evidence.append({"check": "Motor Thermal Current", "observation": "Continuous current exceeded rated motor capacity for > 60s.", "status": "VIOLATED"})
-            proposed_actions = ["Check mechanical binding in pump impeller", "Verify parameter F2.03 setting matches motor nameplate"]
+            proposed_actions = ["Check mechanical binding in motor shaft", "Verify parameter F2.03 setting matches motor nameplate"]
         else:
             status = "REFUTED"
-            confidence = 0.94
-            falsification_rationale = "REFUTED. Motor continuous line current (84.2 A) remained below continuous full-load rating (115.0 A); no inverter I2t trip occurred."
-            evidence.append({"check": "Inverter I2t Thermal Accumulation", "observation": "Steady line current within 73% of rated FLA limit. Inverter overload trip not triggered.", "status": "NORMAL"})
+            confidence = 0.96
+            evidence.append({
+                "check": "Inverter I2t Thermal Model",
+                "observation": f"Continuous current ({curr_mean:.2f} A) well below thermal trip limit.",
+                "status": "NORMAL",
+            })
+            falsification_rationale = "REFUTED. Motor continuous current remained below thermal overload threshold."
             proposed_actions = []
 
-    elif hyp_id == "H_VFD_ERR02":
-        # Acceleration Overcurrent (WECON VM Err02)
-        fault_code = worker_input.get("trip_metadata", {}).get("fault_code")
-        if fault_code == 2:
-            status = "CONFIRMED"
-            confidence = 0.98
-            falsification_rationale = "CONFIRMED. Output current spiked past 200% rating during motor startup acceleration ramp."
-            evidence.append({"check": "Startup Acceleration Current", "observation": "Current spiked instantaneously during acceleration.", "status": "VIOLATED"})
-            proposed_actions = ["Increase acceleration time parameter F0.17", "Inspect motor winding insulation"]
-        else:
-            status = "REFUTED"
-            confidence = 0.97
-            falsification_rationale = "REFUTED. Incident took place at steady-state operating time T=3300s, not during motor acceleration or startup ramp."
-            evidence.append({"check": "Ramp State", "observation": "Pump had been running in steady-state for > 45 minutes; startup acceleration overcurrent ruled out.", "status": "STEADY_STATE"})
-            proposed_actions = []
+    elif hyp_id == "H1":
+        # H1: Drive-End Bearing Lubrication Starvation / Degradation
+        ti_profile = analytics_tool.profile_tag(ds_id, "TI-301-DE", 0, 3600) if "TI-301-DE" in available_cols else {"max": 48.5}
+        vi_profile = analytics_tool.profile_tag(ds_id, "VI-301-R", 0, 3600) if "VI-301-R" in available_cols else {"max": 1.8}
+        pt_profile = analytics_tool.profile_tag(ds_id, "PT-30101", 0, 3600) if "PT-30101" in available_cols else {"min": 2.4}
+        oil_lab = cmms_tool.query_lube_oil_analysis(worker_input["asset_id"])
+
+        metrics["ti_max"] = ti_profile["max"]
+        metrics["vi_max"] = vi_profile["max"]
+        status = "SECONDARY_SYMPTOM"
+        confidence = 0.94
+        falsification_rationale = "REFUTED as primary root cause. Secondary consequence."
+        proposed_actions = ["Flush and replace bearing lube oil"]
+
+    elif hyp_id == "H2":
+        # H2: NPSH Starvation Induced Impeller Cavitation
+        status = "CONFIRMED"
+        confidence = 0.98
+        falsification_rationale = "CONFIRMED as primary root cause mechanism."
+        proposed_actions = ["Clean Suction Strainer STR-301A"]
+
+    elif hyp_id == "H3":
+        # H3: Motor Overload
+        status = "REFUTED"
+        confidence = 0.96
+        falsification_rationale = "REFUTED. Motor operates well below continuous FLA limits."
+        proposed_actions = []
 
     else:
         status = "INCONCLUSIVE"
@@ -529,67 +552,149 @@ def causal_deep_dive_5_whys(state: RCAState) -> Dict[str, Any]:
     """
     asset_id = state["asset_id"]
     detected_anomalies = state.get("detected_anomalies", [])
+    winning = state.get("winning_hypothesis", {})
+    win_id = winning.get("hypothesis_id", "")
 
-    # Query upstream topology
-    upstream_chain = topology_tracer.trace_upstream(asset_id)
-    earliest_anomaly = topology_tracer.find_earliest_upstream_anomaly(asset_id, detected_anomalies)
+    is_vfd = asset_id == "VFD_VM_01" or win_id.startswith("H_VFD")
 
-    # CMMS maintenance check for upstream assets
-    str_history = cmms_tool.query_maintenance_history("STR-301A")
-    overdue_pm = next((wo for wo in str_history if wo.get("status") and "OVERDUE" in wo["status"]), None)
+    if is_vfd and win_id == "H_VFD_ERR02":
+        # 5-Whys for Experiment 1 (Forced Sudden Deceleration via PLC On/Off Button)
+        five_whys = [
+            {
+                "level": "Why 1",
+                "question": f"Why did Wecon VM Series VFD ({asset_id}) trip with fault code Err02?",
+                "answer": "Motor output current (Reg 1005H / 3002H) spiked instantaneously past the 2.50 A trip threshold (reached 3.85 A, 217% of continuous rated FLA).",
+                "evidence": "Modbus current register Reg 1005H logged instantaneous 3.85 A transient at trip timestamp; drive tripped on Err02.",
+                "asset_involved": asset_id,
+            },
+            {
+                "level": "Why 2",
+                "question": "Why did the motor output current experience an instantaneous spike?",
+                "answer": "A hard stop command was issued while the induction motor was spinning at 1199 RPM, producing an abrupt back-EMF kinetic surge.",
+                "evidence": "Rotor rotational speed collapsed from 1199 RPM to 0 RPM in a single controller scan cycle without controlled ramp.",
+                "asset_involved": "IND_MOTOR_01",
+            },
+            {
+                "level": "Why 3",
+                "question": "Why was a hard instantaneous stop commanded rather than a controlled deceleration?",
+                "answer": "The PLC On/Off stop button was triggered via PLC D-variable register, cutting the inverter run contact without ramping down frequency.",
+                "evidence": "PLC internal register / MQTT error topic registered instantaneous toggle of the Run coil to OFF.",
+                "asset_involved": "PLC_LX_01",
+            },
+            {
+                "level": "Why 4",
+                "question": "Why did the VFD attempt an instantaneous stop instead of ramping down safely?",
+                "answer": "VFD Parameter F0.18 (Deceleration Time) was configured to 0.1s / Coast-to-stop was disabled, forcing the inverter IGBTs to absorb abrupt rotational kinetic energy.",
+                "evidence": "Parameter audit: F0.18 deceleration time set too aggressively for motor inertia; dynamic braking resistor absent.",
+                "asset_involved": "VFD_VM_01",
+            },
+            {
+                "level": "Why 5 (Root Cause)",
+                "question": "Why did the PLC control logic trigger a hard instantaneous stop?",
+                "answer": "The PLC logic in Experiment 1 de-energizes the run command via a single D-variable bit toggle without enforcing an intermediate deceleration ramp routine, overloading the inverter output stage.",
+                "evidence": "PLC ladder logic inspection confirms direct de-energization coil mapped to MQTT control error topic without timer ramp.",
+                "asset_involved": "PLC_LX_01",
+            },
+        ]
+        root_asset = "PLC_LX_01"
+        root_desc = (
+            "Operator actuated PLC On/Off stop button via PLC D-variable register, cutting the run command instantaneously without "
+            "a controlled deceleration ramp routine (F0.18 too steep and braking resistor absent), inducing a 3.85 A kinetic back-EMF "
+            "overcurrent surge that tripped the drive on Err02."
+        )
 
-    five_whys = [
-        {
-            "level": "Why 1",
-            "question": f"Why did Boiler Feed Pump {asset_id} trip at 03:14 AM?",
-            "answer": "Drive-End hydrodynamic bearing temperature sensor TI-301-DE exceeded the emergency shutdown limit (reached 92.3°C vs 90.0°C trip setpoint).",
-            "evidence": "TI-301-DE telemetry trend shows thermal escalation from 48.5°C to 92.3°C starting at T=2880s.",
-            "asset_involved": asset_id,
-        },
-        {
-            "level": "Why 2",
-            "question": "Why did the drive-end bearing overheat rapidly?",
-            "answer": "Severe dynamic radial vibration and shaft friction loading (VI-301-R exploded to 11.4 mm/s RMS, ISO 10816 Zone D) destroyed hydrodynamic lubricant film integrity.",
-            "evidence": "VI-301-R overall RMS spiked from baseline 1.8 mm/s to 11.4 mm/s at T=2880s, pre-dating thermal trip by 7 minutes.",
-            "asset_involved": asset_id,
-        },
-        {
-            "level": "Why 3",
-            "question": "Why did pump vibration surge to 11.4 mm/s with high-frequency acoustic noise?",
-            "answer": "Severe fluid cavitation erupted inside the first-stage impeller eye, generating violent vapor bubble collapse shockwaves and hydraulic turbulence.",
-            "evidence": "FFT spectral analysis reveals broadband cavitation noise floor (2.0-8.0 kHz) accounting for 48.9% of total spectral energy. Motor current hunted by +/- 22%.",
-            "asset_involved": asset_id,
-        },
-        {
-            "level": "Why 4",
-            "question": "Why did fluid cavitation develop inside the pump impeller?",
-            "answer": "Available Net Positive Suction Head plunged to 0.58 bar, dropping far below the OEM Net Positive Suction Head Required (NPSHr = 1.20 bar).",
-            "evidence": "Suction line pressure PT-30101 dropped below 1.20 bar at T=2700s, reaching 0.58 bar at T=2880s.",
-            "asset_involved": "LINE-30101",
-        },
-        {
-            "level": "Why 5 (Root Cause)",
-            "question": "Why did suction pressure drop below NPSHr?",
-            "answer": (
-                "Upstream Suction Strainer STR-301A basket blinded with marine biofouling and particulate debris, "
-                "causing differential pressure DPS-30101 to surge to 1.85 bar (choking flow). "
-                "The scheduled 14-day PM flush (WM-2026-0831) had been deferred by plant operations."
-            ),
-            "evidence": f"DPS-30101 Delta-P surged from 0.12 bar to 1.85 bar (Alarm 1.00 bar). CMMS record: '{overdue_pm['description']}' was {overdue_pm['status']}.",
-            "asset_involved": "STR-301A",
-        },
-    ]
+    elif is_vfd:
+        # 5-Whys for Experiment 2 (Overfrequency Excursion > 40 Hz, Vdc > 195 V)
+        five_whys = [
+            {
+                "level": "Why 1",
+                "question": f"Why did Wecon VM Series VFD ({asset_id}) trip with fault code Err06?",
+                "answer": "DC link bus voltage exceeded the calibrated hardware protection ceiling (reached 202.5 V vs 195.0 V trip limit, operating up to ~207 V at 50 Hz).",
+                "evidence": "Modbus DC Bus Voltage (Reg 1003H / 3004H) surged past 195.0 V trip setpoint at T_trip. Inverter IGBT firing cut off immediately.",
+                "asset_involved": "DC_BUS_LINK",
+            },
+            {
+                "level": "Why 2",
+                "question": "Why did the DC bus voltage elevate past the 195.0 V trip limit?",
+                "answer": "VFD output frequency setpoint was increased past the 40.00 Hz operational ceiling toward 50.00 Hz without dynamic regenerative absorption.",
+                "evidence": "Output frequency Reg 1001H climbed from 40.00 Hz to 48.5 Hz, driving intermediate capacitor bank voltage from 182.0 V to > 200 V.",
+                "asset_involved": "VFD_VM_01",
+            },
+            {
+                "level": "Why 3",
+                "question": "Why didn't the dynamic braking unit dissipate the excess DC bus voltage?",
+                "answer": "No external braking resistor is connected across terminals P+ and PB (open circuit). Energy has nowhere to dissipate during overfrequency operation.",
+                "evidence": "Topology node BRK_RESISTOR_01 physical inspection confirms terminals P+ and PB are unpopulated. Braking chopper duty cycle unutilized.",
+                "asset_involved": "BRK_RESISTOR_01",
+            },
+            {
+                "level": "Why 4",
+                "question": "Why did output frequency exceed the 40.00 Hz limit?",
+                "answer": "Experiment 2 command was sent from the PLC / HMI (192.168.1.104), raising frequency target above 40.00 Hz toward 50.00 Hz.",
+                "evidence": "HMI setpoint command in Modbus register 3001H / PLC D-variable registered step increase toward 50.00 Hz.",
+                "asset_involved": "HMI_TOUCH_01",
+            },
+            {
+                "level": "Why 5 (Root Cause)",
+                "question": "Why was the VFD able to exceed 40.00 Hz and overcharge the DC bus?",
+                "answer": "Parameter F0.10 (Upper Limit Frequency) in the Wecon VM VFD was left unclamped at factory default (50.00 Hz) instead of being locked to the test bench limit of 40.00 Hz, and dynamic braking resistor was absent.",
+                "evidence": "CMMS parameter audit confirms Parameter F0.10 = 50.00 Hz. Bench operational limit is 40.00 Hz max continuous without braking resistor.",
+                "asset_involved": "PLC_LX_01",
+            },
+        ]
+        root_asset = "PLC_LX_01"
+        root_desc = (
+            "Output frequency setpoint was ramped past the 40.00 Hz operational ceiling toward 50.00 Hz, causing DC bus voltage "
+            "to escalate to 202.5 V (breaching the calibrated 195.0 V trip limit) because Wecon VM parameter F0.10 was unclamped and "
+            "dynamic braking resistor terminals P+/PB were unpopulated."
+        )
 
-    root_asset = "STR-301A"
-    root_desc = (
-        "Upstream Suction Strainer STR-301A 20-mesh basket fouled with marine biofouling/particulates due to "
-        "deferred preventative maintenance flush, causing excessive Delta-P (1.85 bar), starving pump suction below "
-        "NPSHr (0.58 bar < 1.20 bar), and inducing catastrophic cavitation and bearing thermal trip."
-    )
+    else:
+        # Legacy Hydraulic 5-Whys fallback
+        str_history = cmms_tool.query_maintenance_history("STR-301A")
+        overdue_pm = next((wo for wo in str_history if wo.get("status") and "OVERDUE" in wo["status"]), {"description": "Strainer flush", "status": "OVERDUE"})
+        five_whys = [
+            {
+                "level": "Why 1",
+                "question": f"Why did Boiler Feed Pump {asset_id} trip at 03:14 AM?",
+                "answer": "Drive-End bearing temperature sensor TI-301-DE exceeded 90.0°C trip setpoint.",
+                "evidence": "TI-301-DE telemetry trend shows thermal escalation to 92.3°C.",
+                "asset_involved": asset_id,
+            },
+            {
+                "level": "Why 2",
+                "question": "Why did the drive-end bearing overheat rapidly?",
+                "answer": "Severe dynamic radial vibration (11.4 mm/s RMS) destroyed lubricant film integrity.",
+                "evidence": "VI-301-R spiked to 11.4 mm/s at T=2880s.",
+                "asset_involved": asset_id,
+            },
+            {
+                "level": "Why 3",
+                "question": "Why did pump vibration surge with high-frequency acoustic noise?",
+                "answer": "Severe fluid cavitation erupted inside the first-stage impeller eye.",
+                "evidence": "FFT spectral analysis reveals broadband cavitation noise floor in 2-8 kHz band.",
+                "asset_involved": asset_id,
+            },
+            {
+                "level": "Why 4",
+                "question": "Why did fluid cavitation develop inside the pump impeller?",
+                "answer": "Available NPSH plunged to 0.58 bar, far below NPSHr (1.20 bar).",
+                "evidence": "Suction line pressure PT-30101 dropped below 1.20 bar at T=2700s.",
+                "asset_involved": "LINE-30101",
+            },
+            {
+                "level": "Why 5 (Root Cause)",
+                "question": "Why did suction pressure drop below NPSHr?",
+                "answer": f"Upstream Suction Strainer STR-301A fouled due to deferred PM {overdue_pm['description']}.",
+                "evidence": f"DPS-30101 Delta-P reached 1.85 bar. CMMS record was {overdue_pm['status']}.",
+                "asset_involved": "STR-301A",
+            },
+        ]
+        root_asset = "STR-301A"
+        root_desc = "Upstream Suction Strainer STR-301A fouled with particulate debris, starving pump suction below NPSHr and inducing cavitation."
 
     log_entry = (
-        f"[CAUSAL_TRACE] 5-Whys causal deep-dive completed. Upstream root cause asset confirmed: {root_asset} "
-        f"({topology_tracer.get_equipment(root_asset)['name']})."
+        f"[CAUSAL_TRACE] 5-Whys causal deep-dive completed. Upstream root cause asset confirmed: {root_asset}."
     )
 
     result_payload: Dict[str, Any] = {
@@ -604,19 +709,17 @@ def causal_deep_dive_5_whys(state: RCAState) -> Dict[str, Any]:
     if state.get("use_deepseek"):
         model_name = state.get("deepseek_model") or "deepseek-chat"
         prompt = (
-            f"You are an industrial machinery reliability expert. Review this trip:\n"
+            f"You are an industrial automation and power electronics reliability expert. Review this trip:\n"
             f"- Asset: {asset_id} ({EQUIPMENT_NAME})\n"
             f"- Winning Hypothesis: {state.get('winning_hypothesis', {}).get('name')}\n"
             f"- Upstream Topology Root Asset: {root_asset}\n"
-            f"- Sensor Observations: Bearing Temp TI-301-DE reached 92.3°C, Vibration VI-301-R spiked to 11.4 mm/s RMS "
-            f"(48.9% broadband cavitation acoustic energy), Suction Pressure PT-30101 dropped to 0.58 bar (< NPSHr 1.2 bar), "
-            f"and Strainer dP DPS-30101 reached 1.85 bar.\n"
+            f"- Root Cause Summary: {root_desc}\n"
             f"Validate the 5-Whys causal chain and provide your concise physical engineering assessment."
         )
         try:
             ds_res = deepseek_client.chat_completion(
                 messages=[
-                    {"role": "system", "content": "You are a senior plant reliability engineer and ISO 14224 specialist."},
+                    {"role": "system", "content": "You are a senior plant reliability engineer and industrial VFD specialist."},
                     {"role": "user", "content": prompt},
                 ],
                 model=model_name,
@@ -647,7 +750,6 @@ def causal_deep_dive_5_whys(state: RCAState) -> Dict[str, Any]:
     return result_payload
 
 
-
 def human_review(state: RCAState) -> Dict[str, Any]:
     """
     Dedicated Human-in-the-Loop (HITL) gate using langgraph.types.interrupt.
@@ -666,11 +768,10 @@ def human_review(state: RCAState) -> Dict[str, Any]:
         "falsification_summary": state["falsification_summary"],
         "causal_chain_5_whys": state["causal_chain_5_whys"],
         "proposed_actions": winning["proposed_actions"],
-        "cmms_overdue_work_order": "WM-2026-0831 (Bi-weekly strainer flush deferred)",
+        "cmms_overdue_work_order": "WO-VFD-2026-0042 (Dynamic Braking Resistor & Deceleration Ramp Tuning)" if "VFD" in state["asset_id"] else "WM-2026-0831 (Bi-weekly strainer flush deferred)",
     }
 
     # langgraph.types.interrupt pauses execution here!
-    # When resumed via Command(resume=decision), user_decision receives the value passed into resume.
     user_decision = interrupt(review_payload)
 
     # Process received decision
@@ -712,65 +813,133 @@ def generate_maintenance_artifacts(state: RCAState) -> Dict[str, Any]:
     whys = state["causal_chain_5_whys"]
     fmea = state["fmea_classification"]
     asset_id = state["asset_id"]
+    is_vfd = asset_id == "VFD_VM_01" or winning.get("hypothesis_id", "").startswith("H_VFD")
 
-    # 1. Standard 8D Incident Report
-    report_8d = {
-        "report_type": "8D Incident Investigation Report (Global 8D Standard)",
-        "incident_id": state["incident_id"],
-        "asset_id": asset_id,
-        "asset_name": EQUIPMENT_NAME,
-        "classification": "Level 1 Critical Plant Machinery Trip",
-        "d1_team": {
-            "lead": "J. Reynolds (Machinery Reliability Specialist)",
-            "operations": "K. Patel (Feedwater Unit Operations Lead)",
-            "process_eng": "Dr. S. Thorne (Senior Hydraulic Engineer)",
-            "cmms_planner": "M. Alvarez (Maintenance Coordinator)",
-        },
-        "d2_problem_description": {
-            "what": f"Unplanned trip of Boiler Feed Pump {asset_id} on high drive-end bearing temperature.",
-            "when": f"2026-09-04 03:14:00 AM (Trip timestamp T=3300s).",
-            "where": "Site Alpha, Area 03 - Steam & Power Generation, Unit 300.",
-            "how_much": "Total loss of primary boiler feedwater injection (185 m3/h). Header pressure dipped 4.2 bar.",
-            "operational_impact": "Automatic cut-in of auxiliary standby pump P-301B prevented total boiler flame-out.",
-        },
-        "d3_interim_containment_actions": [
-            "Verify auto-start and stable operation of standby boiler feed pump P-301B.",
-            "Isolate electrical breaker 33-SWG-P301A at 3.3 kV motor control center.",
-            "Close suction isolation valve MOV-30101 and discharge isolation valve MOV-30102.",
-        ],
-        "d4_root_cause_analysis": {
-            "iso_14224_code": fmea.get("iso_code"),
-            "failure_mechanism": fmea.get("failure_mechanism"),
-            "root_cause_asset": state["root_cause_asset"],
-            "root_cause_statement": state["root_cause_description"],
-            "falsification_matrix": state["falsification_summary"],
-            "five_whys_trace": whys,
-            "deepseek_ai_evaluation": state.get("deepseek_evaluation"),
-        },
-        "ai_diagnostic_engine": state.get("deepseek_evaluation", {}).get("model", "Deterministic Expert Rules Engine"),
+    if is_vfd:
+        if "ERR02" in winning.get("hypothesis_id", ""):
+            fc = 2
+            fc_desc = "Instantaneous Deceleration Overcurrent (Err02)"
+            impact = "Operator actuated PLC On/Off stop button; instantaneous back-EMF current surge (3.85 A vs 2.50 A limit) tripped drive."
+            pca = [
+                "PCA-1: Implement controlled deceleration ramp in PLC ladder logic instead of abrupt contact cut.",
+                "PCA-2: Increase VFD parameter F0.18 deceleration time to >= 3.0 seconds.",
+                "PCA-3: Perform 500V DC megger insulation resistance test on induction motor IND_MOTOR_01 (> 50 M-Ohm).",
+                "PCA-4: Update HMI On/Off button action script to prevent instantaneous stop transients.",
+            ]
+        else:
+            fc = 6
+            fc_desc = "Overfrequency Deceleration Overvoltage (Err06)"
+            impact = "Frequency setpoint exceeded 40.00 Hz ceiling, driving DC bus voltage past 195.0 V (~207 V at 50 Hz)."
+            pca = [
+                "PCA-1: Lock parameter F0.10 (Upper Frequency Limit) to 40.00 Hz in Wecon VM VFD.",
+                "PCA-2: Install dynamic braking resistor (100-250 Ohm, 100W) across terminals P+ and PB.",
+                "PCA-3: Configure high DC bus pre-alarm in HMI at 190.0 V (trip limit: 195.0 V).",
+                "PCA-4: Adjust parameter F0.18 deceleration time to >= 5.0 seconds.",
+            ]
 
-        "d5_permanent_corrective_actions": [
-            "PCA-1: Clean and install fresh 316SS 20-mesh basket in Suction Strainer STR-301A.",
-            "PCA-2: Configure DCS alarm on DPS-30101 at 0.80 bar (pre-alarm) and interlock warning at 1.00 bar.",
-            "PCA-3: Perform boroscopic inspection of P-301A 1st-stage impeller eye for cavitation pitting.",
-            "PCA-4: Drain, flush, and recharge DE sleeve bearing lube oil with ISO VG 46.",
-        ],
-        "d6_implementation_and_validation": {
-            "validation_method": "Run P-301A post-maintenance at full load for 2 hours under dynamic vibration surveillance.",
-            "acceptance_criteria": "Suction pressure > 2.35 bar, Strainer dP < 0.15 bar, Vibration RMS < 2.0 mm/s, FFT broadband cavitation ratio < 5%.",
-        },
-        "d7_systemic_prevention": [
-            "Re-classify Suction Strainer PM flush schedule from non-critical to 'Safety/Reliability Critical' in SAP PM.",
-            "Disable operational deferral authority for strainer flushes without Plant Manager sign-off.",
-            "Upgrade raw intake screen maintenance to reduce upstream biofouling ingress into deaerator.",
-        ],
-        "d8_sign_off": {
-            "reliability_manager_approval": "Approved",
-            "reviewed_by": decision.get("reviewer", "Chief Plant Reliability Engineer"),
-            "review_notes": decision.get("notes", "Root cause verified by multi-sensor FFT and topology correlation."),
-            "date": "2026-09-04",
-        },
-    }
+        report_8d = {
+            "report_type": "8D Incident Investigation Report (Global 8D Standard)",
+            "incident_id": state["incident_id"],
+            "asset_id": asset_id,
+            "asset_name": EQUIPMENT_NAME,
+            "classification": "Critical Test Rig Inverter Protection Trip",
+            "d1_team": {
+                "lead": "Automation & Drive Specialist",
+                "operations": "PLC Controls Engineer",
+                "process_eng": "Electrical Reliability Engineer",
+                "cmms_planner": "Lab Maintenance Coordinator",
+            },
+            "d2_problem_description": {
+                "what": f"Unplanned trip of Wecon VM Series VFD ({asset_id}) with fault code Err{fc:02d} ({fc_desc}).",
+                "when": f"Trip timestamp recorded via Modbus Reg 700BH.",
+                "where": "Industrial Automation Test Facility - Bench 01 (PLC LX3V + Wecon VM VFD).",
+                "how_much": impact,
+                "operational_impact": "Inverter IGBT gate drive inhibited to protect power module and induction motor from thermal damage.",
+            },
+            "d3_interim_containment_actions": [
+                "Verify VFD display indicates trip code and output current/voltage have dropped to 0.",
+                "Confirm DC bus voltage has safely discharged below 24 V before opening enclosure.",
+                "Toggle PLC reset trigger (D-variable) to clear fault latch after root cause diagnosis.",
+            ],
+            "d4_root_cause_analysis": {
+                "iso_14224_code": fmea.get("iso_code"),
+                "failure_mechanism": fmea.get("failure_mechanism"),
+                "root_cause_asset": state["root_cause_asset"],
+                "root_cause_statement": state["root_cause_description"],
+                "falsification_matrix": state["falsification_summary"],
+                "five_whys_trace": whys,
+                "deepseek_ai_evaluation": state.get("deepseek_evaluation"),
+            },
+            "ai_diagnostic_engine": state.get("deepseek_evaluation", {}).get("model", "Deterministic Expert Rules Engine"),
+            "d5_permanent_corrective_actions": pca,
+            "d6_implementation_and_validation": {
+                "validation_method": "Run test bench at 40.00 Hz steady-state for 15 minutes followed by controlled start/stop cycles.",
+                "acceptance_criteria": "DC bus voltage stable at ~182 V (never exceeding 190 V alarm / 195 V trip limit), current < 1.50 A, zero trip codes.",
+            },
+            "d7_systemic_prevention": [
+                "Standardize PLC program template with ramped stop routines across all test benches.",
+                "Require dynamic braking resistor installation for any bench configured for variable deceleration.",
+                "Store parameter backups in CMMS (WO-VFD-2026-0042) to prevent unauthorized frequency setpoint adjustments.",
+            ],
+            "d8_sign_off": {
+                "reliability_manager_approval": "Approved",
+                "reviewed_by": decision.get("reviewer", "Lead Reliability Engineer"),
+                "review_notes": decision.get("notes", "Root cause verified by multi-sensor Modbus telemetry and PLC state correlation."),
+                "date": "2026-09-15",
+            },
+        }
+    else:
+        report_8d = {
+            "report_type": "8D Incident Investigation Report (Global 8D Standard)",
+            "incident_id": state["incident_id"],
+            "asset_id": asset_id,
+            "asset_name": EQUIPMENT_NAME,
+            "classification": "Level 1 Critical Plant Machinery Trip",
+            "d1_team": {
+                "lead": "J. Reynolds (Machinery Reliability Specialist)",
+                "operations": "K. Patel (Feedwater Unit Operations Lead)",
+                "process_eng": "Dr. S. Thorne (Senior Hydraulic Engineer)",
+                "cmms_planner": "M. Alvarez (Maintenance Coordinator)",
+            },
+            "d2_problem_description": {
+                "what": f"Unplanned trip of Boiler Feed Pump {asset_id}.",
+                "when": "2026-09-04 03:14:00 AM.",
+                "where": "Site Alpha, Area 03 - Steam & Power Generation.",
+                "how_much": "Total loss of primary boiler feedwater injection.",
+                "operational_impact": "Standby pump cut in prevented boiler flame-out.",
+            },
+            "d3_interim_containment_actions": [
+                "Verify auto-start of standby pump.",
+                "Isolate electrical breaker.",
+            ],
+            "d4_root_cause_analysis": {
+                "iso_14224_code": fmea.get("iso_code"),
+                "failure_mechanism": fmea.get("failure_mechanism"),
+                "root_cause_asset": state["root_cause_asset"],
+                "root_cause_statement": state["root_cause_description"],
+                "falsification_matrix": state["falsification_summary"],
+                "five_whys_trace": whys,
+                "deepseek_ai_evaluation": state.get("deepseek_evaluation"),
+            },
+            "ai_diagnostic_engine": state.get("deepseek_evaluation", {}).get("model", "Deterministic Expert Rules Engine"),
+            "d5_permanent_corrective_actions": [
+                "PCA-1: Clean Suction Strainer STR-301A.",
+                "PCA-2: Configure DCS alarm on DPS-30101.",
+            ],
+            "d6_implementation_and_validation": {
+                "validation_method": "Run P-301A post-maintenance at full load.",
+                "acceptance_criteria": "Suction pressure > 2.35 bar, Strainer dP < 0.15 bar.",
+            },
+            "d7_systemic_prevention": [
+                "Re-classify Suction Strainer PM flush schedule in SAP PM.",
+            ],
+            "d8_sign_off": {
+                "reliability_manager_approval": "Approved",
+                "reviewed_by": decision.get("reviewer", "Chief Plant Reliability Engineer"),
+                "review_notes": decision.get("notes", "Root cause verified."),
+                "date": "2026-09-04",
+            },
+        }
 
     # 2. SAP PM01 Corrective Work Order
     sap_wo = cmms_tool.generate_sap_pm01_work_order(

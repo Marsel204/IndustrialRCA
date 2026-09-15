@@ -22,9 +22,13 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
   const isLiveStream = activeScenarioId === 'live_stream';
   const isVfdAsset =
     activeScenarioId === 'live_stream' ||
+    activeScenarioId === 'exp_err02' ||
+    activeScenarioId === 'exp_err06' ||
+    activeScenarioId === 'exp_nominal' ||
     activeScenarioId === 'hil' ||
     Boolean(activeScenarioId?.startsWith('ds_hil')) ||
-    telemetry?.metadata?.asset_id === 'VFD_VM_01';
+    telemetry?.metadata?.asset_id === 'VFD_VM_01' ||
+    true;
 
   const [liveMetric, setLiveMetric] = useState<LiveMetric | null>(null);
   const [rollingTimestamps, setRollingTimestamps] = useState<number[]>([]);
@@ -691,8 +695,8 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
       },
       yAxis: {
         type: 'value',
-        min: 200,
-        max: 800,
+        min: 150,
+        max: 225,
         axisLabel: { formatter: '{value} V', fontSize: 10, color: '#334155' },
         splitLine: { lineStyle: { color: '#F1F5F9' } },
       },
@@ -717,16 +721,22 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
             symbol: 'none',
             data: [
               {
-                yAxis: 700.0,
+                yAxis: 195.0,
                 name: 'Err06 Trip Threshold',
                 lineStyle: { color: '#DC2626', type: 'dashed', width: 2 },
-                label: { formatter: 'Trip 700 V (Err06)', position: 'insideEndTop', color: '#DC2626' },
+                label: { formatter: 'Trip 195.0 V (Err06)', position: 'insideEndTop', color: '#DC2626' },
               },
               {
-                yAxis: 650.0,
+                yAxis: 190.0,
                 name: 'High Alarm',
                 lineStyle: { color: '#D97706', type: 'dotted', width: 1.5 },
-                label: { formatter: 'Alarm 650 V', position: 'insideEndTop', color: '#D97706' },
+                label: { formatter: 'Alarm 190.0 V', position: 'insideEndTop', color: '#D97706' },
+              },
+              {
+                yAxis: 182.0,
+                name: 'Nominal 40Hz',
+                lineStyle: { color: '#10B981', type: 'dotted', width: 1.5 },
+                label: { formatter: 'Nominal 182.0 V', position: 'insideEndBottom', color: '#10B981' },
               },
             ],
           },
@@ -927,16 +937,16 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
                 </span>
                 <span
                   className={`px-1.5 py-0.5 text-[10px] font-mono rounded font-semibold ${
-                    currentVDc >= 700
+                    currentVDc >= 195.0
                       ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                      : currentVDc > 650
+                      : currentVDc >= 190.0
                       ? 'bg-amber-50 text-amber-700 border border-amber-200'
                       : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                   }`}
                 >
-                  {currentVDc >= 700
+                  {currentVDc >= 195.0
                     ? 'TRIP'
-                    : currentVDc > 650
+                    : currentVDc >= 190.0
                     ? 'ALARM'
                     : 'STABLE'}
                 </span>
@@ -946,7 +956,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
                 <span className="text-xs font-normal text-slate-500">V</span>
               </div>
               <div className="text-[10px] font-mono text-slate-500 mt-1">
-                Nominal: 312 V · Trip limit: 700.0 V
+                Nominal: 182.0 V (40 Hz) · Trip limit: 195.0 V (&gt;195V trips Err06)
               </div>
             </div>
 
