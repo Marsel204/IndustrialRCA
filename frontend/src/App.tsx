@@ -45,6 +45,8 @@ export function App() {
 
   // Status flags
   const [apiOnline, setApiOnline] = useState<boolean>(true);
+  const [mqttConnected, setMqttConnected] = useState<boolean>(false);
+  const [isSimulated, setIsSimulated] = useState<boolean>(true);
   const [_isLoading, setIsLoading] = useState<boolean>(true);
   const [isPipelineRunning, setIsPipelineRunning] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -65,8 +67,10 @@ export function App() {
 
       // 1. Health check
       try {
-        await fetchHealth();
+        const health = await fetchHealth();
         setApiOnline(true);
+        if (health?.mqtt_connected !== undefined) setMqttConnected(Boolean(health.mqtt_connected));
+        if (health?.is_simulated !== undefined) setIsSimulated(Boolean(health.is_simulated));
       } catch {
         setApiOnline(false);
       }
@@ -223,6 +227,21 @@ export function App() {
     return () => unsubscribe();
   }, []);
 
+  // Periodic health check to update MQTT connection and simulation status
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      try {
+        const health = await fetchHealth();
+        setApiOnline(true);
+        if (health?.mqtt_connected !== undefined) setMqttConnected(Boolean(health.mqtt_connected));
+        if (health?.is_simulated !== undefined) setIsSimulated(Boolean(health.is_simulated));
+      } catch {
+        setApiOnline(false);
+      }
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Reset Pipeline & Return System to Nominal Live Monitoring
   const handleResetPipeline = async () => {
     try {
@@ -336,6 +355,8 @@ export function App() {
         deepseekModel={deepseekModel}
         onToggleModel={setDeepseekModel}
         isPipelineRunning={isPipelineRunning}
+        mqttConnected={mqttConnected}
+        isSimulated={isSimulated}
       />
 
       {/* 7-Step Macro Stepper */}

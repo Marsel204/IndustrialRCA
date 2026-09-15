@@ -202,6 +202,9 @@ class CopilotChatRequest(BaseModel):
 def get_health():
     _ensure_default_scenarios()
     cache_stats = GLOBAL_TELEMETRY_CACHE.get_stats()
+    mqtt_online = influx_tool.is_mqtt_active()
+    latest_tsdb = GLOBAL_TSDB.get_latest("VFD_VM_01")
+    is_real = bool(latest_tsdb and (time.time() - latest_tsdb.get("timestamp", 0) < 60))
     return {
         "status": "ONLINE",
         "service": "Industrial RCA Unified Backend API",
@@ -211,6 +214,9 @@ def get_health():
         "telemetry_cache": cache_stats,
         "latest_hil_incident": LATEST_HIL_INCIDENT.get("incident_data"),
         "hil_status": LATEST_HIL_INCIDENT.get("pipeline_status"),
+        "mqtt_connected": mqtt_online,
+        "is_simulated": not is_real,
+        "telemetry_source": "hardware" if is_real else "fallback_simulation",
     }
 
 

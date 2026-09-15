@@ -325,4 +325,7 @@ export interface LiveMetric {
   event?: string;
   incident_id?: string;
   fault_description?: string;
+  source?: string;
+  mqtt_connected?: boolean;
+  is_simulated?: boolean;
 }

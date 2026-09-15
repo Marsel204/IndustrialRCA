@@ -257,20 +257,38 @@ class InfluxDBTelemetryTool:
         self._enrich_rca_tags(df)
         return df
 
+    def is_mqtt_active(self, host: str = "127.0.0.1", port: int = 1883) -> bool:
+        """Probes local or configured MQTT broker to check if it's accepting connections."""
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.15)
+            res = sock.connect_ex((host, port))
+            sock.close()
+            return res == 0
+        except Exception:
+            return False
+
     def get_latest_metrics(self, asset_id: str = VFD_EQUIPMENT_ID) -> Dict[str, Any]:
         """
         Retrieves the single latest live telemetry reading and status.
         Returns dict matching the LiveMetric contract.
         """
+        mqtt_online = self.is_mqtt_active()
+
         latest_tsdb = GLOBAL_TSDB.get_latest(asset_id)
         if latest_tsdb and time.time() - latest_tsdb.get("timestamp", 0) < 60:
             res = dict(latest_tsdb)
             res["source"] = "embedded_tsdb"
+            res["is_simulated"] = False
+            res["mqtt_connected"] = mqtt_online
             return res
 
         if self._latest_cache and time.time() - self._latest_cache.get("timestamp", 0) < 60:
             cached = dict(self._latest_cache)
             cached["source"] = "mqtt_live_cache"
+            cached["is_simulated"] = False
+            cached["mqtt_connected"] = mqtt_online
             return cached
 
         flux = f'''
@@ -310,6 +328,8 @@ class InfluxDBTelemetryTool:
                     "status": status,
                     "timestamp": float(latest_ts) if isinstance(latest_ts, (int, float)) else time.time(),
                     "source": "influxdb",
+                    "is_simulated": False,
+                    "mqtt_connected": mqtt_online,
                 }
         except Exception as e:
             logger.debug(f"InfluxDB latest metric query failed: {e}. Using fallback.")
@@ -330,6 +350,8 @@ class InfluxDBTelemetryTool:
             "status": "RUNNING",
             "timestamp": now,
             "source": "fallback_simulation",
+            "is_simulated": True,
+            "mqtt_connected": mqtt_online,
         }
 
     def get_statistical_summary(

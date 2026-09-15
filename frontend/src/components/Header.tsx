@@ -18,6 +18,8 @@ interface HeaderProps {
   deepseekModel: string;
   onToggleModel: (model: string) => void;
   isPipelineRunning: boolean;
+  mqttConnected?: boolean;
+  isSimulated?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -30,6 +32,8 @@ export const Header: React.FC<HeaderProps> = ({
   deepseekModel,
   onToggleModel,
   isPipelineRunning,
+  mqttConnected = false,
+  isSimulated = true,
 }) => {
   const activeScenario = scenarios.find((s) => s.id === activeScenarioId);
 
@@ -110,26 +114,33 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 shadow-xs">
             <span className="relative flex h-2.5 w-2.5">
               <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                latestIncident?.has_incident ? 'bg-rose-400' : 'bg-emerald-400'
+                latestIncident?.has_incident ? 'bg-rose-400' : (mqttConnected && !isSimulated ? 'bg-emerald-400' : 'bg-amber-400')
               }`} />
               <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
-                latestIncident?.has_incident ? 'bg-rose-500' : 'bg-emerald-500'
+                latestIncident?.has_incident ? 'bg-rose-500' : (mqttConnected && !isSimulated ? 'bg-emerald-500' : 'bg-amber-500')
               }`} />
             </span>
             <span className="text-xs font-mono font-bold text-slate-800 tracking-wide">
-              LIVE HARDWARE TELEMETRY
+              {isSimulated ? 'SIMULATED TELEMETRY' : 'LIVE HARDWARE TELEMETRY'}
             </span>
             <span className="text-slate-400 text-xs">·</span>
             <span className="text-[11px] font-mono text-slate-600">
-              Wecon VM VFD (192.168.1.104)
+              {isSimulated ? 'Offline Fallback Generator' : 'Wecon VM VFD (192.168.1.104)'}
             </span>
           </div>
 
-          {/* MQTT Protocol Pill */}
-          <span className="hidden sm:flex items-center space-x-1 px-2 py-1 rounded text-[11px] font-mono font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-xs">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span>MQTT 1883/8883 CONNECTED</span>
-          </span>
+          {/* MQTT Protocol Dynamic Pill */}
+          {mqttConnected ? (
+            <span className="hidden sm:flex items-center space-x-1 px-2 py-1 rounded text-[11px] font-mono font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>MQTT 1883 CONNECTED</span>
+            </span>
+          ) : (
+            <span className="hidden sm:flex items-center space-x-1 px-2 py-1 rounded text-[11px] font-mono font-semibold bg-amber-50 text-amber-700 border border-amber-200 shadow-xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              <span>MQTT OFFLINE (SIMULATED)</span>
+            </span>
+          )}
 
           {/* Fault Status Pill */}
           {latestIncident?.has_incident ? (
