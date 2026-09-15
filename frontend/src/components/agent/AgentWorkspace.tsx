@@ -192,7 +192,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
               </span>
             )}
             <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-              {rcaState?.has_active_trip ? `Trip: Err0${rcaState.fault_code}` : 'Wecon VFD VM Rig'}
+              {rcaState?.has_active_trip ? `Trip: Err0${rcaState.fault_code || 6}` : 'Wecon VFD VM Rig'}
             </span>
           </div>
         </div>
@@ -201,7 +201,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
             <Sparkles className="w-4 h-4 text-teal-600 flex-shrink-0" />
             <span>
               {rcaState?.has_active_trip || (rcaState?.fault_code && rcaState.fault_code > 0)
-                ? `🚨 Hardware Trip Detected: Err0${rcaState.fault_code} on Wecon VFD Rig — Autonomous RCA Active`
+                ? `🚨 Hardware Trip Detected: Err0${rcaState.fault_code || 6} on Wecon VFD Rig — Autonomous RCA Active`
                 : '⚡ Live Rig Monitor: Listening for Hardware Trip Trigger over MQTT / PLC D-variable...'}
             </span>
           </div>

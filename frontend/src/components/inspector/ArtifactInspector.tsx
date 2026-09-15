@@ -32,13 +32,19 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
     { id: 'deliverables', label: '8D Report & SAP Work Order', icon: FileCheck2 },
   ];
 
+  // Gracefully alias 'fmea' to 'hypotheses' and fallback unknown tabs to 'telemetry'
+  const normalizedTab = activeTab === 'fmea' ? 'hypotheses' : activeTab;
+  const currentTab = ['telemetry', 'topology', 'hypotheses', 'deliverables'].includes(normalizedTab)
+    ? normalizedTab
+    : 'telemetry';
+
   return (
     <div className="flex flex-col h-full bg-slate-50/50 border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
       {/* Tab Navigation Header Bar */}
       <div className="bg-white border-b border-slate-200 px-3 pt-2 flex space-x-1 overflow-x-auto scrollbar-none">
         {TABS.map((tab) => {
           const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
+          const isActive = currentTab === tab.id;
           return (
             <button
               key={tab.id}
@@ -61,7 +67,7 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
 
       {/* Tab Content Canvas */}
       <div className="flex-1 overflow-y-auto p-4">
-        {activeTab === 'telemetry' && (
+        {currentTab === 'telemetry' && (
           <TelemetryAnalyticsTab
             telemetry={telemetry}
             spectrum={spectrum}
@@ -69,11 +75,11 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
           />
         )}
 
-        {activeTab === 'topology' && <TopologyTab topology={topology} />}
+        {currentTab === 'topology' && <TopologyTab topology={topology} />}
 
-        {activeTab === 'hypotheses' && <FMEAMatrixTab rcaState={rcaState} />}
+        {currentTab === 'hypotheses' && <FMEAMatrixTab rcaState={rcaState} />}
 
-        {activeTab === 'deliverables' && <DeliverablesTab rcaState={rcaState} />}
+        {currentTab === 'deliverables' && <DeliverablesTab rcaState={rcaState} />}
       </div>
     </div>
   );

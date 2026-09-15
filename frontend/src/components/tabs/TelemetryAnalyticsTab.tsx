@@ -13,6 +13,7 @@ interface TelemetryAnalyticsTabProps {
 
 const EMPTY_TIMESTAMPS: number[] = [];
 const EMPTY_SERIES: Record<string, number[]> = {};
+const ECHARTS_OPTS = { renderer: 'canvas' as const };
 
 export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
   telemetry,
@@ -147,9 +148,11 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
     }
   }, []);
 
-  // Base options template for crisp light ECharts
+  // Base options template for crisp light ECharts with animation disabled for flicker-free live streaming
   const baseChartTheme = useMemo(
     () => ({
+      animation: false,
+      animationDurationUpdate: 0,
       backgroundColor: '#FFFFFF',
       textStyle: { fontFamily: 'JetBrains Mono, monospace', color: '#334155' },
       grid: { top: 35, right: 20, bottom: 25, left: 55 },
@@ -504,6 +507,8 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
     const shaft2x = spectrum.shaft_2x_hz || 99.3;
 
     return {
+      animation: false,
+      animationDurationUpdate: 0,
       backgroundColor: '#FFFFFF',
       textStyle: { fontFamily: 'JetBrains Mono, monospace', color: '#334155' },
       grid: { top: 70, right: 30, bottom: 40, left: 60 },
@@ -885,11 +890,11 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
     };
   }, [baseChartTheme, series, timestamps]);
 
-  const currentFOut = isLiveStream && liveMetric ? liveMetric.f_out : (series['f_out']?.[series['f_out'].length - 1] ?? 40.0);
-  const currentVDc = isLiveStream && liveMetric ? liveMetric.v_dc : (series['v_dc']?.[series['v_dc'].length - 1] ?? 312.0);
-  const currentAmp = isLiveStream && liveMetric ? liveMetric.current : (series['current']?.[series['current'].length - 1] ?? 1.35);
-  const currentRpm = isLiveStream && liveMetric ? liveMetric.rpm : (series['rpm']?.[series['rpm'].length - 1] ?? 1160.0);
-  const currentStatus = isLiveStream && liveMetric ? liveMetric.status : ((series['fault_code']?.[series['fault_code'].length - 1] || 0) > 0 ? 'TRIPPED' : 'RUNNING');
+  const currentFOut = (isLiveStream && liveMetric ? liveMetric.f_out : (series['f_out']?.[series['f_out'].length - 1])) ?? 40.0;
+  const currentVDc = (isLiveStream && liveMetric ? liveMetric.v_dc : (series['v_dc']?.[series['v_dc'].length - 1])) ?? 182.0;
+  const currentAmp = (isLiveStream && liveMetric ? liveMetric.current : (series['current']?.[series['current'].length - 1])) ?? 1.15;
+  const currentRpm = (isLiveStream && liveMetric ? liveMetric.rpm : (series['rpm']?.[series['rpm'].length - 1])) ?? 1199.0;
+  const currentStatus = (isLiveStream && liveMetric ? liveMetric.status : undefined) || ((series['fault_code']?.[series['fault_code'].length - 1] || 0) > 0 ? 'TRIPPED' : 'RUNNING');
 
   const latestTi = series['TI-301-DE']?.[series['TI-301-DE'].length - 1] ?? 48.5;
   const latestVi = series['VI-301-R']?.[series['VI-301-R'].length - 1] ?? 1.80;
@@ -1200,7 +1205,9 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
             <ReactECharts
               option={fftSpectrumOption}
               style={{ height: '100%', width: '100%' }}
-              opts={{ renderer: 'canvas' }}
+              opts={ECHARTS_OPTS}
+              lazyUpdate={true}
+              notMerge={false}
             />
           </div>
 
@@ -1221,7 +1228,9 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
               <ReactECharts
                 option={vfdFrequencyOption}
                 style={{ height: '100%', width: '100%' }}
-                opts={{ renderer: 'canvas' }}
+                opts={ECHARTS_OPTS}
+                lazyUpdate={true}
+                notMerge={false}
                 onChartReady={onTelemetryChartReady}
               />
             </div>
@@ -1233,7 +1242,9 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
               <ReactECharts
                 option={vfdDcBusOption}
                 style={{ height: '100%', width: '100%' }}
-                opts={{ renderer: 'canvas' }}
+                opts={ECHARTS_OPTS}
+                lazyUpdate={true}
+                notMerge={false}
                 onChartReady={onTelemetryChartReady}
               />
             </div>
@@ -1245,7 +1256,9 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
               <ReactECharts
                 option={vfdCurrentOption}
                 style={{ height: '100%', width: '100%' }}
-                opts={{ renderer: 'canvas' }}
+                opts={ECHARTS_OPTS}
+                lazyUpdate={true}
+                notMerge={false}
                 onChartReady={onTelemetryChartReady}
               />
             </div>
@@ -1257,7 +1270,9 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
               <ReactECharts
                 option={vfdRpmOption}
                 style={{ height: '100%', width: '100%' }}
-                opts={{ renderer: 'canvas' }}
+                opts={ECHARTS_OPTS}
+                lazyUpdate={true}
+                notMerge={false}
                 onChartReady={onTelemetryChartReady}
               />
             </div>
@@ -1272,7 +1287,9 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
               <ReactECharts
                 option={bearingTempOption}
                 style={{ height: '100%', width: '100%' }}
-                opts={{ renderer: 'canvas' }}
+                opts={ECHARTS_OPTS}
+                lazyUpdate={true}
+                notMerge={false}
                 onChartReady={onTelemetryChartReady}
               />
             </div>
@@ -1284,7 +1301,9 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
               <ReactECharts
                 option={vibrationOption}
                 style={{ height: '100%', width: '100%' }}
-                opts={{ renderer: 'canvas' }}
+                opts={ECHARTS_OPTS}
+                lazyUpdate={true}
+                notMerge={false}
                 onChartReady={onTelemetryChartReady}
               />
             </div>
@@ -1296,7 +1315,9 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
               <ReactECharts
                 option={strainerDpOption}
                 style={{ height: '100%', width: '100%' }}
-                opts={{ renderer: 'canvas' }}
+                opts={ECHARTS_OPTS}
+                lazyUpdate={true}
+                notMerge={false}
                 onChartReady={onTelemetryChartReady}
               />
             </div>
@@ -1308,7 +1329,9 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
               <ReactECharts
                 option={suctionOption}
                 style={{ height: '100%', width: '100%' }}
-                opts={{ renderer: 'canvas' }}
+                opts={ECHARTS_OPTS}
+                lazyUpdate={true}
+                notMerge={false}
                 onChartReady={onTelemetryChartReady}
               />
             </div>
@@ -1320,7 +1343,9 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
               <ReactECharts
                 option={motorCurrentOption}
                 style={{ height: '100%', width: '100%' }}
-                opts={{ renderer: 'canvas' }}
+                opts={ECHARTS_OPTS}
+                lazyUpdate={true}
+                notMerge={false}
                 onChartReady={onTelemetryChartReady}
               />
             </div>

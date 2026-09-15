@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Header } from './components/Header';
 import { PipelineStepper } from './components/PipelineStepper';
@@ -52,6 +52,10 @@ export function App() {
   const [activeThreadId, setActiveThreadId] = useState<string>(
     `rca-gui-${Date.now()}`
   );
+  const activeThreadIdRef = useRef<string>(activeThreadId);
+  activeThreadIdRef.current = activeThreadId;
+  const latestIncidentRef = useRef<LatestIncident | null>(latestIncident);
+  latestIncidentRef.current = latestIncident;
 
   // Initialize and load base data
   const loadInitialData = useCallback(async () => {
@@ -184,7 +188,7 @@ export function App() {
             }
           }
         } else if (eventData.event === 'hil_pipeline_completed') {
-          const thId = eventData.thread_id || latestIncident?.incident_data?.thread_id || activeThreadId;
+          const thId = eventData.thread_id || latestIncidentRef.current?.incident_data?.thread_id || activeThreadIdRef.current;
           setIsPipelineRunning(false);
           setLatestIncident((prev) =>
             prev ? { ...prev, pipeline_status: 'ANALYSIS_COMPLETE' } : null
@@ -193,7 +197,7 @@ export function App() {
           try {
             const state = await fetchRCAState(thId);
             setRcaState(state);
-            setInspectorTab('fmea');
+            setInspectorTab('hypotheses');
           } catch (e) {
             console.error('Failed to load completed RCA state:', e);
           }
@@ -214,7 +218,7 @@ export function App() {
     );
 
     return () => unsubscribe();
-  }, [activeThreadId, latestIncident]);
+  }, []);
 
   // Reset Pipeline & Return System to Nominal Live Monitoring
   const handleResetPipeline = async () => {
