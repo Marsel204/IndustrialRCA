@@ -890,10 +890,21 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
     };
   }, [baseChartTheme, series, timestamps]);
 
-  const currentFOut = (isLiveStream && liveMetric ? liveMetric.f_out : (series['f_out']?.[series['f_out'].length - 1])) ?? 40.0;
-  const currentVDc = (isLiveStream && liveMetric ? liveMetric.v_dc : (series['v_dc']?.[series['v_dc'].length - 1])) ?? 182.0;
-  const currentAmp = (isLiveStream && liveMetric ? liveMetric.current : (series['current']?.[series['current'].length - 1])) ?? 1.15;
-  const currentRpm = (isLiveStream && liveMetric ? liveMetric.rpm : (series['rpm']?.[series['rpm'].length - 1])) ?? 1199.0;
+  // For live stream: prefer liveMetric, but fall back to rollingSeries last point when liveMetric
+  // has physically-invalid zero values (e.g., stale init before first SSE message arrives).
+  const _lmFOut  = isLiveStream && liveMetric ? liveMetric.f_out  : null;
+  const _lmVDc   = isLiveStream && liveMetric ? liveMetric.v_dc   : null;
+  const _lmAmp   = isLiveStream && liveMetric ? liveMetric.current : null;
+  const _lmRpm   = isLiveStream && liveMetric ? liveMetric.rpm    : null;
+  const _serFOut  = series['f_out']?.[series['f_out'].length - 1];
+  const _serVDc   = series['v_dc']?.[series['v_dc'].length - 1];
+  const _serAmp   = series['current']?.[series['current'].length - 1];
+  const _serRpm   = series['rpm']?.[series['rpm'].length - 1];
+  // f_out and v_dc should never be 0 in RUNNING state — fall back to series if so
+  const currentFOut = ((_lmFOut !== null && _lmFOut !== 0) ? _lmFOut : (_serFOut ?? _lmFOut)) ?? 40.0;
+  const currentVDc  = ((_lmVDc  !== null && _lmVDc  !== 0) ? _lmVDc  : (_serVDc  ?? _lmVDc )) ?? 182.0;
+  const currentAmp  = _lmAmp  !== null ? _lmAmp  : (_serAmp  ?? 0.0);
+  const currentRpm  = ((_lmRpm  !== null && _lmRpm  !== 0) ? _lmRpm  : (_serRpm  ?? _lmRpm )) ?? 1199.0;
   const currentStatus = (isLiveStream && liveMetric ? liveMetric.status : undefined) || ((series['fault_code']?.[series['fault_code'].length - 1] || 0) > 0 ? 'TRIPPED' : 'RUNNING');
 
   const latestTi = series['TI-301-DE']?.[series['TI-301-DE'].length - 1] ?? 48.5;

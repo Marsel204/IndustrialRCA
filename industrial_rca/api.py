@@ -313,10 +313,11 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
         "asset_id": incident.asset_id,
         "fault_code": incident.fault_code,
         "fault_description": fault_desc,
-        "f_out": 0.0,
-        "v_dc": float(df["v_dc"].max()),
-        "current": float(df["current"].max()),
-        "rpm": 0.0,
+        # Use peak/last pre-fault values so KPI cards show meaningful data at trip moment
+        "f_out": float(df["f_out"].iloc[-1]) if len(df) > 0 else 0.0,
+        "v_dc": float(df["v_dc"].max()) if len(df) > 0 else 0.0,
+        "current": float(df["current"].max()) if len(df) > 0 else 0.0,
+        "rpm": float(df["rpm"].iloc[-1]) if len(df) > 0 else 0.0,
         "status": "TRIPPED",
         "timestamp": time.time(),
     })
