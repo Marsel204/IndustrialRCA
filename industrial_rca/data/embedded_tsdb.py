@@ -218,8 +218,10 @@ class EmbeddedTSDB:
 
         if fault_code > 0:
             now = time.time()
-            if now - self._last_trip_time > 15.0:
+            last_code = getattr(self, "_last_fault_code", None)
+            if fault_code != last_code or (now - self._last_trip_time > 5.0):
                 self._last_trip_time = now
+                self._last_fault_code = fault_code
                 return fault_code
         return None
 
