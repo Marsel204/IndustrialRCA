@@ -76,3 +76,54 @@ CACHE_MAX_ENTRIES = 256
 
 # Checkpointer Thread ID Default
 DEFAULT_THREAD_ID = "rca-session-p301a-001"
+
+# InfluxDB 2.0 Live Telemetry Configuration
+INFLUXDB_URL = "http://127.0.0.1:8086"
+INFLUXDB_ORG = "factory"
+INFLUXDB_BUCKET = "telemetry"
+INFLUXDB_TOKEN = "rca_super_secret_token_123"
+INFLUXDB_MEASUREMENT = "vfd_telemetry"
+
+# Hardware-in-the-Loop VFD Specifications & Operational Limits
+VFD_EQUIPMENT_ID = "VFD_VM_01"
+VFD_OPERATIONAL_LIMITS: Dict[str, Dict[str, Any]] = {
+    "f_out": {
+        "description": "VFD Output Frequency",
+        "unit": "Hz",
+        "normal_min": 0.0,
+        "normal_max": 40.0,
+        "rated_max": 50.0,
+        "alarm_high": 42.0,
+        "trip_high": 50.0,
+    },
+    "v_dc": {
+        "description": "DC Bus Voltage",
+        "unit": "V",
+        "normal_min": 280.0,
+        "normal_max": 380.0,
+        "alarm_high": 650.0,
+        "trip_high": 700.0,
+    },
+    "current": {
+        "description": "Motor Line / Output Current",
+        "unit": "A",
+        "normal_min": 0.0,
+        "normal_max": 1.50,
+        "alarm_high": 2.00,
+        "trip_high": 2.50,
+    },
+    "rpm": {
+        "description": "Motor Speed",
+        "unit": "RPM",
+        "normal_min": 0.0,
+        "normal_max": 1450.0,
+        "trip_high": 1750.0,
+    },
+    "v_out": {
+        "description": "Output Voltage",
+        "unit": "V",
+        "normal_min": 0.0,
+        "normal_max": 220.0,
+        "trip_high": 250.0,
+    },
+}

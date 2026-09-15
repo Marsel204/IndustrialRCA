@@ -294,3 +294,17 @@ export interface LatestIncident {
   received_at?: string | null;
   pipeline_status: string;
 }
+
+export interface LiveMetric {
+  f_out: number;
+  v_dc: number;
+  current: number;
+  rpm: number;
+  fault_code: number;
+  status: 'RUNNING' | 'TRIPPED' | 'WARNING' | string;
+  timestamp: number;
+  asset_id?: string;
+  event?: string;
+  incident_id?: string;
+  fault_description?: string;
+}

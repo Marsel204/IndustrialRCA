@@ -3,3 +3,6 @@
 __pycache__/
 *.pyc
 .system_generated/
+*.db
+*.db-shm
+*.db-wal

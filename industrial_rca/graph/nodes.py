@@ -12,6 +12,7 @@ from industrial_rca.config import (
     EQUIPMENT_ID,
     EQUIPMENT_NAME,
     OPERATIONAL_LIMITS,
+    VFD_OPERATIONAL_LIMITS,
     RUNNING_FREQUENCY_1X_HZ,
 )
 from industrial_rca.data.oem_manuals import (
@@ -158,10 +159,18 @@ def detect_anomalies(state: RCAState) -> Dict[str, Any]:
         }
 
     primary_sensor = trip_meta.get("primary_trip_sensor", "TI-301-DE")
-    trip_val = tag_profiles.get(primary_sensor, {}).get("max", 0.0)
+    trip_val = tag_profiles.get(primary_sensor, {}).get("max")
+    if trip_val is None:
+        trip_val = trip_meta.get("trip_value", 0.0)
+
+    combined_limits = dict(OPERATIONAL_LIMITS)
+    combined_limits.update(VFD_OPERATIONAL_LIMITS)
+    unit = combined_limits.get(primary_sensor, {}).get("unit", "")
+    unit_str = f" {unit}" if unit else ("°C" if "TI" in primary_sensor else "")
+
     log_entry = (
         f"[ANOMALY_DETECTION] Active trip confirmed! {len(detected_anomalies)} anomaly events identified. "
-        f"Primary trip sensor: {primary_sensor} = {trip_val}°C."
+        f"Primary trip sensor: {primary_sensor} = {trip_val}{unit_str}."
     )
     logs.append(log_entry)
 
@@ -447,7 +456,7 @@ def aggregate_hypotheses(state: RCAState) -> Dict[str, Any]:
             "execution_logs": ["[AGGREGATION] Error: No hypothesis results received."],
         }
 
-    # Sort: CONFIRMED first, then by confidence descending
+    # Sort: CONFIRMED first, then asset-specific match, then by confidence descending
     def sort_key(r):
         priority = 0
         if r["status"] == "CONFIRMED":
@@ -456,13 +465,26 @@ def aggregate_hypotheses(state: RCAState) -> Dict[str, Any]:
             priority = 2
         elif r["status"] == "REFUTED":
             priority = 1
-        return (priority, r["confidence"])
+
+        is_vfd = state.get("asset_id") == "VFD_VM_01"
+        is_asset_match = 1 if (is_vfd and r["hypothesis_id"].startswith("H_VFD")) or (not is_vfd and not r["hypothesis_id"].startswith("H_VFD")) else 0
+        return (priority, is_asset_match, r["confidence"])
 
     sorted_results = sorted(results, key=sort_key, reverse=True)
     winning_hyp = sorted_results[0]
 
-    # Map to ISO 14224
-    iso_info = ISO_14224_TAXONOMY.get("CAVITATION", {})
+    # Map to ISO 14224 dynamically
+    hyp_iso_map = {
+        "H1": "BEARING_WIPED",
+        "H2": "CAVITATION",
+        "H3": "MOTOR_OVERLOAD",
+        "H_VFD_ERR06": "VFD_DECEL_OVERVOLTAGE",
+        "H_VFD_ERR11": "VFD_MOTOR_OVERLOAD",
+        "H_VFD_ERR02": "VFD_ACCEL_OVERCURRENT",
+        "H_VFD_ERR03": "VFD_DECEL_OVERCURRENT",
+    }
+    iso_key = hyp_iso_map.get(winning_hyp["hypothesis_id"], "CAVITATION")
+    iso_info = ISO_14224_TAXONOMY.get(iso_key, ISO_14224_TAXONOMY.get("CAVITATION", {}))
     fmea_entry = get_fmea_entry(winning_hyp["hypothesis_id"]) or {}
 
     falsification_summary = [

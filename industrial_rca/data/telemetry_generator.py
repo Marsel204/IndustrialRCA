@@ -11,6 +11,7 @@ import pandas as pd
 
 from industrial_rca.config import (
     EQUIPMENT_ID,
+    VFD_EQUIPMENT_ID,
     SAMPLING_RATE_HZ,
     HIGH_FREQ_SAMPLING_RATE_HZ,
     SIMULATION_DURATION_SEC,
@@ -301,3 +302,242 @@ def generate_fault_scenario(duration_sec: int = SIMULATION_DURATION_SEC, seed: i
         normal_waveform={"t": t_wf_norm, "signal": sig_norm},
         fault_waveform={"t": t_wf_cav, "signal": sig_cav},
     )
+
+
+def generate_vfd_dataset(
+    scenario: str = "nominal",
+    df_live: Optional[pd.DataFrame] = None,
+    duration_sec: int = 300,
+    seed: int = 42,
+) -> TelemetryDataset:
+    """
+    Generates standardized VFD telemetry datasets for:
+    - 'nominal': Healthy operation at 40 Hz, 312V DC, 1.35A, 1160 RPM.
+    - 'overfrequency': Pushed past 40 Hz limit up to 50 Hz with current elevation.
+    - 'decel_overvoltage': Rapid deceleration down to 0 without braking resistor -> Err06 (>700V DC surge).
+    - 'live_stream': Ingests live InfluxDB / buffer DataFrame (or generates live stream fallback).
+    Maps all measurements to standard RCA columns:
+    v_dc, current, f_out, rpm, fault_code, PT-30101, DPS-30101, VI-301-R, TI-301-DE, IT-30101.
+    """
+    rng = np.random.default_rng(seed)
+
+    if scenario == "live_stream":
+        if df_live is not None:
+            df = df_live.copy()
+        else:
+            from industrial_rca.tools.influx_tool import InfluxDBTelemetryTool
+            df = InfluxDBTelemetryTool().get_live_telemetry(limit=duration_sec)
+
+        # Standardize required columns
+        for col, default in [
+            ("f_out", 40.0),
+            ("f_target", 40.0),
+            ("current", 1.35),
+            ("v_dc", 312.0),
+            ("v_out", 220.0),
+            ("rpm", 1160.0),
+            ("fault_code", 0),
+        ]:
+            if col not in df.columns:
+                df[col] = default
+
+        if "timestamp_sec" not in df.columns:
+            df["timestamp_sec"] = np.arange(len(df))
+
+        # Standard pump & motor baseline tags remain healthy/nominal for VFD operations
+        if "PT-30101" not in df.columns:
+            df["PT-30101"] = 2.40
+        if "DPS-30101" not in df.columns:
+            df["DPS-30101"] = 0.12
+        if "VI-301-R" not in df.columns:
+            df["VI-301-R"] = 1.80
+        if "TI-301-DE" not in df.columns:
+            df["TI-301-DE"] = 48.50
+        if "IT-30101" not in df.columns:
+            df["IT-30101"] = df["current"] * 60.0
+
+        t_wf_norm, sig_norm = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
+        t_wf_cav, sig_cav = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
+
+        has_trip = bool((df["fault_code"].max() or 0) > 0)
+
+        return TelemetryDataset(
+            scenario_name="Wecon VFD Live Telemetry (Node-RED / InfluxDB)",
+            df_1hz=df,
+            metadata={
+                "asset_id": VFD_EQUIPMENT_ID,
+                "duration_sec": len(df),
+                "condition": "HARDWARE_FAULT_TRIP" if has_trip else "LIVE_STREAM",
+                "anomaly_expected": bool(has_trip),
+                "scenario": "live_stream",
+                "fault_code": int(df["fault_code"].max()),
+            },
+            normal_waveform={"t": t_wf_norm, "signal": sig_norm},
+            fault_waveform={"t": t_wf_cav, "signal": sig_cav},
+        )
+
+    elif scenario == "nominal":
+        t = np.arange(duration_sec)
+        f_out = 40.0 + rng.normal(0, 0.05, duration_sec)
+        v_dc = 312.0 + rng.normal(0, 0.5, duration_sec)
+        current = 1.35 + rng.normal(0, 0.02, duration_sec)
+        rpm = f_out * 29.0 + rng.normal(0, 1.0, duration_sec)
+        v_out = np.full(duration_sec, 220.0) + rng.normal(0, 0.3, duration_sec)
+        fault_code = np.zeros(duration_sec, dtype=int)
+
+        df = pd.DataFrame({
+            "timestamp_sec": t,
+            "f_out": np.round(f_out, 2),
+            "f_target": np.full(duration_sec, 40.0),
+            "v_dc": np.round(v_dc, 1),
+            "v_out": np.round(v_out, 1),
+            "current": np.round(current, 2),
+            "rpm": np.round(rpm, 1),
+            "fault_code": fault_code,
+            "PT-30101": np.round(2.40 + rng.normal(0, 0.01, duration_sec), 2),
+            "DPS-30101": np.round(0.12 + rng.normal(0, 0.005, duration_sec), 2),
+            "VI-301-R": np.round(1.80 + rng.normal(0, 0.05, duration_sec), 2),
+            "TI-301-DE": np.round(48.5 + rng.normal(0, 0.1, duration_sec), 1),
+            "IT-30101": np.round(current * 60.0, 1),
+        })
+
+        t_wf_norm, sig_norm = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
+        t_wf_cav, sig_cav = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
+
+        return TelemetryDataset(
+            scenario_name="WECON VM VFD Nominal Baseline",
+            df_1hz=df,
+            metadata={
+                "asset_id": VFD_EQUIPMENT_ID,
+                "duration_sec": duration_sec,
+                "condition": "HEALTHY",
+                "anomaly_expected": False,
+                "scenario": "nominal",
+                "fault_code": 0,
+            },
+            normal_waveform={"t": t_wf_norm, "signal": sig_norm},
+            fault_waveform={"t": t_wf_cav, "signal": sig_cav},
+        )
+
+    elif scenario == "overfrequency":
+        t = np.arange(duration_sec)
+        idx_ramp = int(duration_sec * 0.5)
+        f_out = np.full(duration_sec, 40.0)
+        f_out[idx_ramp:] = np.linspace(40.0, 48.5, duration_sec - idx_ramp)
+        f_out += rng.normal(0, 0.05, duration_sec)
+
+        current = np.full(duration_sec, 1.35)
+        current[idx_ramp:] = np.linspace(1.35, 2.15, duration_sec - idx_ramp)
+        current += rng.normal(0, 0.03, duration_sec)
+
+        v_dc = 312.0 + rng.normal(0, 0.8, duration_sec)
+        rpm = f_out * 29.0 + rng.normal(0, 1.0, duration_sec)
+        v_out = np.full(duration_sec, 220.0)
+        fault_code = np.zeros(duration_sec, dtype=int)
+
+        df = pd.DataFrame({
+            "timestamp_sec": t,
+            "f_out": np.round(f_out, 2),
+            "f_target": np.full(duration_sec, 48.5),
+            "v_dc": np.round(v_dc, 1),
+            "v_out": np.round(v_out, 1),
+            "current": np.round(current, 2),
+            "rpm": np.round(rpm, 1),
+            "fault_code": fault_code,
+            "PT-30101": np.full(duration_sec, 2.40),
+            "DPS-30101": np.full(duration_sec, 0.12),
+            "VI-301-R": np.where(f_out > 42.0, 3.80, 1.80),
+            "TI-301-DE": np.where(current > 2.0, 68.5, 48.5),
+            "IT-30101": np.round(current * 60.0, 1),
+        })
+
+        t_wf_norm, sig_norm = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
+        t_wf_cav, sig_cav = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
+
+        return TelemetryDataset(
+            scenario_name="WECON VM VFD Overfrequency Warning",
+            df_1hz=df,
+            metadata={
+                "asset_id": VFD_EQUIPMENT_ID,
+                "duration_sec": duration_sec,
+                "condition": "WARNING_OVERFREQUENCY",
+                "anomaly_expected": True,
+                "scenario": "overfrequency",
+                "primary_trip_sensor": "f_out",
+                "trip_value": 48.5,
+                "trip_setpoint": 40.0,
+                "fault_code": 0,
+            },
+            normal_waveform={"t": t_wf_norm, "signal": sig_norm},
+            fault_waveform={"t": t_wf_cav, "signal": sig_cav},
+        )
+
+    elif scenario == "decel_overvoltage":
+        t = np.arange(duration_sec)
+        idx_trip = duration_sec - 15
+        idx_decel = idx_trip - 5
+
+        f_out = np.full(duration_sec, 40.0)
+        v_dc = np.full(duration_sec, 312.0)
+        current = np.full(duration_sec, 1.35)
+        v_out = np.full(duration_sec, 220.0)
+        fault_code = np.zeros(duration_sec, dtype=int)
+
+        # Decel ramp 5s
+        decel_steps = idx_trip - idx_decel
+        f_out[idx_decel:idx_trip] = np.linspace(40.0, 0.0, decel_steps)
+        v_dc[idx_decel:idx_trip] = np.linspace(312.0, 748.5, decel_steps)
+        current[idx_decel:idx_trip] = np.linspace(1.35, 3.80, decel_steps)
+        v_out[idx_decel:idx_trip] = np.linspace(220.0, 140.0, decel_steps)
+
+        # Trip state
+        f_out[idx_trip:] = 0.0
+        v_dc[idx_trip:] = 748.5 - np.linspace(0, 45.0, duration_sec - idx_trip)
+        current[idx_trip:] = 0.0
+        v_out[idx_trip:] = 0.0
+        fault_code[idx_trip:] = 6
+
+        rpm = f_out * 29.0
+
+        df = pd.DataFrame({
+            "timestamp_sec": t,
+            "f_out": np.round(f_out, 2),
+            "f_target": np.where(t >= idx_decel, 0.0, 40.0),
+            "v_dc": np.round(v_dc, 1),
+            "v_out": np.round(v_out, 1),
+            "current": np.round(current, 2),
+            "rpm": np.round(rpm, 1),
+            "fault_code": fault_code,
+            "PT-30101": np.full(duration_sec, 2.40),
+            "DPS-30101": np.full(duration_sec, 0.12),
+            "VI-301-R": np.full(duration_sec, 1.80),
+            "TI-301-DE": np.full(duration_sec, 48.5),
+            "IT-30101": np.round(current * 60.0, 1),
+        })
+
+        t_wf_norm, sig_norm = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
+        t_wf_cav, sig_cav = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
+
+        return TelemetryDataset(
+            scenario_name="WECON VM VFD Decel Overvoltage Trip (Err06)",
+            df_1hz=df,
+            metadata={
+                "asset_id": VFD_EQUIPMENT_ID,
+                "duration_sec": duration_sec,
+                "condition": "HARDWARE_FAULT_TRIP",
+                "anomaly_expected": True,
+                "scenario": "decel_overvoltage",
+                "trip_timestamp_sec": idx_trip,
+                "trip_time_str": "03:14:00 AM",
+                "primary_trip_sensor": "v_dc",
+                "trip_value": 748.5,
+                "trip_setpoint": 700.0,
+                "fault_code": 6,
+                "fault_description": "Deceleration Overvoltage (Err06) - DC link regeneration surge without brake resistor",
+            },
+            normal_waveform={"t": t_wf_norm, "signal": sig_norm},
+            fault_waveform={"t": t_wf_cav, "signal": sig_cav},
+        )
+
+    else:
+        raise ValueError(f"Unknown VFD scenario: {scenario}. Expected nominal, overfrequency, decel_overvoltage, or live_stream.")

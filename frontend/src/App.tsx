@@ -96,18 +96,28 @@ export function App() {
         setIsPipelineRunning(true);
         setErrorMessage(null);
 
-        // Fetch timeseries & spectrum
-        const [telData, specData] = await Promise.all([
+        // Target asset determination based on active scenario
+        const targetAssetId =
+          scenarioId === 'live_stream' ||
+          scenarioId === 'hil' ||
+          scenarioId.startsWith('ds_hil')
+            ? 'VFD_VM_01'
+            : 'P-301A';
+
+        // Fetch timeseries, spectrum, and topology for target asset
+        const [telData, specData, topoData] = await Promise.all([
           fetchTelemetry(scenarioId),
           fetchSpectrum(scenarioId),
+          fetchTopology(targetAssetId),
         ]);
         setTelemetry(telData);
         setSpectrum(specData);
+        setTopology(topoData);
 
         // Run LangGraph pipeline for this scenario & thread
         await runRCAPipeline({
           dataset_id: scenarioId,
-          asset_id: 'P-301A',
+          asset_id: targetAssetId,
           thread_id: threadId,
           use_deepseek: true,
           deepseek_model: deepseekModel,

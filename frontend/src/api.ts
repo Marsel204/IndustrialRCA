@@ -5,6 +5,7 @@ import {
   TopologyData,
   RCAState,
   LatestIncident,
+  LiveMetric,
 } from './types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || '/api/v1';
@@ -169,3 +170,46 @@ export function subscribeTelemetryEvents(
     eventSource.close();
   };
 }
+
+export async function fetchLiveMetrics(): Promise<LiveMetric> {
+  const res = await fetch(`${API_BASE}/telemetry/live/metrics`);
+  if (!res.ok) throw new Error(`Failed to fetch live metrics: ${res.statusText}`);
+  return res.json();
+}
+
+export function subscribeLiveTelemetryStream(
+  onMetric: (metric: LiveMetric) => void,
+  onError?: (err: any) => void
+): () => void {
+  const eventSource = new EventSource(`${API_BASE}/telemetry/live/stream`);
+
+  eventSource.onmessage = (event) => {
+    try {
+      const data: LiveMetric = JSON.parse(event.data);
+      onMetric(data);
+    } catch (err) {
+      console.error('Error parsing live telemetry stream metric:', err);
+    }
+  };
+
+  eventSource.onerror = (err) => {
+    if (onError) onError(err);
+  };
+
+  return () => {
+    eventSource.close();
+  };
+}
+
+export async function fetchTSDBHistory(seconds = 120): Promise<any[]> {
+  try {
+    const res = await fetch(`${API_BASE}/telemetry/tsdb/history?seconds=${seconds}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.history || [];
+  } catch (err) {
+    console.error('Error fetching TSDB history:', err);
+    return [];
+  }
+}
+

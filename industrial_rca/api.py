@@ -50,6 +50,7 @@ from industrial_rca.data.telemetry_generator import (
     TelemetryStore,
     generate_normal_scenario,
     generate_fault_scenario,
+    generate_vfd_dataset,
     generate_high_frequency_vibration,
 )
 from industrial_rca.tools.telemetry_analytics import (
@@ -60,6 +61,8 @@ from industrial_rca.tools.telemetry_analytics import (
 from industrial_rca.tools.topology_tracer import AssetTopologyTracer
 from industrial_rca.tools.cmms_connector import CMMSConnector
 from industrial_rca.tools.deepseek_client import DeepSeekClient
+from industrial_rca.tools.influx_tool import InfluxDBTelemetryTool
+from industrial_rca.data.embedded_tsdb import GLOBAL_TSDB
 from industrial_rca.graph.workflow import create_rca_graph
 
 
@@ -83,6 +86,7 @@ analytics_tool = TelemetryAnalyticsTool(GLOBAL_TELEMETRY_CACHE)
 topology_tracer = AssetTopologyTracer()
 cmms_tool = CMMSConnector()
 deepseek_client = DeepSeekClient()
+influx_tool = InfluxDBTelemetryTool()
 
 # Stateful shared checkpointer and graph
 GLOBAL_CHECKPOINTER = MemorySaver()
@@ -93,7 +97,7 @@ SCENARIOS_REGISTRY: Dict[str, str] = {}
 
 
 def _ensure_default_scenarios():
-    """Initializes and registers standard baseline and fault scenarios if not present."""
+    """Initializes and registers standard baseline, fault, and live stream scenarios if not present."""
     if "fault" not in SCENARIOS_REGISTRY:
         ds_fault = generate_fault_scenario()
         ds_id_fault = TelemetryStore.register(ds_fault, "ds_fault")
@@ -103,6 +107,11 @@ def _ensure_default_scenarios():
         ds_norm = generate_normal_scenario()
         ds_id_norm = TelemetryStore.register(ds_norm, "ds_normal")
         SCENARIOS_REGISTRY["normal"] = ds_id_norm
+
+    if "live_stream" not in SCENARIOS_REGISTRY:
+        ds_live = generate_vfd_dataset(scenario="live_stream")
+        ds_id_live = TelemetryStore.register(ds_live, "ds_live_stream")
+        SCENARIOS_REGISTRY["live_stream"] = ds_id_live
 
 
 _ensure_default_scenarios()
@@ -119,12 +128,24 @@ LATEST_HIL_INCIDENT: Dict[str, Any] = {
 _HIL_EVENT_SUBSCRIBERS: List[asyncio.Queue] = []
 _SUBSCRIBER_LOCK = threading.Lock()
 
+_LIVE_STREAM_SUBSCRIBERS: List[asyncio.Queue] = []
+_LIVE_STREAM_LOCK = threading.Lock()
+
 
 def _notify_hil_subscribers(event_data: Dict[str, Any]):
     with _SUBSCRIBER_LOCK:
         for q in _HIL_EVENT_SUBSCRIBERS:
             try:
                 q.put_nowait(event_data)
+            except Exception:
+                pass
+
+
+def _broadcast_live_metric(metric_data: Dict[str, Any]):
+    with _LIVE_STREAM_LOCK:
+        for q in _LIVE_STREAM_SUBSCRIBERS:
+            try:
+                q.put_nowait(metric_data)
             except Exception:
                 pass
 
@@ -275,6 +296,19 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
         "data": LATEST_HIL_INCIDENT["incident_data"],
         "timestamp": time.time(),
     })
+    _broadcast_live_metric({
+        "event": "incident",
+        "incident_id": inc_id,
+        "asset_id": incident.asset_id,
+        "fault_code": incident.fault_code,
+        "fault_description": fault_desc,
+        "f_out": 0.0,
+        "v_dc": float(df["v_dc"].max()),
+        "current": float(df["current"].max()),
+        "rpm": 0.0,
+        "status": "TRIPPED",
+        "timestamp": time.time(),
+    })
 
     def _run_graph():
         try:
@@ -353,6 +387,167 @@ async def stream_telemetry_events():
     )
 
 
+# ── Live VFD Telemetry Metrics & SSE Stream ───────────────────────────
+
+@api_app.get("/api/v1/telemetry/live/metrics")
+def get_live_telemetry_metrics():
+    """Returns the latest single live telemetry metric for the Wecon VFD."""
+    return influx_tool.get_latest_metrics(asset_id="VFD_VM_01")
+
+
+@api_app.get("/api/v1/telemetry/live/stream")
+async def stream_live_telemetry():
+    """
+    Server-Sent Events (SSE) streaming 1 Hz real-time VFD telemetry metrics
+    for live frontend timeseries chart updating and incident alerting.
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+    with _LIVE_STREAM_LOCK:
+        _LIVE_STREAM_SUBSCRIBERS.append(queue)
+
+    async def sse_generator():
+        try:
+            init_metric = await asyncio.to_thread(influx_tool.get_latest_metrics, "VFD_VM_01")
+            yield f"data: {json.dumps(init_metric)}\n\n"
+
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                    continue
+                except asyncio.TimeoutError:
+                    pass
+
+                metric = await asyncio.to_thread(influx_tool.get_latest_metrics, "VFD_VM_01")
+                yield f"data: {json.dumps(metric)}\n\n"
+        except (asyncio.CancelledError, GeneratorExit):
+            pass
+        except Exception as e:
+            logger.debug(f"SSE client stream closed: {e}")
+        finally:
+            with _LIVE_STREAM_LOCK:
+                if queue in _LIVE_STREAM_SUBSCRIBERS:
+                    _LIVE_STREAM_SUBSCRIBERS.remove(queue)
+
+    return StreamingResponse(
+        sse_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@api_app.post("/api/v1/telemetry/live/feed")
+def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTasks):
+    """
+    Ingests live telemetry readings directly from MQTT broker listener or Node-RED,
+    commits to the embedded TSDB, evaluates autonomous trip conditions, and broadcasts to SSE clients.
+    """
+    def _unpack(v: Any, default: float = 0.0) -> float:
+        if isinstance(v, (list, tuple)):
+            v = v[0] if len(v) > 0 else default
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return default
+
+    now = time.time()
+    ts = metric.get("ts", metric.get("timestamp", now))
+    if isinstance(ts, str):
+        try:
+            # Check if ISO format or epoch float
+            if "T" in ts:
+                # ISO timestamp
+                ts = time.time()
+            else:
+                ts = float(ts)
+        except ValueError:
+            ts = now
+
+    raw_f_out = _unpack(metric.get("f_out", metric.get("frequency", 40.0)))
+    # If scaled as 4000 for 40.00 Hz (standard Modbus register scaling)
+    f_out = round(raw_f_out / 100.0 if raw_f_out > 200.0 else raw_f_out, 2)
+
+    raw_rpm = _unpack(metric.get("rpm", f_out * 29.0))
+    rpm = round(raw_rpm, 1)
+
+    raw_v_dc = _unpack(metric.get("v_dc", metric.get("bus_voltage", 312.0)))
+    v_dc = round(raw_v_dc, 1)
+
+    raw_current = _unpack(metric.get("current", 0.0))
+    current = round(raw_current / 100.0 if raw_current > 100.0 else raw_current, 2)
+
+    raw_fault = _unpack(metric.get("fault_code", metric.get("fault", 0)))
+    fault_code = int(raw_fault)
+    status = "TRIPPED" if fault_code > 0 else "RUNNING"
+    asset_id = str(metric.get("asset_id", "VFD_VM_01"))
+
+    normalized = {
+        "asset_id": asset_id,
+        "f_out": f_out,
+        "v_dc": v_dc,
+        "current": current,
+        "rpm": rpm,
+        "fault_code": fault_code,
+        "status": status,
+        "timestamp": ts if isinstance(ts, (int, float)) else now,
+        "source": "mqtt_live",
+    }
+
+    # 1. Commit to high-performance embedded TSDB
+    GLOBAL_TSDB.insert(normalized)
+
+    # 2. Autonomous Trip Detection: When fault occurs, slice 60s pre-fault window and dispatch RCA
+    trip_code = GLOBAL_TSDB.check_trip_trigger(normalized)
+    if trip_code is not None:
+        try:
+            df_pre = GLOBAL_TSDB.get_window(seconds=60, asset_id=asset_id)
+            pre_points = df_pre.to_dict("records")
+            fault_info = get_vfd_fault_info(trip_code)
+            fault_desc = fault_info.get("description", f"WECON VM VFD Trip Code {trip_code}")
+            inc = IncidentPayload(
+                asset_id=asset_id,
+                fault_code=trip_code,
+                fault_description=fault_desc,
+                incident_id=f"INC-AUTO-{int(now)}",
+                pre_fault_telemetry=pre_points,
+            )
+            ingest_incident(inc, background_tasks)
+        except Exception as e:
+            logger.warning(f"Auto-trip dispatch error: {e}")
+
+    # 3. Update active tools & broadcast live metric to connected SSE frontend clients
+    influx_tool.update_latest(normalized)
+    _broadcast_live_metric(normalized)
+
+    return {"status": "INGESTED", "metric": normalized, "tsdb_buffered": True}
+
+
+# ── Embedded TSDB History & Diagnostics ───────────────────────────────
+
+@api_app.get("/api/v1/telemetry/tsdb/history")
+def get_tsdb_history(seconds: int = 120, asset_id: str = "VFD_VM_01"):
+    """
+    Returns the historical telemetry window from the embedded TSDB.
+    Used by frontend charts to instantly pre-fill upon load.
+    """
+    df = GLOBAL_TSDB.get_window(seconds=seconds, asset_id=asset_id)
+    records = df.to_dict("records") if not df.empty else []
+    return {
+        "asset_id": asset_id,
+        "seconds": seconds,
+        "count": len(records),
+        "history": records,
+    }
+
+
+@api_app.get("/api/v1/telemetry/tsdb/stats")
+def get_tsdb_stats(seconds: int = 300):
+    """
+    Returns real-time statistical performance, buffer health, and metrics of the embedded TSDB.
+    """
+    return GLOBAL_TSDB.get_stats(seconds=seconds)
+
+
 # ── Scenarios Catalog ─────────────────────────────────────────────────
 
 @api_app.get("/api/v1/scenarios")
@@ -381,6 +576,17 @@ def list_scenarios():
             "has_trip": False,
             "badge": "HEALTHY",
         },
+        {
+            "id": "live_stream",
+            "dataset_id": SCENARIOS_REGISTRY.get("live_stream", "ds_live_stream"),
+            "name": "Wecon VFD Live Telemetry (Node-RED / InfluxDB)",
+            "asset_id": "VFD_VM_01",
+            "condition": "LIVE_STREAM",
+            "description": "Continuous 1 Hz live streaming telemetry from Node-RED edge broker, InfluxDB, and Wecon VFD hardware.",
+            "duration_sec": 300,
+            "has_trip": False,
+            "badge": "LIVE_EDGE",
+        },
     ]
     if LATEST_HIL_INCIDENT.get("has_incident"):
         inc = LATEST_HIL_INCIDENT["incident_data"]
@@ -402,6 +608,12 @@ def list_scenarios():
 
 def _resolve_ds(dataset_id: str) -> TelemetryDataset:
     _ensure_default_scenarios()
+    if dataset_id in ("live_stream", "ds_live_stream"):
+        ds = generate_vfd_dataset(scenario="live_stream")
+        TelemetryStore.register(ds, "ds_live_stream")
+        SCENARIOS_REGISTRY["live_stream"] = "ds_live_stream"
+        return ds
+
     actual_id = SCENARIOS_REGISTRY.get(dataset_id, dataset_id)
     try:
         return TelemetryStore.get(actual_id)
@@ -424,10 +636,18 @@ def get_telemetry_series(dataset_id: str):
 
     timestamps = ds.get_timestamps().tolist()
     series_data: Dict[str, List[float]] = {}
-    standard_tags = ["PT-30101", "DPS-30101", "VI-301-R", "TI-301-DE", "IT-30101", "f_out", "v_dc", "current", "v_out"]
+    skip_cols = {"timestamp_sec", "timestamp", "asset_id", "status", "_time", "_measurement", "_field", "result", "table"}
     for col in df.columns:
-        if col in standard_tags or col != "timestamp_sec":
-            series_data[col] = df[col].astype(float).round(3).tolist()
+        if col in skip_cols:
+            continue
+        try:
+            series_data[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).round(3).tolist()
+        except Exception:
+            pass
+
+    combined_limits = dict(OPERATIONAL_LIMITS)
+    from industrial_rca.config import VFD_OPERATIONAL_LIMITS
+    combined_limits.update(VFD_OPERATIONAL_LIMITS)
 
     return {
         "dataset_id": dataset_id,
@@ -436,7 +656,7 @@ def get_telemetry_series(dataset_id: str):
         "sample_count": len(df),
         "timestamps": timestamps,
         "series": series_data,
-        "operational_limits": OPERATIONAL_LIMITS,
+        "operational_limits": combined_limits,
     }
 
 
