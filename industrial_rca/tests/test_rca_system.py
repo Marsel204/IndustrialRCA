@@ -80,6 +80,45 @@ def test_change_point_detector():
     assert best_cp["post_change_mean"] > best_cp["pre_change_mean"]
 
 
+def test_change_point_detector_short_buffer():
+    """Verify dynamic windowing and change point detection on short buffers (N < 240)."""
+    # Test across short buffer lengths: 30, 60, 100
+    for n in [30, 60, 100]:
+        mid = n // 2
+        signal = np.concatenate([np.full(mid, 10.0), np.full(n - mid, 50.0)])
+        cps = ChangePointDetector.detect_change_points(signal, window_sec=60, step_sec=5, min_relative_shift=0.10)
+        assert len(cps) >= 1, f"Failed to detect change point for short buffer N={n}"
+        best_cp = max(cps, key=lambda x: x["detector_score"])
+        assert abs(best_cp["timestamp_sec"] - mid) <= 10
+        assert best_cp["magnitude_shift"] > 0
+
+
+def test_telemetry_store_lru_and_waveform_cache():
+    """Verify bounded LRU cache capacity and eviction in TelemetryStore and waveform cache."""
+    # Test TelemetryStore LRU eviction
+    orig_store_len = len(TelemetryStore._store)
+    try:
+        ds = generate_normal_scenario(duration_sec=10)
+        registered_ids = []
+        for i in range(60):
+            ds_id = TelemetryStore.register(ds, f"test_eviction_ds_{i}")
+            registered_ids.append(ds_id)
+
+        assert len(TelemetryStore._store) <= TelemetryStore.MAX_ITEMS
+        # Oldest items should have been evicted
+        assert registered_ids[0] not in TelemetryStore._store
+        assert registered_ids[-1] in TelemetryStore._store
+    finally:
+        TelemetryStore.clear()
+
+    # Test waveform cache copy isolation
+    t1, sig1 = generate_high_frequency_vibration(is_cavitating=False, seed=99)
+    sig1_orig = sig1[0]
+    sig1[0] += 999.0  # Mutate returned copy
+    t2, sig2 = generate_high_frequency_vibration(is_cavitating=False, seed=99)
+    assert sig2[0] == sig1_orig, "Waveform cache returned mutated reference instead of copy"
+
+
 def test_spectral_analyzer_normal_vs_cavitation():
     """Test FFT decomposition distinguishing discrete shaft harmonics from broadband cavitation noise."""
     t_norm, sig_norm = generate_high_frequency_vibration(is_cavitating=False, seed=42)

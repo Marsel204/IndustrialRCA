@@ -9,7 +9,7 @@ import os
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Generator
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -108,6 +108,69 @@ class DeepSeekClient:
                 return mock_res
         else:
             return self._generate_simulated_response(messages, target_model)
+
+    def chat_completion_stream(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        temperature: float = 0.3,
+        max_tokens: int = 2048,
+    ) -> Generator[Dict[str, str], None, None]:
+        """
+        Executes a streaming chat completion call against DeepSeek API or deterministic simulation.
+        Yields chunk dictionaries with delta strings:
+        {"content": "...", "reasoning_content": "..."}
+        """
+        target_model = model or self.default_model
+
+        if self.is_live and self.client is not None:
+            try:
+                kwargs: Dict[str, Any] = {
+                    "model": target_model,
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "stream": True,
+                }
+                if "reasoner" not in target_model:
+                    kwargs["temperature"] = temperature
+
+                response = self.client.chat.completions.create(**kwargs)
+                for chunk in response:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    c_delta = getattr(delta, "content", None) or ""
+                    r_delta = getattr(delta, "reasoning_content", None) or ""
+                    if c_delta or r_delta:
+                        yield {"content": c_delta, "reasoning_content": r_delta}
+                return
+            except Exception as e:
+                logger.error(f"DeepSeek live streaming error: {e}. Falling back to simulated stream.")
+
+        # Deterministic simulation streaming
+        simulated = self._generate_simulated_response(messages, target_model)
+        reasoning = simulated.get("reasoning_content", "")
+        content = simulated.get("content", "")
+
+        # Stream reasoning first if present
+        if reasoning:
+            r_words = reasoning.split(" ")
+            chunk_buf = []
+            for i, word in enumerate(r_words):
+                chunk_buf.append(word + (" " if i < len(r_words) - 1 else ""))
+                if len(chunk_buf) >= 3 or i == len(r_words) - 1:
+                    yield {"content": "", "reasoning_content": "".join(chunk_buf)}
+                    chunk_buf = []
+
+        # Stream content
+        if content:
+            c_words = content.split(" ")
+            chunk_buf = []
+            for i, word in enumerate(c_words):
+                chunk_buf.append(word + (" " if i < len(c_words) - 1 else ""))
+                if len(chunk_buf) >= 4 or i == len(c_words) - 1:
+                    yield {"content": "".join(chunk_buf), "reasoning_content": ""}
+                    chunk_buf = []
 
     def _generate_simulated_response(
         self, messages: List[Dict[str, str]], model: str

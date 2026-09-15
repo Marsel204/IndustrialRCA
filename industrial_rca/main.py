@@ -4,6 +4,10 @@ Complies with ISA-95, ISO 14224, ISO 10816, and LangGraph HITL Orchestration.
 """
 
 import sys
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 import time
 import argparse
 from pathlib import Path
@@ -435,7 +439,15 @@ def main():
     parser.add_argument("--use-deepseek", action="store_true", help="Enable DeepSeek AI diagnostic reasoning")
     parser.add_argument("--deepseek-model", type=str, default="deepseek-chat", choices=["deepseek-chat", "deepseek-reasoner"], help="DeepSeek model to use (default: deepseek-chat)")
     parser.add_argument("--test-deepseek", action="store_true", help="Test DeepSeek API connectivity and exit")
+    parser.add_argument("--server", action="store_true", help="Start standalone FastAPI REST/SSE backend on port 8000")
+    parser.add_argument("--port", type=int, default=8000, help="Port for FastAPI server (default: 8000)")
     args = parser.parse_args()
+
+    if args.server:
+        import uvicorn
+        console.print(f"[bold green][*] Starting Industrial RCA FastAPI Backend Server on port {args.port}...[/bold green]")
+        uvicorn.run("industrial_rca.api:api_app", host="0.0.0.0", port=args.port, reload=False)
+        return
 
     if args.test_deepseek:
         from industrial_rca.tools.deepseek_client import DeepSeekClient

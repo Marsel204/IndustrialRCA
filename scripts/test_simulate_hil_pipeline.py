@@ -4,28 +4,33 @@ Enables instant zero-hardware testing of the IndustrialRCA API endpoint,
 simulating a real WECON VM VFD Deceleration Overvoltage (Err06) incident.
 """
 
+import sys
 import time
 import json
 import urllib.request
 import urllib.error
+
+# Ensure UTF-8 output on Windows consoles
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 API_URL = "http://localhost:8000/api/v1/telemetry/incident"
 HEALTH_URL = "http://localhost:8000/api/v1/telemetry/health"
 
 def run_simulation_test():
     print("=" * 70)
-    print("🚀 IndustrialRCA HIL Middleware Ingestion Simulation Test")
+    print("IndustrialRCA HIL Middleware Ingestion Simulation Test")
     print("=" * 70)
 
     # 1. Health check
-    print("\n[1/3] Checking FastAPI middleware health...")
+    print("\n[1/3] Checking FastAPI backend health...")
     try:
         with urllib.request.urlopen(HEALTH_URL, timeout=3) as resp:
             data = json.loads(resp.read().decode())
-            print(f"  ✓ Health Status: {data.get('status')} ({data.get('service')})")
+            print(f"  [OK] Health Status: {data.get('status')} ({data.get('service')})")
     except Exception as e:
-        print(f"  ❌ Health check failed: {e}")
-        print("  💡 Tip: Ensure app.py is running via 'streamlit run app.py' or 'uvicorn app:api_app --port 8000'.")
+        print(f"  [FAIL] Health check failed: {e}")
+        print("  Tip: Ensure FastAPI server is running via 'python -m industrial_rca.main --server --port 8000'.")
         return False
 
     # 2. Build 60-second simulated telemetry buffer
@@ -108,8 +113,8 @@ def run_simulation_test():
         return False
 
     print("\n" + "=" * 70)
-    print("✅ TEST PASSED: Ingestion pipeline received and dispatched the incident!")
-    print("👉 Check the Streamlit dashboard at http://localhost:8501 to inspect the live incident.")
+    print("TEST PASSED: Ingestion pipeline received and dispatched the incident!")
+    print("Check the React SPA dashboard at http://localhost:5173 to inspect the live incident.")
     print("=" * 70)
     return True
 

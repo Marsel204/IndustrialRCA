@@ -144,47 +144,84 @@ class ChangePointDetector:
         """
         n = len(values)
         change_points = []
-        if n < 2 * window_sec:
+        if n < 20:
             return change_points
 
-        scores = []
-        timestamps = []
-
-        for t in range(window_sec, n - window_sec, step_sec):
-            w_left = values[t - window_sec : t]
-            w_right = values[t : t + window_sec]
-
-            m_left, m_right = np.mean(w_left), np.mean(w_right)
-            s_left, s_right = np.std(w_left), np.std(w_right)
-
-            # Pooled standard error
-            pooled_se = np.sqrt((s_left**2 / window_sec) + (s_right**2 / window_sec) + 1e-6)
-            t_stat = abs(m_right - m_left) / pooled_se
-
-            # Variance ratio
-            var_ratio = max(s_right**2, s_left**2) / (min(s_right**2, s_left**2) + 1e-6)
-            var_score = np.log1p(var_ratio)
-
-            combined_score = float(t_stat + 1.5 * var_score)
-            scores.append(combined_score)
-            timestamps.append(t)
-
-        if not scores:
+        # Dynamic windowing to fix short buffer bug (N < 240)
+        w = min(window_sec, max(10, n // 4))
+        if n < 2 * w:
             return change_points
 
-        # Peak detection above threshold
-        scores = np.array(scores)
+        # Vectorized cumulative prefix sums for O(1) interval stats
+        vals_f = np.asarray(values, dtype=np.float64)
+        c1 = np.empty(n + 1, dtype=np.float64)
+        c1[0] = 0.0
+        np.cumsum(vals_f, out=c1[1:])
+
+        c2 = np.empty(n + 1, dtype=np.float64)
+        c2[0] = 0.0
+        np.cumsum(vals_f * vals_f, out=c2[1:])
+
+        t_indices = np.arange(w, n - w + 1, step_sec, dtype=int)
+        if len(t_indices) == 0:
+            return change_points
+
+        w_f = float(w)
+        left_sums = c1[t_indices] - c1[t_indices - w]
+        right_sums = c1[t_indices + w] - c1[t_indices]
+
+        m_left = left_sums / w_f
+        m_right = right_sums / w_f
+
+        left_sq_sums = c2[t_indices] - c2[t_indices - w]
+        right_sq_sums = c2[t_indices + w] - c2[t_indices]
+
+        var_left = np.maximum(0.0, left_sq_sums / w_f - m_left**2)
+        var_right = np.maximum(0.0, right_sq_sums / w_f - m_right**2)
+
+        # Pooled standard error
+        pooled_se = np.sqrt((var_left / w_f) + (var_right / w_f) + 1e-6)
+        t_stat = np.abs(m_right - m_left) / pooled_se
+
+        # Variance ratio
+        var_max = np.maximum(var_right, var_left)
+        var_min = np.minimum(var_right, var_left)
+        var_ratio = var_max / (var_min + 1e-6)
+        var_score = np.log1p(var_ratio)
+
+        scores = t_stat + 1.5 * var_score
+
+        # Peak detection above threshold supporting single-sample, two-sample, and boundary peaks
         peaks = []
-        for i in range(1, len(scores) - 1):
-            if scores[i] >= threshold_score and scores[i] > scores[i - 1] and scores[i] > scores[i + 1]:
-                peaks.append(i)
+        num_scores = len(scores)
+        if num_scores == 1:
+            if scores[0] >= threshold_score:
+                peaks.append(0)
+        elif num_scores == 2:
+            max_idx = int(np.argmax(scores))
+            if scores[max_idx] >= threshold_score:
+                peaks.append(max_idx)
+        else:
+            if scores[0] >= threshold_score and scores[0] > scores[1]:
+                peaks.append(0)
+            for i in range(1, num_scores - 1):
+                if scores[i] >= threshold_score and scores[i] >= scores[i - 1] and scores[i] >= scores[i + 1]:
+                    if scores[i] > scores[i - 1] or scores[i] > scores[i + 1]:
+                        peaks.append(i)
+            if scores[-1] >= threshold_score and scores[-1] > scores[-2]:
+                peaks.append(num_scores - 1)
 
         for p_idx in peaks:
-            t_sec = timestamps[p_idx]
-            pre_w = values[max(0, t_sec - window_sec) : t_sec]
-            post_w = values[t_sec : min(n, t_sec + window_sec)]
-            pre_m = float(np.mean(pre_w))
-            post_m = float(np.mean(post_w))
+            t_sec = int(t_indices[p_idx])
+            pre_start = max(0, t_sec - w)
+            post_end = min(n, t_sec + w)
+            pre_len = t_sec - pre_start
+            post_len = post_end - t_sec
+            if pre_len == 0 or post_len == 0:
+                continue
+
+            pre_m = float((c1[t_sec] - c1[pre_start]) / pre_len)
+            post_m = float((c1[post_end] - c1[t_sec]) / post_len)
             shift = float(post_m - pre_m)
             rel_shift = abs(shift) / (abs(pre_m) + 1e-6)
 

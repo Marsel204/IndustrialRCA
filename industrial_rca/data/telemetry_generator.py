@@ -20,6 +20,9 @@ from industrial_rca.config import (
 )
 
 
+import threading
+from collections import OrderedDict
+
 @dataclass
 class TelemetryDataset:
     scenario_name: str
@@ -40,24 +43,40 @@ class TelemetryDataset:
 
 
 class TelemetryStore:
-    """In-memory registry decoupling raw TSDB datasets from serializable LangGraph state."""
-    _store: Dict[str, TelemetryDataset] = {}
+    """In-memory registry decoupling raw TSDB datasets from serializable LangGraph state.
+    Uses bounded LRU cache (OrderedDict, max 50 items) to prevent memory leaks."""
+    _store: "OrderedDict[str, TelemetryDataset]" = OrderedDict()
+    _lock = threading.RLock()
+    MAX_ITEMS: int = 50
 
     @classmethod
     def register(cls, dataset: TelemetryDataset, custom_id: Optional[str] = None) -> str:
         ds_id = custom_id or f"ds_{dataset.scenario_name.lower().replace(' ', '_')}_{id(dataset)}"
-        cls._store[ds_id] = dataset
+        with cls._lock:
+            if ds_id in cls._store:
+                cls._store.move_to_end(ds_id)
+            cls._store[ds_id] = dataset
+            if len(cls._store) > cls.MAX_ITEMS:
+                cls._store.popitem(last=False)
         return ds_id
 
     @classmethod
     def get(cls, dataset_id: str) -> TelemetryDataset:
-        if dataset_id not in cls._store:
-            raise KeyError(f"Dataset '{dataset_id}' not found in TelemetryStore. Available: {list(cls._store.keys())}")
-        return cls._store[dataset_id]
+        with cls._lock:
+            if dataset_id not in cls._store:
+                raise KeyError(f"Dataset '{dataset_id}' not found in TelemetryStore. Available: {list(cls._store.keys())}")
+            cls._store.move_to_end(dataset_id)
+            return cls._store[dataset_id]
 
     @classmethod
     def clear(cls) -> None:
-        cls._store.clear()
+        with cls._lock:
+            cls._store.clear()
+
+
+_VIBRATION_WAVEFORM_CACHE: "OrderedDict[Tuple[bool, float, float, int], Tuple[np.ndarray, np.ndarray]]" = OrderedDict()
+_WAVEFORM_CACHE_LOCK = threading.Lock()
+MAX_WAVEFORM_CACHE_ITEMS: int = 50
 
 
 def generate_high_frequency_vibration(
@@ -68,12 +87,20 @@ def generate_high_frequency_vibration(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Synthesize high-frequency piezoelectric accelerometer vibration signal (in mm/s velocity).
+    Results are cached in memory using a bounded LRU cache (max 50 items) to accelerate repeated queries.
 
     - Normal state: Prominent 1X (49.67 Hz) and small 2X (99.33 Hz) shaft speed peaks.
                     Broadband noise floor (2 kHz - 8 kHz) is minimal.
     - Cavitation state: Explosive broadband noise floor (2 kHz - 8 kHz) caused by
                         imploding vapor micro-bubbles, plus harmonic distortion.
     """
+    cache_key = (is_cavitating, duration_sec, sampling_rate_hz, seed)
+    with _WAVEFORM_CACHE_LOCK:
+        if cache_key in _VIBRATION_WAVEFORM_CACHE:
+            _VIBRATION_WAVEFORM_CACHE.move_to_end(cache_key)
+            t_cached, sig_cached = _VIBRATION_WAVEFORM_CACHE[cache_key]
+            return t_cached.copy(), sig_cached.copy()
+
     rng = np.random.default_rng(seed)
     n_samples = int(duration_sec * sampling_rate_hz)
     t = np.linspace(0.0, duration_sec, n_samples, endpoint=False)
@@ -113,7 +140,14 @@ def generate_high_frequency_vibration(
         current_rms = np.sqrt(np.mean(signal**2))
         signal = signal * (11.4 / (current_rms + 1e-6))
 
-    return t, signal
+    with _WAVEFORM_CACHE_LOCK:
+        if cache_key in _VIBRATION_WAVEFORM_CACHE:
+            _VIBRATION_WAVEFORM_CACHE.move_to_end(cache_key)
+        _VIBRATION_WAVEFORM_CACHE[cache_key] = (t, signal)
+        if len(_VIBRATION_WAVEFORM_CACHE) > MAX_WAVEFORM_CACHE_ITEMS:
+            _VIBRATION_WAVEFORM_CACHE.popitem(last=False)
+
+    return t.copy(), signal.copy()
 
 
 def generate_normal_scenario(duration_sec: int = SIMULATION_DURATION_SEC, seed: int = 101) -> TelemetryDataset:

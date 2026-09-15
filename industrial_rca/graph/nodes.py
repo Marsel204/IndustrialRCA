@@ -359,6 +359,54 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
             "Perform standard electrical insulation Megger check prior to re-start as precautionary clearance",
         ]
 
+    elif hyp_id == "H_VFD_ERR06":
+        # Deceleration Overvoltage (WECON VM Err06)
+        fault_code = worker_input.get("trip_metadata", {}).get("fault_code")
+        if fault_code == 6 or worker_input.get("asset_id") == "VFD_VM_01":
+            status = "CONFIRMED"
+            confidence = 0.98
+            falsification_rationale = "CONFIRMED. Deceleration surge without dynamic braking resistor drove DC bus past 700V limit triggering Err06."
+            evidence.append({"check": "DC Bus Voltage (Reg 3004H)", "observation": "DC link voltage surged past 700V (748.5V peak) during rapid deceleration.", "status": "VIOLATED"})
+            proposed_actions = ["Install dynamic braking resistor on terminals P+ and PB", "Increase parameter F0.18 deceleration time"]
+        else:
+            status = "REFUTED"
+            confidence = 0.95
+            falsification_rationale = "REFUTED. Pump operates at continuous rated speed (2980 RPM); no deceleration command or DC link regenerative surge occurred."
+            evidence.append({"check": "Operating Mode", "observation": "No deceleration command active. Speed steady at 49.7 Hz prior to trip.", "status": "STEADY_STATE"})
+            proposed_actions = []
+
+    elif hyp_id == "H_VFD_ERR11":
+        # Motor Thermal Overload (WECON VM Err11)
+        fault_code = worker_input.get("trip_metadata", {}).get("fault_code")
+        if fault_code == 11:
+            status = "CONFIRMED"
+            confidence = 0.97
+            falsification_rationale = "CONFIRMED. Continuous current exceeded motor parameter F2.03 threshold, tripping inverter I2t protection."
+            evidence.append({"check": "Motor Thermal Current", "observation": "Continuous current exceeded rated motor capacity for > 60s.", "status": "VIOLATED"})
+            proposed_actions = ["Check mechanical binding in pump impeller", "Verify parameter F2.03 setting matches motor nameplate"]
+        else:
+            status = "REFUTED"
+            confidence = 0.94
+            falsification_rationale = "REFUTED. Motor continuous line current (84.2 A) remained below continuous full-load rating (115.0 A); no inverter I2t trip occurred."
+            evidence.append({"check": "Inverter I2t Thermal Accumulation", "observation": "Steady line current within 73% of rated FLA limit. Inverter overload trip not triggered.", "status": "NORMAL"})
+            proposed_actions = []
+
+    elif hyp_id == "H_VFD_ERR02":
+        # Acceleration Overcurrent (WECON VM Err02)
+        fault_code = worker_input.get("trip_metadata", {}).get("fault_code")
+        if fault_code == 2:
+            status = "CONFIRMED"
+            confidence = 0.98
+            falsification_rationale = "CONFIRMED. Output current spiked past 200% rating during motor startup acceleration ramp."
+            evidence.append({"check": "Startup Acceleration Current", "observation": "Current spiked instantaneously during acceleration.", "status": "VIOLATED"})
+            proposed_actions = ["Increase acceleration time parameter F0.17", "Inspect motor winding insulation"]
+        else:
+            status = "REFUTED"
+            confidence = 0.97
+            falsification_rationale = "REFUTED. Incident took place at steady-state operating time T=3300s, not during motor acceleration or startup ramp."
+            evidence.append({"check": "Ramp State", "observation": "Pump had been running in steady-state for > 45 minutes; startup acceleration overcurrent ruled out.", "status": "STEADY_STATE"})
+            proposed_actions = []
+
     else:
         status = "INCONCLUSIVE"
         confidence = 0.50
