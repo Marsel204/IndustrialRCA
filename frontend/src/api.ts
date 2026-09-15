@@ -213,3 +213,13 @@ export async function fetchTSDBHistory(seconds = 120): Promise<any[]> {
   }
 }
 
+export async function clearIncident(): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${API_BASE}/telemetry/incident/clear`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) throw new Error(`Failed to clear incident: ${res.statusText}`);
+  return res.json();
+}
+
+

@@ -26,6 +26,7 @@ import {
   submitHumanReview,
   fetchLatestIncident,
   subscribeTelemetryEvents,
+  clearIncident,
 } from './api';
 
 export function App() {
@@ -196,6 +197,15 @@ export function App() {
           } catch (e) {
             console.error('Failed to load completed RCA state:', e);
           }
+        } else if (eventData.event === 'hil_incident_cleared') {
+          setLatestIncident({
+            has_incident: false,
+            incident_data: null,
+            pipeline_status: 'READY',
+          });
+          setActiveScenarioId('live_stream');
+          setInspectorTab('telemetry');
+          fetchTelemetry('live_stream').then(setTelemetry).catch(console.warn);
         }
       },
       (err) => {
@@ -206,20 +216,69 @@ export function App() {
     return () => unsubscribe();
   }, [activeThreadId, latestIncident]);
 
-  // 1-Click Load Incident handler
-  const handleLoadLiveIncident = () => {
-    if (latestIncident?.incident_data?.dataset_id) {
-      const hilDsId = latestIncident.incident_data.dataset_id;
-      setActiveScenarioId(hilDsId);
-      setInspectorTab('telemetry');
-    }
-  };
+  // Reset Pipeline & Return System to Nominal Live Monitoring
+  const handleResetPipeline = async () => {
+    try {
+      setIsPipelineRunning(true);
+      // 1. Call backend to clear active incident & reset TSDB trip triggers
+      await clearIncident().catch(console.warn);
 
-  // Reset Pipeline
-  const handleResetPipeline = () => {
-    const newThread = `rca-gui-${Date.now()}`;
-    setActiveThreadId(newThread);
-    loadScenarioData(activeScenarioId, newThread);
+      // 2. Reset frontend state
+      setLatestIncident({
+        has_incident: false,
+        incident_data: null,
+        pipeline_status: 'READY',
+      });
+      setActiveScenarioId('live_stream');
+      const newThread = `rca-live-${Date.now()}`;
+      setActiveThreadId(newThread);
+      setInspectorTab('telemetry');
+
+      // 3. Re-fetch nominal live telemetry & topology
+      const [telData, specData, topoData] = await Promise.all([
+        fetchTelemetry('live_stream').catch(() => null),
+        fetchSpectrum('live_stream').catch(() => null),
+        fetchTopology('VFD_VM_01').catch(() => null),
+      ]);
+      if (telData) setTelemetry(telData);
+      if (specData) setSpectrum(specData);
+      if (topoData) setTopology(topoData);
+
+      // 4. Reset RCA workspace state
+      setRcaState({
+        thread_id: newThread,
+        pipeline_status: 'MONITORING',
+        current_step: 1,
+        is_paused_at_hitl: false,
+        has_active_trip: false,
+        fault_code: 0,
+        detected_anomalies: [],
+        tag_profiles: {},
+        hypothesis_results: [],
+        winning_hypothesis: null,
+        falsification_summary: [],
+        fmea_classification: {},
+        causal_chain_5_whys: [],
+        root_cause_asset: 'VFD_VM_01',
+        root_cause_description:
+          'Continuous real-time telemetry from Wecon VM VFD is nominal. Listening for hardware trip trigger over MQTT / PLC D-variable.',
+        human_review_required: false,
+        human_review_payload: null,
+        human_review_decision: null,
+        incident_report_8d: null,
+        sap_work_order: null,
+        execution_logs: [
+          '[LIVE_MONITOR] System reset to nominal.',
+          '[LIVE_MONITOR] Listening for physical trip trigger on MQTT 1883/8883...',
+        ],
+        deepseek_evaluation: null,
+      });
+    } catch (err: any) {
+      console.error('Reset error:', err);
+      setErrorMessage(err.message || 'Failed to reset system.');
+    } finally {
+      setIsPipelineRunning(false);
+    }
   };
 
   // Submit Human Review from Modal
@@ -266,7 +325,6 @@ export function App() {
         onSelectScenario={(sId) => setActiveScenarioId(sId)}
         apiOnline={apiOnline}
         latestIncident={latestIncident}
-        onLoadIncident={handleLoadLiveIncident}
         onResetPipeline={handleResetPipeline}
         deepseekModel={deepseekModel}
         onToggleModel={setDeepseekModel}

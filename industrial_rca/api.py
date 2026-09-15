@@ -364,6 +364,40 @@ def get_latest_incident():
     return LATEST_HIL_INCIDENT
 
 
+@api_app.post("/api/v1/telemetry/incident/clear")
+def clear_incident():
+    """
+    Clears the active hardware incident, restores nominal monitoring,
+    and resets the TSDB trip triggers so the bench can monitor normally or trip again.
+    """
+    LATEST_HIL_INCIDENT["has_incident"] = False
+    LATEST_HIL_INCIDENT["incident_data"] = None
+    LATEST_HIL_INCIDENT["pipeline_status"] = "READY"
+    LATEST_HIL_INCIDENT["graph_result"] = None
+    LATEST_HIL_INCIDENT["received_at"] = None
+    LATEST_HIL_INCIDENT["version"] += 1
+
+    GLOBAL_TSDB._last_fault_code = 0
+    GLOBAL_TSDB._last_trip_time = 0.0
+
+    _notify_hil_subscribers({
+        "event": "hil_incident_cleared",
+        "status": "READY",
+        "timestamp": time.time(),
+    })
+
+    return {
+        "status": "INCIDENT_CLEARED",
+        "message": "Active hardware incident cleared. System restored to real-time nominal monitoring.",
+    }
+
+
+@api_app.post("/api/v1/rca/reset")
+def reset_rca(thread_id: Optional[str] = None):
+    """Alias to reset active incident and pipeline state back to normal."""
+    return clear_incident()
+
+
 @api_app.get("/api/v1/telemetry/events/stream")
 async def stream_telemetry_events():
     """SSE endpoint for live edge HIL trip alerts push to React UI."""
@@ -481,6 +515,9 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
             return default
 
     now = time.time()
+    if metric.get("reset") is True or metric.get("clear") is True:
+        return clear_incident()
+
     ts = metric.get("ts", metric.get("timestamp", now))
     if isinstance(ts, str):
         try:

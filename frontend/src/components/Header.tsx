@@ -14,7 +14,6 @@ interface HeaderProps {
   onSelectScenario: (scenarioId: string) => void;
   apiOnline: boolean;
   latestIncident: LatestIncident | null;
-  onLoadIncident: () => void;
   onResetPipeline: () => void;
   deepseekModel: string;
   onToggleModel: (model: string) => void;
@@ -27,7 +26,6 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectScenario,
   apiOnline,
   latestIncident,
-  onLoadIncident,
   onResetPipeline,
   deepseekModel,
   onToggleModel,
@@ -176,15 +174,23 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </div>
 
-          {/* Reset Pipeline Button */}
+          {/* Reset / Return to Normal Button */}
           <button
             onClick={onResetPipeline}
             disabled={isPipelineRunning}
-            className="flex items-center space-x-1.5 px-3 py-1 bg-white hover:bg-slate-50 active:bg-slate-100 border border-slate-200 text-slate-700 rounded-md font-mono text-xs font-medium transition-colors cursor-pointer shadow-xs disabled:opacity-50"
-            title="Reset active LangGraph thread and re-run analysis"
+            className={`flex items-center space-x-1.5 px-3 py-1 rounded-md font-mono text-xs font-semibold transition-colors cursor-pointer shadow-xs disabled:opacity-50 ${
+              latestIncident?.has_incident
+                ? 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700'
+                : 'bg-white hover:bg-slate-50 active:bg-slate-100 border border-slate-200 text-slate-700'
+            }`}
+            title={
+              latestIncident?.has_incident
+                ? 'Fault resolved: Click to clear incident and return to normal real-time monitoring'
+                : 'Reset active session and re-run baseline monitoring'
+            }
           >
-            <RotateCcw className={`w-3.5 h-3.5 text-slate-500 ${isPipelineRunning ? 'animate-spin' : ''}`} />
-            <span>Reset</span>
+            <RotateCcw className={`w-3.5 h-3.5 ${latestIncident?.has_incident ? 'text-white' : 'text-slate-500'} ${isPipelineRunning ? 'animate-spin' : ''}`} />
+            <span>{latestIncident?.has_incident ? 'Reset to Normal' : 'Reset'}</span>
           </button>
         </div>
       </div>
