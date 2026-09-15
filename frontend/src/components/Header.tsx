@@ -37,26 +37,33 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-xs">
-      {/* Live HIL Alert Banner if active */}
+      {/* Live Hardware Incident Banner (100% Autonomous) */}
       {latestIncident?.has_incident && (
-        <div className="bg-rose-50 border-b border-rose-200 px-4 py-2 flex items-center justify-between animate-pulse">
+        <div className="bg-rose-50 border-b border-rose-200 px-4 py-2 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <AlertOctagon className="w-4 h-4 text-rose-600 animate-bounce" />
+            <div className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600"></span>
+            </div>
             <div>
               <span className="font-mono text-xs font-bold text-rose-700 tracking-wider">
-                🚨 LIVE HIL INCIDENT DETECTED FROM EDGE BENCH
+                🚨 HARDWARE FAULT AUTOMATICALLY CAPTURED FROM EDGE BENCH
               </span>
               <span className="ml-2 font-mono text-xs text-rose-900">
-                Asset: {latestIncident.incident_data?.asset_id} | Code: Err0{latestIncident.incident_data?.fault_code} ({latestIncident.incident_data?.fault_description})
+                Asset: {latestIncident.incident_data?.asset_id || 'VFD_VM_01'} | Code: Err0{latestIncident.incident_data?.fault_code} ({latestIncident.incident_data?.fault_description})
               </span>
             </div>
           </div>
-          <button
-            onClick={onLoadIncident}
-            className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-mono text-xs font-semibold rounded shadow-xs transition-all flex items-center space-x-1 cursor-pointer"
-          >
-            <span>1-Click Load Incident</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            <span className="px-2.5 py-1 bg-rose-100 border border-rose-300 text-rose-800 font-mono text-xs font-semibold rounded shadow-xs flex items-center space-x-1.5">
+              <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" />
+              <span>
+                {latestIncident.pipeline_status === 'ANALYSIS_COMPLETE'
+                  ? '✓ AUTO-ANALYZED · DIAGNOSIS ACTIVE'
+                  : '⏳ AUTONOMOUS RCA IN PROGRESS...'}
+              </span>
+            </span>
+          </div>
         </div>
       )}
 

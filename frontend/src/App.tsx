@@ -117,18 +117,24 @@ export function App() {
         setSpectrum(specData);
         setTopology(topoData);
 
-        // Run LangGraph pipeline for this scenario & thread
-        await runRCAPipeline({
-          dataset_id: scenarioId,
-          asset_id: targetAssetId,
-          thread_id: threadId,
-          use_deepseek: true,
-          deepseek_model: deepseekModel,
-        });
+        // If it's a backend-managed HIL incident, fetch the state directly
+        if (threadId.startsWith('rca-hil-')) {
+          const state = await fetchRCAState(threadId);
+          setRcaState(state);
+        } else {
+          // Run LangGraph pipeline for this scenario & thread
+          await runRCAPipeline({
+            dataset_id: scenarioId,
+            asset_id: targetAssetId,
+            thread_id: threadId,
+            use_deepseek: true,
+            deepseek_model: deepseekModel,
+          });
 
-        // Fetch full RCA state
-        const state = await fetchRCAState(threadId);
-        setRcaState(state);
+          // Fetch full RCA state
+          const state = await fetchRCAState(threadId);
+          setRcaState(state);
+        }
       } catch (err: any) {
         console.error('Scenario load error:', err);
         setErrorMessage(err.message || 'Failed to load telemetry data.');
