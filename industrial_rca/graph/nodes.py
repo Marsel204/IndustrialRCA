@@ -34,7 +34,10 @@ from industrial_rca.graph.state import (
     HypothesisTestResult,
 )
 from industrial_rca.tools.deepseek_client import DeepSeekClient
+from industrial_rca.utils.logging import get_logger
+from industrial_rca.graph.debugger import debug_node
 
+logger = get_logger("industrial_rca.graph.nodes")
 
 analytics_tool = TelemetryAnalyticsTool(GLOBAL_TELEMETRY_CACHE)
 cmms_tool = CMMSConnector()
@@ -42,7 +45,7 @@ topology_tracer = AssetTopologyTracer()
 deepseek_client = DeepSeekClient()
 
 
-
+@debug_node("ingest_telemetry_event")
 def ingest_telemetry_event(state: RCAState) -> Dict[str, Any]:
     """Ingests plant telemetry event and initial trip metadata into the graph state."""
     ds_id = state.get("dataset_id")
@@ -84,6 +87,7 @@ def ingest_telemetry_event(state: RCAState) -> Dict[str, Any]:
     }
 
 
+@debug_node("detect_anomalies")
 def detect_anomalies(state: RCAState) -> Dict[str, Any]:
     """
     Performs deterministic statistical profiling and change-point detection across core sensor tags.
@@ -215,6 +219,7 @@ def detect_anomalies(state: RCAState) -> Dict[str, Any]:
     }
 
 
+@debug_node("generate_hypotheses")
 def generate_hypotheses(state: RCAState) -> Dict[str, Any]:
     """
     Formulates candidate failure hypotheses based on ISO 14224 and FMEA reference knowledge.
@@ -243,6 +248,7 @@ def generate_hypotheses(state: RCAState) -> Dict[str, Any]:
     }
 
 
+@debug_node("test_hypothesis_worker")
 def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any]:
     """
     Worker node executed in parallel via LangGraph Send() primitive.
@@ -467,6 +473,7 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
     }
 
 
+@debug_node("aggregate_hypotheses")
 def aggregate_hypotheses(state: RCAState) -> Dict[str, Any]:
     """
     Aggregates parallel worker evaluations, synthesizes the Falsification Matrix,
@@ -545,6 +552,7 @@ def aggregate_hypotheses(state: RCAState) -> Dict[str, Any]:
     }
 
 
+@debug_node("causal_deep_dive_5_whys")
 def causal_deep_dive_5_whys(state: RCAState) -> Dict[str, Any]:
     """
     Performs deterministic 5-Whys causal deep-dive along the winning branch,
@@ -750,6 +758,7 @@ def causal_deep_dive_5_whys(state: RCAState) -> Dict[str, Any]:
     return result_payload
 
 
+@debug_node("human_review")
 def human_review(state: RCAState) -> Dict[str, Any]:
     """
     Dedicated Human-in-the-Loop (HITL) gate using langgraph.types.interrupt.
@@ -802,6 +811,7 @@ def human_review(state: RCAState) -> Dict[str, Any]:
     }
 
 
+@debug_node("generate_maintenance_artifacts")
 def generate_maintenance_artifacts(state: RCAState) -> Dict[str, Any]:
     """
     Emits formal standardized industrial artifacts:
@@ -964,6 +974,7 @@ def generate_maintenance_artifacts(state: RCAState) -> Dict[str, Any]:
     }
 
 
+@debug_node("handle_rejection")
 def handle_rejection(state: RCAState) -> Dict[str, Any]:
     """Handles rejection from human reviewer."""
     decision = state.get("human_review_decision", {})

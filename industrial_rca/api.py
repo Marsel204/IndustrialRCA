@@ -64,13 +64,19 @@ from industrial_rca.tools.deepseek_client import DeepSeekClient
 from industrial_rca.tools.influx_tool import InfluxDBTelemetryTool
 from industrial_rca.data.embedded_tsdb import GLOBAL_TSDB
 from industrial_rca.graph.workflow import create_rca_graph
+from industrial_rca.utils.middleware import CorrelationIdMiddleware
+from industrial_rca.utils.logging import get_logger
 
+logger = get_logger("industrial_rca.api")
 
 api_app = FastAPI(
     title="Industrial RCA Unified REST & SSE API",
     description="High-performance backend serving telemetry, ISA-95 topology, LangGraph RCA, and DeepSeek streaming.",
     version="2.1.0",
 )
+
+# Correlation ID and error handling middleware
+api_app.add_middleware(CorrelationIdMiddleware)
 
 # Enable CORS for Vite frontend running on localhost:5173 / localhost:3000
 api_app.add_middleware(
@@ -275,7 +281,7 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
             "trip_timestamp_sec": len(df) - 1,
             "trip_time_str": time.strftime("%H:%M:%S UTC"),
             "primary_trip_sensor": "VFD_V_DC" if incident.fault_code == 6 else "VFD_I_OUT",
-            "trip_value": float(df["v_dc"].max()) if incident.fault_code == 6 else float(df["current"].max()),
+            "trip_value": float(df["v_dc"].max()) if (incident.fault_code == 6 and "v_dc" in df.columns and len(df) > 0) else (float(df["current"].max()) if ("current" in df.columns and len(df) > 0) else 0.0),
             "trip_setpoint": 700.0 if incident.fault_code == 6 else 1.15,
         },
         normal_waveform={"t": t_norm, "signal": sig_norm},
@@ -314,10 +320,10 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
         "fault_code": incident.fault_code,
         "fault_description": fault_desc,
         # Use peak/last pre-fault values so KPI cards show meaningful data at trip moment
-        "f_out": float(df["f_out"].iloc[-1]) if len(df) > 0 else 0.0,
-        "v_dc": float(df["v_dc"].max()) if len(df) > 0 else 0.0,
-        "current": float(df["current"].max()) if len(df) > 0 else 0.0,
-        "rpm": float(df["rpm"].iloc[-1]) if len(df) > 0 else 0.0,
+        "f_out": float(df["f_out"].iloc[-1]) if ("f_out" in df.columns and len(df) > 0) else 0.0,
+        "v_dc": float(df["v_dc"].max()) if ("v_dc" in df.columns and len(df) > 0) else 0.0,
+        "current": float(df["current"].max()) if ("current" in df.columns and len(df) > 0) else 0.0,
+        "rpm": float(df["rpm"].iloc[-1]) if ("rpm" in df.columns and len(df) > 0) else 0.0,
         "status": "TRIPPED",
         "timestamp": time.time(),
     })
