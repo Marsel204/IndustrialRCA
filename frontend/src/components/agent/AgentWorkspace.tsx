@@ -171,9 +171,17 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
       <div className="p-4 bg-white border-b border-slate-200">
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex items-center space-x-2">
-            <span className={`w-2 h-2 rounded-full ${isPipelineRunning ? 'bg-amber-500 animate-ping' : 'bg-teal-500 animate-pulse'}`} />
+            <span className={`w-2 h-2 rounded-full ${
+              rcaState?.has_active_trip || (rcaState?.fault_code && rcaState.fault_code > 0)
+                ? 'bg-rose-500 animate-ping'
+                : isPipelineRunning
+                ? 'bg-amber-500 animate-ping'
+                : 'bg-emerald-500 animate-pulse'
+            }`} />
             <span className="text-[11px] font-mono font-bold tracking-wider text-teal-700 uppercase">
-              Current Agentic Objective
+              {rcaState?.has_active_trip || (rcaState?.fault_code && rcaState.fault_code > 0)
+                ? '🚨 Hardware Incident Active'
+                : '⚡ Live Hardware Agentic Monitor'}
             </span>
           </div>
           <div className="flex items-center space-x-1.5">
@@ -184,7 +192,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
               </span>
             )}
             <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-              {activeScenarioName}
+              {rcaState?.has_active_trip ? `Trip: Err0${rcaState.fault_code}` : 'Wecon VFD VM Rig'}
             </span>
           </div>
         </div>
@@ -192,13 +200,13 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           <div className="flex items-center space-x-2">
             <Sparkles className="w-4 h-4 text-teal-600 flex-shrink-0" />
             <span>
-              {isVfd
-                ? 'Investigate hardware overvoltage trip on Wecon VFD VM 01'
-                : 'Analyze emergency trip on Boiler Feed Pump P-301A'}
+              {rcaState?.has_active_trip || (rcaState?.fault_code && rcaState.fault_code > 0)
+                ? `🚨 Hardware Trip Detected: Err0${rcaState.fault_code} on Wecon VFD Rig — Autonomous RCA Active`
+                : '⚡ Live Rig Monitor: Listening for Hardware Trip Trigger over MQTT / PLC D-variable...'}
             </span>
           </div>
           <span className="text-[10px] font-mono text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
-            Autonomous RCA
+            {rcaState?.has_active_trip ? 'Autonomous RCA' : 'Active 1 Hz Stream'}
           </span>
         </div>
       </div>

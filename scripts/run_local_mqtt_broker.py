@@ -68,18 +68,34 @@ async def _custom_broadcast(self, session, topic, data, force_qos=None):
             parsed = json.loads(trimmed)
             if isinstance(parsed, dict):
                 payload_dict = parsed
-        elif "error" in topic.lower() or "fault" in topic.lower():
-            try:
-                code_val = int(float(trimmed))
-                payload_dict = {"fault_code": code_val, "topic": topic}
-            except ValueError:
-                payload_dict = {"fault_description": trimmed, "fault_code": 2 if "02" in trimmed else 6, "topic": topic}
-        elif "trigger" in topic.lower() or "d_var" in topic.lower():
-            try:
-                code_val = int(float(trimmed))
-                payload_dict = {"d_trigger": code_val, "fault_code": code_val, "topic": topic}
-            except ValueError:
-                payload_dict = {"d_trigger": trimmed, "topic": topic}
+        else:
+            low = trimmed.lower()
+            if low in ("2", "02", "err02", "error02"):
+                payload_dict = {"fault_code": 2, "fault_description": "Overcurrent during deceleration (Err02)", "topic": topic}
+            elif low in ("6", "06", "err06", "error06"):
+                payload_dict = {"fault_code": 6, "fault_description": "Overvoltage during operation / Overfrequency (Err06)", "topic": topic}
+            elif low in ("3", "03", "err03"):
+                payload_dict = {"fault_code": 3, "fault_description": "Overcurrent during constant speed (Err03)", "topic": topic}
+            elif low in ("11", "err11"):
+                payload_dict = {"fault_code": 11, "fault_description": "Motor Overload (Err11)", "topic": topic}
+            elif "error" in topic.lower() or "fault" in topic.lower():
+                try:
+                    code_val = int(float(trimmed))
+                    payload_dict = {"fault_code": code_val, "topic": topic}
+                except ValueError:
+                    payload_dict = {"fault_description": trimmed, "fault_code": 2 if "02" in trimmed else 6, "topic": topic}
+            elif "trigger" in topic.lower() or "d_var" in topic.lower():
+                try:
+                    code_val = int(float(trimmed))
+                    payload_dict = {"d_trigger": code_val, "fault_code": code_val, "topic": topic}
+                except ValueError:
+                    payload_dict = {"d_trigger": trimmed, "topic": topic}
+            else:
+                try:
+                    val = float(trimmed)
+                    payload_dict = {"value": val, "topic": topic}
+                except ValueError:
+                    payload_dict = {"raw": trimmed, "topic": topic}
 
         if payload_dict is not None:
             payload_dict["_mqtt_topic"] = topic

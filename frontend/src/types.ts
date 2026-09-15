@@ -263,6 +263,7 @@ export interface RCAState {
   incident_report_8d?: Report8D | null;
   sap_work_order?: SAPWorkOrder | null;
   execution_logs: string[];
+  fault_code?: number;
   deepseek_evaluation?: {
     model: string;
     is_mock: boolean;
@@ -288,6 +289,7 @@ export interface LatestIncident {
     fault_code: number;
     fault_description: string;
     dataset_id: string;
+    thread_id?: string;
     point_count: number;
     received_at: string;
   } | null;

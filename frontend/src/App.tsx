@@ -74,6 +74,14 @@ export function App() {
       try {
         const inc = await fetchLatestIncident();
         setLatestIncident(inc);
+        if (inc?.has_incident && inc.incident_data?.thread_id) {
+          setActiveThreadId(inc.incident_data.thread_id);
+          if (inc.incident_data?.dataset_id) {
+            setActiveScenarioId(inc.incident_data.dataset_id);
+          }
+          const state = await fetchRCAState(inc.incident_data.thread_id);
+          setRcaState(state);
+        }
       } catch (e) {
         console.warn('Failed to fetch latest incident:', e);
       }
@@ -146,29 +154,41 @@ export function App() {
   // Reactive SSE listener for live edge HIL events
   useEffect(() => {
     const unsubscribe = subscribeTelemetryEvents(
-      (eventData) => {
+      async (eventData) => {
         if (eventData.event === 'hil_incident_detected') {
           const incData = eventData.data;
+          const thId = eventData.thread_id || incData?.thread_id || `rca-live-${incData?.incident_id || Date.now()}`;
           setLatestIncident({
             has_incident: true,
             incident_data: incData,
             received_at: new Date().toLocaleTimeString(),
             pipeline_status: 'TRIGGERED',
           });
-          // Refresh scenario list
-          fetchScenarios().then(setScenarios).catch(console.error);
+          setIsPipelineRunning(true);
+          setActiveThreadId(thId);
 
-          // Hands-free auto-switch to the live incident
           if (incData?.dataset_id) {
             setActiveScenarioId(incData.dataset_id);
-            setActiveThreadId(`rca-live-${incData.incident_id || Date.now()}`);
-            setInspectorTab('telemetry');
+            try {
+              const tel = await fetchTelemetry(incData.dataset_id);
+              setTelemetry(tel);
+            } catch (e) {
+              console.warn('Failed to fetch incident telemetry:', e);
+            }
           }
         } else if (eventData.event === 'hil_pipeline_completed') {
-          if (latestIncident?.incident_data) {
-            setLatestIncident((prev) =>
-              prev ? { ...prev, pipeline_status: 'ANALYSIS_COMPLETE' } : null
-            );
+          const thId = eventData.thread_id || latestIncident?.incident_data?.thread_id || activeThreadId;
+          setIsPipelineRunning(false);
+          setLatestIncident((prev) =>
+            prev ? { ...prev, pipeline_status: 'ANALYSIS_COMPLETE' } : null
+          );
+          // Auto-load full RCA state from LangGraph checkpoint and update UI
+          try {
+            const state = await fetchRCAState(thId);
+            setRcaState(state);
+            setInspectorTab('fmea');
+          } catch (e) {
+            console.error('Failed to load completed RCA state:', e);
           }
         }
       },
@@ -178,7 +198,7 @@ export function App() {
     );
 
     return () => unsubscribe();
-  }, [latestIncident]);
+  }, [activeThreadId, latestIncident]);
 
   // 1-Click Load Incident handler
   const handleLoadLiveIncident = () => {

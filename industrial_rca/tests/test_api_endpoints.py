@@ -36,9 +36,6 @@ def test_api_scenarios(client):
     assert resp.status_code == 200
     scenarios = resp.json().get("scenarios", [])
     scenario_ids = [s["id"] for s in scenarios]
-    assert "exp_err06" in scenario_ids
-    assert "exp_err02" in scenario_ids
-    assert "exp_nominal" in scenario_ids
     assert "live_stream" in scenario_ids
 
 

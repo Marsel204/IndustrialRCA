@@ -284,6 +284,7 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
     ds_id = TelemetryStore.register(dataset, f"ds_hil_{incident.fault_code}_{int(time.time())}")
     SCENARIOS_REGISTRY["hil"] = ds_id
 
+    thread_id = f"rca-hil-{inc_id}"
     LATEST_HIL_INCIDENT["has_incident"] = True
     LATEST_HIL_INCIDENT["incident_data"] = {
         "incident_id": inc_id,
@@ -291,6 +292,7 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
         "fault_code": incident.fault_code,
         "fault_description": fault_desc,
         "dataset_id": ds_id,
+        "thread_id": thread_id,
         "point_count": len(df),
         "received_at": time.strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
@@ -301,6 +303,8 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
     _notify_hil_subscribers({
         "event": "hil_incident_detected",
         "data": LATEST_HIL_INCIDENT["incident_data"],
+        "thread_id": thread_id,
+        "dataset_id": ds_id,
         "timestamp": time.time(),
     })
     _broadcast_live_metric({
@@ -319,7 +323,7 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
 
     def _run_graph():
         try:
-            config = {"configurable": {"thread_id": f"rca-hil-{inc_id}"}}
+            config = {"configurable": {"thread_id": thread_id}}
             init_state = {
                 "dataset_id": ds_id,
                 "asset_id": incident.asset_id,
@@ -335,6 +339,7 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
             _notify_hil_subscribers({
                 "event": "hil_pipeline_completed",
                 "incident_id": inc_id,
+                "thread_id": thread_id,
                 "dataset_id": ds_id,
                 "status": "ANALYSIS_COMPLETE",
             })
@@ -453,6 +458,23 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
     def _unpack(v: Any, default: float = 0.0) -> float:
         if isinstance(v, (list, tuple)):
             v = v[0] if len(v) > 0 else default
+        if isinstance(v, str):
+            v_clean = v.strip().lower()
+            if "err02" in v_clean or v_clean == "2":
+                return 2.0
+            if "err06" in v_clean or v_clean == "6":
+                return 6.0
+            if "err03" in v_clean or v_clean == "3":
+                return 3.0
+            if "err11" in v_clean or v_clean == "11":
+                return 11.0
+            import re
+            nums = re.findall(r"\d+", v_clean)
+            if nums:
+                try:
+                    return float(nums[0])
+                except ValueError:
+                    pass
         try:
             return float(v)
         except (ValueError, TypeError):
@@ -484,19 +506,18 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
     raw_current = _unpack(metric.get("current", 0.0))
     current = round(raw_current / 100.0 if raw_current > 100.0 else raw_current, 2)
 
-    # Check for trip code in fault_code, fault, error, d_trigger, or PLC D-variables
-    raw_fault = metric.get("fault_code")
-    if raw_fault is None:
-        raw_fault = metric.get("fault")
-    if raw_fault is None:
-        raw_fault = metric.get("error")
-    if raw_fault is None:
-        raw_fault = metric.get("d_trigger")
+    # Check for trip code across common industrial keys (fault_code, error, err, trip, code, d_trigger, D-registers)
+    raw_fault = None
+    for key in ("fault_code", "fault", "error", "err", "code", "trip", "trip_code", "d_trigger"):
+        if metric.get(key) is not None:
+            raw_fault = metric.get(key)
+            break
+
     if raw_fault is None:
         for k, v in metric.items():
-            if k.upper().startswith("D") and (len(k) <= 5 or "VAR" in k.upper()):
+            if k.upper().startswith("D") or "PLC" in k.upper():
                 try:
-                    val = int(float(v[0] if isinstance(v, (list, tuple)) else v))
+                    val = int(_unpack(v, 0))
                     if val in (2, 3, 6, 11) or val > 0:
                         raw_fault = val
                         break
@@ -589,60 +610,27 @@ def list_scenarios():
         {
             "id": "live_stream",
             "dataset_id": SCENARIOS_REGISTRY.get("live_stream", "ds_live_stream"),
-            "name": "⚡ LIVE: Wecon VFD Telemetry (Physical HMI)",
+            "name": "⚡ LIVE: Physical Wecon VFD Rig",
             "asset_id": "VFD_VM_01",
             "condition": "LIVE_STREAM",
             "description": "Continuous 1 Hz real-time telemetry from physical Wecon HMI (192.168.1.104) and VFD test bench via MQTT broker.",
             "duration_sec": 300,
             "has_trip": False,
             "badge": "LIVE_EDGE",
-        },
-        {
-            "id": "exp_err02",
-            "dataset_id": SCENARIOS_REGISTRY.get("exp_err02", "ds_exp_err02"),
-            "name": "Experiment 1: Forced Sudden Deceleration (Err02 On/Off Button)",
-            "asset_id": "VFD_VM_01",
-            "condition": "HARDWARE_FAULT_TRIP",
-            "description": "Operator actuates PLC On/Off stop button (D-variable trigger); instantaneous back-EMF current surge trips inverter on Err02.",
-            "duration_sec": 3600,
-            "has_trip": True,
-            "badge": "EXPERIMENT_1",
-        },
-        {
-            "id": "exp_err06",
-            "dataset_id": SCENARIOS_REGISTRY.get("exp_err06", "ds_exp_err06"),
-            "name": "Experiment 2: Overfrequency Excursion > 40 Hz (Vdc > 195V Err06)",
-            "asset_id": "VFD_VM_01",
-            "condition": "HARDWARE_FAULT_TRIP",
-            "description": "Output frequency setpoint raised past 40 Hz ceiling toward 50 Hz; DC bus voltage crosses calibrated 195.0 V trip limit (~207V at 50Hz) without dynamic braking resistor.",
-            "duration_sec": 3600,
-            "has_trip": True,
-            "badge": "EXPERIMENT_2",
-        },
-        {
-            "id": "exp_nominal",
-            "dataset_id": SCENARIOS_REGISTRY.get("exp_nominal", "ds_exp_nominal"),
-            "name": "Baseline: 40 Hz Nominal Steady-State Run (182V DC)",
-            "asset_id": "VFD_VM_01",
-            "condition": "HEALTHY",
-            "description": "60 minutes continuous steady-state operation at 40.00 Hz, 182.0 V DC bus, 1.15 A current, 1199 RPM. Zero fault codes.",
-            "duration_sec": 3600,
-            "has_trip": False,
-            "badge": "NOMINAL",
-        },
+        }
     ]
     if LATEST_HIL_INCIDENT.get("has_incident"):
         inc = LATEST_HIL_INCIDENT["incident_data"]
         scenarios.append({
-            "id": "hil",
+            "id": inc.get("dataset_id", "hil"),
             "dataset_id": inc.get("dataset_id"),
-            "name": f"Live HIL: {inc.get('fault_description', 'VFD Trip')}",
+            "name": f"🚨 Active Hardware Trip: {inc.get('fault_description', 'VFD Trip')}",
             "asset_id": inc.get("asset_id", "VFD_VM_01"),
             "condition": "HARDWARE_FAULT_TRIP",
-            "description": f"Live incident received from physical edge test bench via REST/MQTT. Fault code {inc.get('fault_code')}.",
+            "description": f"Live incident received from physical edge test bench via MQTT. Fault code {inc.get('fault_code')}.",
             "duration_sec": inc.get("point_count", 60),
             "has_trip": True,
-            "badge": "LIVE_EDGE",
+            "badge": "HARDWARE_FAULT",
         })
     return {"scenarios": scenarios}
 
