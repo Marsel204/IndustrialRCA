@@ -273,11 +273,27 @@ export interface RCAState {
   } | null;
 }
 
+export interface ToolExecutionItem {
+  id: string;
+  name: string;
+  command?: string;
+  args?: Record<string, any>;
+  status: 'running' | 'completed' | 'failed';
+  duration_ms?: number;
+  summary: string;
+  output_details?: string | Record<string, any>;
+  logs?: string[];
+  inspector_tab?: string;
+  tab_label?: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   reasoning_content?: string;
+  elapsed_time_sec?: number;
+  tools?: ToolExecutionItem[];
   timestamp: string;
 }
 

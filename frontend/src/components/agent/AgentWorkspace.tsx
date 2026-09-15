@@ -1,19 +1,18 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Brain,
   ChevronDown,
-  ChevronUp,
+  ChevronRight,
   ExternalLink,
   FileCheck,
   Send,
   Sparkles,
-  Server,
-  Layers,
-  Bot,
-  Clock,
   Loader2,
+  Terminal,
+  CheckCircle2,
+  Bot,
 } from 'lucide-react';
-import { RCAState, ChatMessage } from '../../types';
+import { RCAState, ChatMessage, ToolExecutionItem } from '../../types';
 import { streamCopilotChat } from '../../api';
 
 interface AgentWorkspaceProps {
@@ -28,44 +27,268 @@ interface AgentWorkspaceProps {
 
 export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
   rcaState,
-  apiOnline,
+  apiOnline: _apiOnline,
   deepseekModel,
   onSelectInspectorTab,
   onOpenReviewModal,
-  activeScenarioName = 'Emergency Trip (Strainer Clog)',
+  activeScenarioName: _activeScenarioName = 'Emergency Trip (Strainer Clog)',
   isPipelineRunning = false,
 }) => {
-  // Collapsible sections
-  const [isThinkingExpanded, setIsThinkingExpanded] = useState<boolean>(true);
-  const [expandedCoT, setExpandedCoT] = useState<Record<string, boolean>>({});
+  // Collapsible States for RCA Mission (Turn 1)
+  const [isCoTExpanded, setIsCoTExpanded] = useState<boolean>(false);
+  const [isToolsGroupExpanded, setIsToolsGroupExpanded] = useState<boolean>(true);
+  const [expandedToolIds, setExpandedToolIds] = useState<Record<string, boolean>>({});
 
-  // Copilot Chat State
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'init-msg',
-      role: 'assistant',
-      content:
-        'Continuous telemetry ingested from **Wecon VM VFD & Induction Motor Test Bench (VFD_VM_01)**. ' +
-        'Monitoring 1 Hz Modbus registers: Output Frequency (`f_out`), DC Bus Voltage (`v_dc`), Motor Current (`current`), RPM, and Trip Codes. ' +
-        'Ready to analyze real telemetry, detect trips (>195 Vdc or forced decel), and evaluate failure modes (Err02, Err06, Err03, Err11).',
-      timestamp: 'Just now',
-    },
-  ]);
+  // Collapsible States for Chat Message Items
+  const [expandedChatCoT, setExpandedChatCoT] = useState<Record<string, boolean>>({});
+  const [expandedChatTools, setExpandedChatTools] = useState<Record<string, boolean>>({});
+
+  // Chat conversation state
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputPrompt, setInputPrompt] = useState<string>('');
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [currentReasoning, setCurrentReasoning] = useState<string>('');
   const [currentContent, setCurrentContent] = useState<string>('');
+  const [activeStreamingTools, setActiveStreamingTools] = useState<ToolExecutionItem[]>([]);
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
+  // Auto-scroll when chat or streaming updates
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, currentContent, currentReasoning]);
+  }, [messages, currentContent, currentReasoning, isPipelineRunning]);
 
-  const toggleMsgCoT = (id: string) => {
-    setExpandedCoT((prev) => ({ ...prev, [id]: !prev[id] }));
+  const toggleToolExpanded = (id: string) => {
+    setExpandedToolIds((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const toggleChatToolExpanded = (id: string) => {
+    setExpandedChatTools((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleChatCoT = (msgId: string) => {
+    setExpandedChatCoT((prev) => ({ ...prev, [msgId]: !prev[msgId] }));
+  };
+
+  const faultCode = rcaState?.fault_code || (rcaState?.has_active_trip ? 6 : 0);
+  const isIncidentActive = Boolean(rcaState?.has_active_trip || faultCode > 0);
+
+  // Build Diagnostic Tool Executions from rcaState
+  const autonomousTools: ToolExecutionItem[] = useMemo(() => {
+    const assetId = rcaState?.root_cause_asset || 'VFD_VM_01';
+    const faultStr = faultCode > 0 ? `Err0${faultCode}` : 'Nominal';
+    const winningHypo = rcaState?.winning_hypothesis;
+
+    if (!isIncidentActive) {
+      return [
+        {
+          id: 'tool-stream',
+          name: 'LiveTelemetryMonitor',
+          command: `LiveTelemetryMonitor --asset ${assetId} --protocol Modbus_RTU --rate 1Hz`,
+          args: {
+            asset: assetId,
+            channels: ['f_out', 'v_dc', 'current', 'rpm', 'fault_code'],
+            buffer_window: '60s',
+            status: 'HEALTHY',
+          },
+          status: 'completed',
+          duration_ms: 64,
+          summary: `on ${assetId} (1 Hz Modbus stream: 40.00 Hz, 182.0 V, 1.15 A nominal)`,
+          output_details: {
+            f_out_hz: 40.0,
+            v_dc_volts: 182.0,
+            motor_current_amps: 1.15,
+            rpm: 1199.0,
+            fault_code: 0,
+            trip_status: 'NONE (Nominal Operation)',
+          },
+          logs: [
+            `[LiveTelemetryMonitor] Ingesting Modbus RTU telemetry for ${assetId}...`,
+            '[LiveTelemetryMonitor] 1 Hz buffer synchronized. All sensor channels nominal.',
+          ],
+          inspector_tab: 'telemetry',
+          tab_label: 'Inspect Telemetry',
+        },
+        {
+          id: 'tool-limits',
+          name: 'OperationalEnvelopeValidator',
+          command: `OperationalEnvelopeValidator --asset ${assetId} --standard ISA95`,
+          args: {
+            v_dc_trip_limit: 195.0,
+            current_trip_limit: 2.50,
+            f_out_ceiling_hz: 40.00,
+          },
+          status: 'completed',
+          duration_ms: 82,
+          summary: `evaluating ISA-95 operational envelope (all values within safe margins)`,
+          output_details: {
+            v_dc_margin_volts: '+13.0 V below trip threshold',
+            current_margin_amps: '+1.35 A below trip threshold',
+            health_score_pct: 100,
+          },
+          logs: [
+            '[OperationalEnvelopeValidator] Checking DC bus voltage (182.0V < 195.0V ceiling) -> PASS.',
+            '[OperationalEnvelopeValidator] Checking motor stator current (1.15A < 2.50A trip) -> PASS.',
+            '[OperationalEnvelopeValidator] Operational envelope nominal.',
+          ],
+          inspector_tab: 'hypotheses',
+          tab_label: 'View Hypotheses',
+        },
+        {
+          id: 'tool-watchdog',
+          name: 'HealthWatchdog',
+          command: `HealthWatchdog --subscribe MQTT://1883 --topic factory/bench01/vfd/telemetry`,
+          args: {
+            mqtt_broker: '1883',
+            trip_register: '700BH',
+            trip_condition: 'Reg 700BH > 0',
+          },
+          status: 'completed',
+          duration_ms: 45,
+          summary: `listening for trip trigger events on MQTT / PLC D-variable`,
+          output_details: {
+            connection: 'ESTABLISHED',
+            trip_listener: 'ACTIVE',
+            standby_mode: 'AUTONOMOUS_RCA_READY',
+          },
+          logs: [
+            '[HealthWatchdog] Connected to Mosquitto MQTT broker.',
+            '[HealthWatchdog] Listening on factory/bench01/vfd/telemetry. Trip triggers armed.',
+          ],
+          inspector_tab: 'telemetry',
+          tab_label: 'Inspect Status',
+        },
+      ];
+    }
+
+    return [
+      {
+        id: 'tool-cpd',
+        name: 'ChangePointDetector',
+        command: `ChangePointDetector --asset ${assetId} --window 10s --tags [v_dc,current,f_out]`,
+        args: {
+          asset: assetId,
+          monitored_tags: ['v_dc', 'current', 'f_out', 'rpm'],
+          detection_algorithm: 'Pelt (Pruned Exact Linear Time)',
+          penalty: 'BIC (Bayesian Information Criterion)',
+        },
+        status: isPipelineRunning ? 'running' : 'completed',
+        duration_ms: 284,
+        summary: `on ${assetId} (transient shift: DC bus 182V → 202.5V, current peak 2.62A)`,
+        output_details: {
+          changepoints_detected: rcaState?.detected_anomalies?.length || 2,
+          critical_event:
+            faultCode === 2
+              ? 'Instantaneous motor stall current peak (2.62A > 2.50A trip setpoint)'
+              : 'DC bus overvoltage escalation (202.5V > 195.0V trip threshold)',
+          timestamp: 't = 14.200s relative to baseline',
+          status: 'PRIMARY_TRIGGER_VALIDATED',
+        },
+        logs: [
+          `[ChangePointDetector] Loading high-resolution 100Hz buffer for ${assetId}...`,
+          '[ChangePointDetector] Computed L2-norm cost matrix across 4 channels.',
+          `[ChangePointDetector] Changepoint confirmed at sample #1420 (anomaly score: 0.942).`,
+          `[ChangePointDetector] Operational ceiling breached: DC bus reached threshold.`,
+        ],
+        inspector_tab: 'telemetry',
+        tab_label: 'Inspect Telemetry',
+      },
+      {
+        id: 'tool-topo',
+        name: 'TopologyTracer',
+        command: `TopologyTracer --source PLC_LX_01 --target ${assetId} --depth 2`,
+        args: {
+          target: assetId,
+          upstream_controller: 'PLC_LX_01',
+          protocol: 'Modbus RTU / RS485 (19200 baud, 8-E-1)',
+          isa95_hierarchy: ['Enterprise', 'Site_01', 'Area_VFD', 'Cell_01', assetId],
+        },
+        status: isPipelineRunning ? 'running' : 'completed',
+        duration_ms: 142,
+        summary: `on PLC_LX_01 → ${assetId}`,
+        output_details: {
+          upstream_nodes: ['PLC_LX_01', 'Mains_Supply_230V', 'Braking_Unit_P_PB'],
+          downstream_nodes: ['Induction_Motor_M01', 'Shaft_Encoder_E01'],
+          path_verification: 'Confirmed: Braking resistor terminal P+/PB unpopulated.',
+        },
+        logs: [
+          `[TopologyTracer] Traversing ISA-95 Equipment Graph for ${assetId}...`,
+          '[TopologyTracer] Verified physical link: PLC_LX_01 D-variable register D100 → VFD Run Command.',
+          '[TopologyTracer] Checked auxiliary circuit: Terminals P+ and PB open circuit.',
+        ],
+        inspector_tab: 'topology',
+        tab_label: 'View Topology',
+      },
+      {
+        id: 'tool-fmea',
+        name: 'FMEAEngine',
+        command: `FMEAEngine --evaluate [Err02,Err06,Err03,Err11] --dataset ${rcaState?.thread_id || 'active'}`,
+        args: {
+          fault_observed: faultStr,
+          candidate_hypotheses: ['H_VFD_ERR06', 'H_VFD_ERR02', 'H_VFD_ERR03', 'H_VFD_ERR11'],
+          methodology: 'Deterministic Multi-Hypothesis Falsification (MIL-STD-1629A)',
+        },
+        status: isPipelineRunning ? 'running' : 'completed',
+        duration_ms: 512,
+        summary: `evaluating VFD failure modes (Err02, Err06, Err03, Err11)`,
+        output_details: {
+          winning_hypothesis:
+            winningHypo?.name || 'H_VFD_ERR06: Overvoltage During Acceleration / Deceleration',
+          confidence: winningHypo?.confidence
+            ? `${(winningHypo.confidence * 100).toFixed(0)}%`
+            : '98%',
+          refuted_hypotheses: [
+            'H_VFD_ERR03: Ground Fault (Refuted: zero leakage current)',
+            'H_VFD_ERR11: Motor Overheat (Refuted: PT100 nominal)',
+          ],
+          mechanism:
+            'Regenerative kinetic energy dump into DC bus capacitors without dynamic dissipation',
+        },
+        logs: [
+          '[FMEAEngine] Ingesting fault symptoms and boundary criteria...',
+          '[FMEAEngine] Testing H_VFD_ERR03: Leakage current < 5mA -> REFUTED.',
+          '[FMEAEngine] Testing H_VFD_ERR06: DC bus > 195V during rapid decel / 50Hz ramp -> CONFIRMED (p=0.98).',
+          '[FMEAEngine] FMEA matrix convergence achieved.',
+        ],
+        inspector_tab: 'hypotheses',
+        tab_label: 'View Hypotheses',
+      },
+      {
+        id: 'tool-cmms',
+        name: 'CMMSConnector',
+        command:
+          'CMMSConnector --action create_order --template SAP_PM01 --standard ISO14224',
+        args: {
+          system: 'SAP S/4HANA Plant Maintenance',
+          order_type: 'PM01 (Corrective Maintenance)',
+          equipment: assetId,
+          priority: '1 - Emergency Immediate Shutdown',
+        },
+        status: isPipelineRunning ? 'running' : 'completed',
+        duration_ms: 195,
+        summary: `verifying work order WO-VFD-2026-0042 & Global 8D deliverable`,
+        output_details: {
+          work_order_id: rcaState?.sap_work_order?.order_number || 'WO-VFD-2026-0042',
+          notification:
+            rcaState?.sap_work_order?.notification_number || 'NOTIF-2026-0089',
+          actions_required: [
+            'Install external dynamic braking resistor on terminals P+ and PB (100 Ohm, 200W)',
+            'Tune Wecon VM parameter F0.18 (Decel time) from 0.5s to 3.0s',
+            'Verify parameter F0.10 voltage clamp configuration',
+          ],
+        },
+        logs: [
+          '[CMMSConnector] Connecting to SAP PM REST API endpoint...',
+          '[CMMSConnector] Drafted Order WO-VFD-2026-0042 in System Status: CRTD.',
+          '[CMMSConnector] Linked Global 8D Root Cause Report with ISO 14224 failure taxonomy.',
+        ],
+        inspector_tab: 'deliverables',
+        tab_label: 'View Deliverables',
+      },
+    ];
+  }, [rcaState, isPipelineRunning]);
+
+  // Handle follow-up chat with simulated agent tool calling and live reasoning
   const handleSendChat = (promptText?: string) => {
     const text = promptText || inputPrompt;
     if (!text.trim() || isStreaming) return;
@@ -83,6 +306,106 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     setIsStreaming(true);
     setCurrentReasoning('');
     setCurrentContent('');
+
+    // Generate contextual simulated tool calls based on user query
+    const lower = text.toLowerCase();
+    const chatTools: ToolExecutionItem[] = [];
+
+    if (
+      lower.includes('dc bus') ||
+      lower.includes('207v') ||
+      lower.includes('voltage') ||
+      lower.includes('v_dc')
+    ) {
+      chatTools.push({
+        id: `chat-tool-${Date.now()}-1`,
+        name: 'QueryTelemetry',
+        command: `QueryTelemetry --sensor v_dc --asset VFD_VM_01 --window 30s`,
+        args: { sensor: 'v_dc', asset: 'VFD_VM_01', aggregate: 'max_and_std' },
+        status: 'completed',
+        duration_ms: 120,
+        summary: `on VFD_VM_01 (v_dc range: 181.8V to 206.9V)`,
+        output_details: { peak_v_dc: 206.9, trip_threshold: 195.0, duration_over_limit_ms: 410 },
+        logs: [
+          '[QueryTelemetry] Retrieved 300 data points from TSDB.',
+          '[QueryTelemetry] Peak DC bus recorded at 50.00 Hz: 206.9V.',
+        ],
+        inspector_tab: 'telemetry',
+        tab_label: 'Inspect Telemetry',
+      });
+    }
+
+    if (
+      lower.includes('braking') ||
+      lower.includes('resistor') ||
+      lower.includes('p+/pb') ||
+      lower.includes('f0.18') ||
+      lower.includes('parameter')
+    ) {
+      chatTools.push({
+        id: `chat-tool-${Date.now()}-2`,
+        name: 'CheckOEMManual',
+        command: `CheckOEMManual --model Wecon_VM --section "Braking Resistor & F0.18"`,
+        args: {
+          manual: 'Wecon VM Series User Manual Rev 3.2',
+          section: 'Dynamic Braking Specification',
+        },
+        status: 'completed',
+        duration_ms: 165,
+        summary: `for Wecon VM (P+/PB recommended: 100Ω 200W, min 75Ω)`,
+        output_details: {
+          recommended_resistance: '100 Ohm',
+          min_resistance: '75 Ohm',
+          param_f0_18_default: '5.0s',
+        },
+        logs: [
+          '[CheckOEMManual] Matched section 4.3: Braking Resistor Selection.',
+          '[CheckOEMManual] Overvoltage stall prevention requires F0.10=1.',
+        ],
+        inspector_tab: 'hypotheses',
+        tab_label: 'View Hypotheses',
+      });
+    }
+
+    if (lower.includes('err02') || lower.includes('current') || lower.includes('stall')) {
+      chatTools.push({
+        id: `chat-tool-${Date.now()}-3`,
+        name: 'AnalyzeCurrentTransient',
+        command: `AnalyzeCurrentTransient --sensor current --threshold 2.5A`,
+        args: { sensor: 'current', threshold_amps: 2.5, event: 'Forced Stop' },
+        status: 'completed',
+        duration_ms: 140,
+        summary: `on Motor Current (spike 2.62A during immediate 0Hz step)`,
+        output_details: { peak_current: 2.62, trip_setpoint: 2.50, di_trigger: 'PLC_LX_01 DI Stop Command' },
+        logs: [
+          '[AnalyzeCurrentTransient] Rapid decel caused back-EMF opposing stator field.',
+          '[AnalyzeCurrentTransient] Current trip Err02 triggered in 12ms.',
+        ],
+        inspector_tab: 'telemetry',
+        tab_label: 'Inspect Telemetry',
+      });
+    }
+
+    if (chatTools.length === 0) {
+      chatTools.push({
+        id: `chat-tool-${Date.now()}-def`,
+        name: 'SearchDiagnosticKB',
+        command: `SearchDiagnosticKB --query "${text.slice(0, 40)}"`,
+        args: { query: text, domain: 'Industrial VFD Root Cause Analysis' },
+        status: 'completed',
+        duration_ms: 95,
+        summary: `searching ISO 14224 & OEM knowledge base`,
+        output_details: {
+          matches_found: 3,
+          top_match: 'Wecon VM Dynamic Braking and Deceleration Profile',
+        },
+        logs: ['[SearchDiagnosticKB] Searched 42 technical manuals and 8D incident histories.'],
+        inspector_tab: 'hypotheses',
+        tab_label: 'View Hypotheses',
+      });
+    }
+
+    setActiveStreamingTools(chatTools);
 
     const assistantMsgId = `asst-${Date.now()}`;
     let accumulatedContent = '';
@@ -109,11 +432,14 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
             role: 'assistant',
             content: accumulatedContent || 'Diagnosis confirmed by DeepSeek Copilot.',
             reasoning_content: accumulatedReasoning || undefined,
+            elapsed_time_sec: 1.4,
+            tools: chatTools,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
         ]);
         setCurrentReasoning('');
         setCurrentContent('');
+        setActiveStreamingTools([]);
         setIsStreaming(false);
       },
       (err) => {
@@ -127,17 +453,18 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
               accumulatedContent ||
               `Diagnosis verified from deterministic FMEA convergence. (Notice: ${err.message})`,
             reasoning_content: accumulatedReasoning || undefined,
+            elapsed_time_sec: 0.8,
+            tools: chatTools,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
         ]);
         setCurrentReasoning('');
         setCurrentContent('');
+        setActiveStreamingTools([]);
         setIsStreaming(false);
       }
     );
   };
-
-  const isVfd = true;
 
   const quickPrompts = [
     'Why does DC bus reach ~207V at 50 Hz and trip Err06 above 195V?',
@@ -146,12 +473,17 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     'How does increasing parameter F0.18 prevent regeneration trips?',
   ];
 
-  const defaultThinking =
-    "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
-    "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
-    "3. Trip setpoint evaluated: DC bus limit at 195.0 V DC (reaches ~207V at 50 Hz), current limit at 2.50 A.\n" +
-    "4. Evaluated failure hypotheses: H_VFD_ERR06 (Overfrequency > 40 Hz) and H_VFD_ERR02 (Forced Decel Stop).\n" +
-    "5. OEM corrective action: Install dynamic braking resistor on terminals P+/PB and tune parameter F0.18.";
+  const defaultThinking = isIncidentActive
+    ? "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
+      "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
+      "3. Trip setpoint evaluated: DC bus limit at 195.0 V DC (reaches ~207V at 50 Hz), current limit at 2.50 A.\n" +
+      "4. Evaluated failure hypotheses: H_VFD_ERR06 (Overfrequency > 40 Hz) and H_VFD_ERR02 (Forced Decel Stop).\n" +
+      "5. OEM corrective action: Install dynamic braking resistor on terminals P+/PB and tune parameter F0.18."
+    : "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
+      "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
+      "3. Continuous safety verification: DC bus (182.0 V < 195.0 V ceiling), current (1.15 A < 2.50 A trip).\n" +
+      "4. All health diagnostics green. Zero hardware trip codes active.\n" +
+      "5. System operating nominal edge monitoring. Ready for hardware trip triggers.";
 
   const isPaused = rcaState?.is_paused_at_hitl || false;
   const isFinalized = rcaState?.pipeline_status === 'COMPLETED';
@@ -161,389 +493,540 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     rcaState?.deepseek_evaluation?.content ||
     defaultThinking;
 
-  const displayedDiagnosis =
-    rcaState?.root_cause_description ||
-    'Real-time telemetry and FMEA matrix actively monitored for Wecon VM Series VFD (VFD_VM_01). Operational baseline calibrated at 40.00 Hz and 182.0 V DC bus. Emergency trips calibrated at 195.0 V DC (Err06) and 2.50 A (Err02).';
+  const displayedDiagnosis = isIncidentActive
+    ? rcaState?.root_cause_description ||
+      'Output frequency setpoint was ramped past the 40.00 Hz operational ceiling toward 50.00 Hz, causing DC bus voltage to escalate to 202.5 V (breaching the calibrated 195.0 V trip limit) because Wecon VM parameter F0.10 was unclamped and dynamic braking resistor terminals P+/PB were unpopulated.'
+    : 'Continuous real-time telemetry from Wecon VM VFD (VFD_VM_01) is nominal. Output frequency (40.00 Hz), DC bus voltage (182.0 V), and motor current (1.15 A) remain within calibrated ISA-95 envelopes. Listening for hardware trip trigger over MQTT / PLC D-variable.';
 
   return (
-    <div className="flex flex-col h-full bg-slate-50/50 border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
-      {/* Top User Prompt / Goal Card */}
-      <div className="p-4 bg-white border-b border-slate-200">
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <div className="flex items-center space-x-2">
-            <span className={`w-2 h-2 rounded-full ${
-              rcaState?.has_active_trip || (rcaState?.fault_code && rcaState.fault_code > 0)
-                ? 'bg-rose-500 animate-ping'
-                : isPipelineRunning
-                ? 'bg-amber-500 animate-ping'
-                : 'bg-emerald-500 animate-pulse'
-            }`} />
-            <span className="text-[11px] font-mono font-bold tracking-wider text-teal-700 uppercase">
-              {rcaState?.has_active_trip || (rcaState?.fault_code && rcaState.fault_code > 0)
-                ? '🚨 Hardware Incident Active'
-                : '⚡ Live Hardware Agentic Monitor'}
-            </span>
+    <div className="flex flex-col h-full bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden text-slate-800 font-sans">
+      {/* Sleek Agent Terminal Header */}
+      <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/80 flex items-center justify-between gap-3">
+        <div className="flex items-center space-x-2.5 min-w-0">
+          <div className="w-6 h-6 rounded-md bg-teal-600/10 border border-teal-600/20 flex items-center justify-center text-teal-700 flex-shrink-0">
+            <Bot className="w-3.5 h-3.5" />
           </div>
-          <div className="flex items-center space-x-1.5">
-            {isPipelineRunning && (
-              <span className="flex items-center space-x-1 text-[10px] font-mono text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                <span>Running Pipeline</span>
+          <div className="min-w-0">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-mono font-bold text-slate-800 truncate">
+                Industrial RCA Agent
               </span>
-            )}
-            <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-              {rcaState?.has_active_trip ? `Trip: Err0${rcaState.fault_code}` : 'Wecon VFD VM Rig'}
-            </span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200/70 text-slate-600 border border-slate-300/60 font-medium">
+                {deepseekModel}
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-500 font-mono truncate">
+              Asset: <span className="font-semibold text-slate-700">VFD_VM_01</span> · Modbus 1 Hz Stream
+            </div>
           </div>
         </div>
-        <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-semibold text-slate-800 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <Sparkles className="w-4 h-4 text-teal-600 flex-shrink-0" />
-            <span>
-              {rcaState?.has_active_trip || (rcaState?.fault_code && rcaState.fault_code > 0)
-                ? `🚨 Hardware Trip Detected: Err0${rcaState.fault_code} on Wecon VFD Rig — Autonomous RCA Active`
-                : '⚡ Live Rig Monitor: Listening for Hardware Trip Trigger over MQTT / PLC D-variable...'}
+
+        {/* Live Status Indicators */}
+        <div className="flex items-center space-x-2 flex-shrink-0">
+          {isPipelineRunning && (
+            <span className="flex items-center space-x-1.5 text-[11px] font-mono text-amber-700 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded-md animate-pulse">
+              <Loader2 className="w-3 h-3 animate-spin text-amber-600" />
+              <span>Analyzing</span>
             </span>
-          </div>
-          <span className="text-[10px] font-mono text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
-            {rcaState?.has_active_trip ? 'Autonomous RCA' : 'Active 1 Hz Stream'}
-          </span>
+          )}
+
+          {isIncidentActive ? (
+            <span className="flex items-center space-x-1.5 text-[11px] font-mono font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+              <span>Trip: Err0{faultCode}</span>
+            </span>
+          ) : (
+            <span className="flex items-center space-x-1.5 text-[11px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span>Nominal Monitoring</span>
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Scrollable Agent Content Body */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* Service Status Block */}
-        <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs space-y-2">
-          <div className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">
-            Connected Agentic Environment
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
-            {/* FastAPI Service */}
-            <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
-              <div className="flex items-center space-x-2">
-                <Server className="w-3.5 h-3.5 text-slate-600" />
-                <span className="text-slate-700 font-medium truncate">
-                  FastAPI Backend Server (REST & SSE)
-                </span>
-              </div>
-              <span className={`flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                apiOnline
-                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                  : 'bg-rose-50 text-rose-700 border border-rose-200'
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${apiOnline ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                <span>{apiOnline ? 'ONLINE' : 'OFFLINE'}</span>
-              </span>
+      {/* Main Agent Feed (Unified Chronological Trace) */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 text-xs font-sans">
+        {/* ================= TURN 1: Autonomous RCA Mission ================= */}
+        <div className="space-y-2.5">
+          {/* User / Mission Prompt */}
+          <div className="flex items-start space-x-2.5">
+            <div className="w-5 h-5 rounded-full bg-slate-100 border border-slate-300 flex items-center justify-center text-slate-600 text-[10px] font-bold flex-shrink-0 mt-0.5">
+              ⚡
             </div>
-
-            {/* React UI */}
-            <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
-              <div className="flex items-center space-x-2">
-                <Layers className="w-3.5 h-3.5 text-slate-600" />
-                <span className="text-slate-700 font-medium truncate">
-                  React 19 + Vite Industrial Control Room UI
-                </span>
-              </div>
-              <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>ONLINE</span>
-              </span>
+            <div className="font-mono text-xs text-slate-800 font-semibold bg-slate-100/70 border border-slate-200 rounded-lg px-3 py-1.5 w-full">
+              {isIncidentActive
+                ? `Investigate hardware trip Err0${faultCode} on Wecon VFD Rig (VFD_VM_01). Trace root cause and generate ISO 14224 / 8D deliverables.`
+                : `Continuous monitoring and diagnostic readiness on Wecon VFD Rig (VFD_VM_01).`}
             </div>
           </div>
-        </div>
 
-        {/* Expandable Thinking Box */}
-        <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-          <button
-            onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}
-            className="w-full px-3.5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs font-mono font-semibold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-          >
-            <div className="flex items-center space-x-2">
-              <Brain className="w-4 h-4 text-purple-600" />
-              <span>DeepSeek-R1 Chain-of-Thought</span>
-              <span className="flex items-center space-x-1 text-[10px] font-mono text-purple-700 bg-purple-50 border border-purple-200 px-1.5 py-0.2 rounded font-normal">
-                <Clock className="w-3 h-3" />
-                <span>Elapsed: 1.8s</span>
-              </span>
-            </div>
-            {isThinkingExpanded ? (
-              <ChevronUp className="w-4 h-4 text-slate-400" />
+          {/* Reasoning Trace (CoT) - Matching Coding Agent Style */}
+          <div className="pl-7">
+            {isPipelineRunning ? (
+              <div className="flex items-center space-x-2 text-purple-700 font-mono text-xs py-1">
+                <Brain className="w-3.5 h-3.5 animate-pulse text-purple-600" />
+                <span className="animate-pulse">Thinking through telemetry and failure hypotheses...</span>
+              </div>
             ) : (
-              <ChevronDown className="w-4 h-4 text-slate-400" />
-            )}
-          </button>
+              <div className="border border-purple-100 bg-purple-50/30 rounded-md overflow-hidden">
+                <button
+                  onClick={() => setIsCoTExpanded(!isCoTExpanded)}
+                  className="w-full px-2.5 py-1.5 flex items-center justify-between text-left font-mono text-[11px] text-purple-800 hover:bg-purple-100/50 transition-colors cursor-pointer group"
+                >
+                  <div className="flex items-center space-x-2">
+                    <Brain className="w-3.5 h-3.5 text-purple-600" />
+                    <span className="font-semibold text-slate-700 group-hover:text-purple-900">
+                      Thought for 1.8s
+                    </span>
+                    <span className="text-slate-400 font-normal">
+                      ({displayedThinking.split('\n').length} diagnostic steps)
+                    </span>
+                  </div>
+                  {isCoTExpanded ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-purple-600" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-purple-600" />
+                  )}
+                </button>
 
-          {isThinkingExpanded && (
-            <div className="p-3 bg-purple-50/20 text-xs font-mono text-slate-600 leading-relaxed whitespace-pre-line border-t border-purple-100">
-              {displayedThinking}
+                {isCoTExpanded && (
+                  <div className="px-3 py-2 border-t border-purple-100 bg-white font-mono text-[11px] text-slate-600 leading-relaxed whitespace-pre-line">
+                    {displayedThinking}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Grouped Tool Executions (Coding Agent Style matching Image 2) */}
+          <div className="pl-7 space-y-1.5">
+            <div className="border border-slate-200 rounded-md overflow-hidden bg-slate-50/40">
+              {/* Tool Group Header */}
+              <button
+                onClick={() => setIsToolsGroupExpanded(!isToolsGroupExpanded)}
+                className="w-full px-2.5 py-1.5 flex items-center justify-between text-left font-mono text-[11px] text-slate-700 hover:bg-slate-100/70 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center space-x-2">
+                  <Terminal className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="font-semibold">
+                    {isPipelineRunning
+                      ? `Running ${autonomousTools.length} diagnostic tools...`
+                      : `Ran ${autonomousTools.length} diagnostic tools`}
+                  </span>
+                </div>
+                {isToolsGroupExpanded ? (
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                )}
+              </button>
+
+              {/* Nested Tool Execution Rows */}
+              {isToolsGroupExpanded && (
+                <div className="divide-y divide-slate-100 border-t border-slate-200 bg-white">
+                  {autonomousTools.map((tool) => {
+                    const isExpanded = !!expandedToolIds[tool.id];
+                    return (
+                      <div key={tool.id} className="text-[11px] font-mono">
+                        {/* Summary Line matching Image 2 */}
+                        <div className="px-3 py-1.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                          <button
+                            onClick={() => toggleToolExpanded(tool.id)}
+                            className="flex items-center space-x-2 text-left text-slate-700 hover:text-slate-900 cursor-pointer min-w-0 flex-1 pr-2"
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                            ) : (
+                              <ChevronRight className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                            )}
+                            <span className="text-slate-500 flex-shrink-0">Ran</span>
+                            <span className="font-semibold text-slate-800 flex-shrink-0">
+                              {tool.name}
+                            </span>
+                            <span className="text-slate-500 truncate font-normal">
+                              {tool.summary}
+                            </span>
+                          </button>
+
+                          {/* 1-Click Action Link to Right-Panel Tab */}
+                          {tool.inspector_tab && (
+                            <button
+                              onClick={() => onSelectInspectorTab(tool.inspector_tab!)}
+                              className="text-teal-600 hover:text-teal-800 font-semibold flex items-center space-x-1 flex-shrink-0 hover:underline cursor-pointer pl-2 text-[10px]"
+                            >
+                              <span>[{tool.tab_label || 'Inspect'}]</span>
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Expandable Accordion: Command, Parameters, Output, and Logs */}
+                        {isExpanded && (
+                          <div className="px-3 py-2 bg-slate-50/60 border-t border-slate-100 space-y-2 text-[11px] font-mono">
+                            {tool.command && (
+                              <div className="text-slate-500 text-[10px]">
+                                <span className="text-slate-400">$ </span>
+                                <code>{tool.command}</code>
+                              </div>
+                            )}
+
+                            {/* Arguments Preview */}
+                            {tool.args && (
+                              <div className="p-2 rounded bg-white border border-slate-200/80 text-slate-600">
+                                <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">
+                                  Invocation Parameters
+                                </div>
+                                <pre className="text-[10px] overflow-x-auto text-slate-700">
+                                  {JSON.stringify(tool.args, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+
+                            {/* Output Preview */}
+                            {tool.output_details && (
+                              <div className="p-2 rounded bg-white border border-slate-200/80 text-slate-600">
+                                <div className="text-[10px] text-teal-700 uppercase font-bold mb-1 flex items-center space-x-1">
+                                  <CheckCircle2 className="w-3 h-3 text-teal-600" />
+                                  <span>Execution Result</span>
+                                </div>
+                                <pre className="text-[10px] overflow-x-auto text-slate-700">
+                                  {JSON.stringify(tool.output_details, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+
+                            {/* Logs Preview */}
+                            {tool.logs && tool.logs.length > 0 && (
+                              <div className="p-2 rounded bg-slate-900 text-slate-300 text-[10px] space-y-0.5 overflow-x-auto">
+                                {tool.logs.map((log, idx) => (
+                                  <div key={idx} className="font-mono leading-tight">
+                                    {log}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Live 'Working...' Indicator matching Image 2 */}
+            {isPipelineRunning && (
+              <div className="flex items-center space-x-2 text-slate-500 font-mono text-[11px] pt-1 animate-pulse">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-600" />
+                <span>Working...</span>
+              </div>
+            )}
+          </div>
+
+          {/* Root Cause Synthesis Response */}
+          {!isPipelineRunning && (
+            <div className="pl-7 space-y-2.5">
+              <div className="p-3.5 bg-slate-50/90 border border-slate-200 rounded-lg text-xs leading-relaxed space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono font-bold text-slate-800 text-[11px] uppercase tracking-wide flex items-center space-x-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                    <span>{isIncidentActive ? 'Root Cause Synthesis' : 'Operational Baseline Synthesis'}</span>
+                  </span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                    isIncidentActive
+                      ? 'bg-teal-50 text-teal-700 border border-teal-200'
+                      : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  }`}>
+                    {isIncidentActive
+                      ? rcaState?.winning_hypothesis
+                        ? `${(rcaState.winning_hypothesis.confidence * 100).toFixed(0)}% Confidence`
+                        : '98% Confidence'
+                      : '100% Health Score'}
+                  </span>
+                </div>
+                <div className="text-slate-700 font-sans leading-relaxed">
+                  {displayedDiagnosis}
+                </div>
+              </div>
+
+              {/* Action / Review Card: 8D Report + SAP Work Order */}
+              {isIncidentActive ? (
+                <div className="p-3 bg-teal-50/40 border border-teal-200/80 rounded-lg flex items-center justify-between gap-3 shadow-2xs">
+                  <div className="flex items-center space-x-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-md bg-teal-100/70 border border-teal-200 flex items-center justify-center text-teal-700 flex-shrink-0">
+                      <FileCheck className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-mono font-bold text-teal-900 truncate">
+                        1 SAP Work Order (PM01) + 8D Report generated
+                      </div>
+                      <div className="text-[11px] text-teal-700/80 font-sans truncate">
+                        {isFinalized
+                          ? `Authorized by ${rcaState?.incident_report_8d?.d8_sign_off?.reviewed_by || 'Lead Reliability Engineer'} · Deliverables Released`
+                          : isPaused
+                          ? 'Awaiting Lead Reliability Engineer digital signature sign-off'
+                          : 'Awaiting Lead Reliability Engineer digital signature sign-off'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={onOpenReviewModal}
+                    className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white text-xs font-mono font-bold rounded-md shadow-2xs flex items-center space-x-1.5 transition-colors cursor-pointer flex-shrink-0"
+                  >
+                    <span>Review & Authorize</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="p-3 bg-emerald-50/40 border border-emerald-200/80 rounded-lg flex items-center justify-between gap-3 shadow-2xs">
+                  <div className="flex items-center space-x-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-md bg-emerald-100/70 border border-emerald-200 flex items-center justify-center text-emerald-700 flex-shrink-0">
+                      <CheckCircle2 className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-mono font-bold text-emerald-900 truncate">
+                        System Nominal · Zero Active Incidents
+                      </div>
+                      <div className="text-[11px] text-emerald-700/80 font-sans truncate">
+                        All telemetry channels within calibrated operational envelopes · RCA standby
+                      </div>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-[10px] font-mono font-bold rounded-md border border-emerald-200">
+                    Nominal
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* Discrete Tool Call Execution Steps with 1-Click Tab Jump Links */}
-        <div className="space-y-2">
-          <div className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider px-1">
-            Autonomous Tool Executions
-          </div>
+        {/* ================= FOLLOW-UP CONVERSATION TURNS ================= */}
+        {messages.map((msg) => {
+          const isUser = msg.role === 'user';
+          const hasTools = msg.tools && msg.tools.length > 0;
+          const isCoTMsgExpanded = !!expandedChatCoT[msg.id];
 
-          <div className="space-y-1.5">
-            {/* Step 1: ChangePointDetector */}
-            <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-xs hover:border-slate-300 transition-colors">
-              <div className="flex items-center space-x-2 text-xs font-mono">
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  OK
-                </span>
-                <span className="font-semibold text-slate-800">ChangePointDetector</span>
-                <span className="text-slate-500">on VFD_VM_01 (DC bus voltage & motor current transients)</span>
-              </div>
-              <button
-                onClick={() => onSelectInspectorTab('telemetry')}
-                className="text-xs font-mono text-blue-600 hover:text-blue-800 font-medium flex items-center space-x-1 hover:underline cursor-pointer"
-              >
-                <span>[Inspect Telemetry]</span>
-                <ExternalLink className="w-3 h-3" />
-              </button>
-            </div>
-
-            {/* Step 2: TopologyTracer */}
-            <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-xs hover:border-slate-300 transition-colors">
-              <div className="flex items-center space-x-2 text-xs font-mono">
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  OK
-                </span>
-                <span className="font-semibold text-slate-800">TopologyTracer</span>
-                <span className="text-slate-500">on PLC_LX_01 → VFD_VM_01</span>
-              </div>
-              <button
-                onClick={() => onSelectInspectorTab('topology')}
-                className="text-xs font-mono text-blue-600 hover:text-blue-800 font-medium flex items-center space-x-1 hover:underline cursor-pointer"
-              >
-                <span>[View Topology]</span>
-                <ExternalLink className="w-3 h-3" />
-              </button>
-            </div>
-
-            {/* Step 3: FMEAEngine */}
-            <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-xs hover:border-slate-300 transition-colors">
-              <div className="flex items-center space-x-2 text-xs font-mono">
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  OK
-                </span>
-                <span className="font-semibold text-slate-800">FMEAEngine</span>
-                <span className="text-slate-500">evaluating VFD modes (Err02, Err06, Err03, Err11)</span>
-              </div>
-              <button
-                onClick={() => onSelectInspectorTab('hypotheses')}
-                className="text-xs font-mono text-blue-600 hover:text-blue-800 font-medium flex items-center space-x-1 hover:underline cursor-pointer"
-              >
-                <span>[View Hypotheses]</span>
-                <ExternalLink className="w-3 h-3" />
-              </button>
-            </div>
-
-            {/* Step 4: CMMSConnector */}
-            <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-xs hover:border-slate-300 transition-colors">
-              <div className="flex items-center space-x-2 text-xs font-mono">
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  OK
-                </span>
-                <span className="font-semibold text-slate-800">CMMSConnector</span>
-                <span className="text-slate-500">verifying work order WO-VFD-2026-0042</span>
-              </div>
-              <button
-                onClick={() => onSelectInspectorTab('deliverables')}
-                className="text-xs font-mono text-blue-600 hover:text-blue-800 font-medium flex items-center space-x-1 hover:underline cursor-pointer"
-              >
-                <span>[View Deliverables]</span>
-                <ExternalLink className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Diagnostic Conclusion Summary Card */}
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono font-bold text-slate-900 uppercase tracking-wide">
-              Root Cause Synthesis
-            </span>
-            <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-teal-50 text-teal-700 border border-teal-200">
-              {rcaState?.winning_hypothesis ? `${(rcaState.winning_hypothesis.confidence * 100).toFixed(0)}% Confidence` : '98% Confidence'}
-            </span>
-          </div>
-
-          <div className="text-xs text-slate-700 leading-relaxed font-sans">
-            {displayedDiagnosis}
-          </div>
-        </div>
-
-        {/* Action / Review Card (matches reference screenshot) */}
-        <div className="bg-teal-50/50 border border-teal-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-xs">
-          <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-lg bg-teal-100/70 border border-teal-200 flex items-center justify-center text-teal-700">
-              <FileCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-xs font-mono font-bold text-teal-900">
-                1 SAP Work Order (PM01) + 8D Report generated
-              </div>
-              <div className="text-[11px] text-teal-700/80 font-sans">
-                {isFinalized
-                  ? `Authorized by ${rcaState?.incident_report_8d?.d8_sign_off?.reviewed_by || 'Lead Reliability Engineer'} · Deliverables Released`
-                  : isPaused
-                  ? 'Awaiting Lead Reliability Engineer digital signature sign-off'
-                  : 'Awaiting Lead Reliability Engineer digital signature sign-off'}
-              </div>
-            </div>
-          </div>
-
-          <button
-            onClick={onOpenReviewModal}
-            className="px-4 py-2 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white text-xs font-mono font-bold rounded-lg shadow-xs flex items-center space-x-1.5 transition-colors cursor-pointer"
-          >
-            <span>📄</span>
-            <span>Review & Authorize</span>
-          </button>
-        </div>
-
-        {/* Real-time Copilot Chat Stream */}
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-            <div className="flex items-center space-x-2">
-              <Bot className="w-4 h-4 text-purple-600" />
-              <span className="text-xs font-mono font-bold text-slate-800">
-                DeepSeek Diagnostic Copilot
-              </span>
-              <span className="text-[10px] font-mono text-purple-700 bg-purple-50 border border-purple-200 px-1.5 py-0.2 rounded">
-                {deepseekModel}
-              </span>
-            </div>
-            <span className="text-[10px] font-mono text-slate-400">
-              Physics & Standards Grounded
-            </span>
-          </div>
-
-          {/* Messages Stream Container */}
-          <div className="max-h-[300px] overflow-y-auto space-y-2.5 pr-1">
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}
-              >
-                <div
-                  className={`max-w-[92%] rounded-xl p-3 text-xs leading-relaxed ${
-                    m.role === 'user'
-                      ? 'bg-blue-600 text-white rounded-br-none shadow-xs'
-                      : 'bg-slate-50 text-slate-800 border border-slate-200 rounded-bl-none shadow-xs space-y-2'
-                  }`}
-                >
-                  {/* Collapsible Chain-of-Thought for Assistant Messages */}
-                  {m.reasoning_content && (
-                    <div className="rounded-lg bg-purple-50 border border-purple-200 overflow-hidden font-mono text-[11px]">
-                      <button
-                        onClick={() => toggleMsgCoT(m.id)}
-                        className="w-full px-2 py-1 bg-purple-100/60 flex items-center justify-between text-purple-800 font-bold hover:bg-purple-100 cursor-pointer"
-                      >
-                        <span className="flex items-center space-x-1.5">
-                          <Brain className="w-3.5 h-3.5 text-purple-600" />
-                          <span>DeepSeek Reasoning Trace</span>
-                        </span>
-                        {expandedCoT[m.id] ? (
-                          <ChevronUp className="w-3 h-3 text-purple-600" />
-                        ) : (
-                          <ChevronDown className="w-3 h-3 text-purple-600" />
-                        )}
-                      </button>
-                      {expandedCoT[m.id] && (
-                        <div className="p-2 text-purple-900 whitespace-pre-wrap leading-relaxed border-t border-purple-200 bg-white">
-                          {m.reasoning_content}
-                        </div>
-                      )}
+          return (
+            <div key={msg.id} className="space-y-2.5 pt-2 border-t border-slate-100">
+              {/* User Prompt */}
+              {isUser ? (
+                <div className="flex items-start space-x-2.5">
+                  <div className="w-5 h-5 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-700 text-[10px] font-bold flex-shrink-0 mt-0.5">
+                    U
+                  </div>
+                  <div className="font-sans text-xs text-slate-800 bg-blue-50/60 border border-blue-200/70 rounded-lg px-3 py-1.5 max-w-[90%]">
+                    {msg.content}
+                    <div className="text-[10px] font-mono text-blue-500/80 mt-1">
+                      {msg.timestamp}
                     </div>
-                  )}
-
-                  <div className="whitespace-pre-wrap font-sans">{m.content}</div>
-                  <div
-                    className={`text-[10px] font-mono mt-1 ${
-                      m.role === 'user' ? 'text-blue-100 text-right' : 'text-slate-400'
-                    }`}
-                  >
-                    {m.timestamp}
                   </div>
                 </div>
-              </div>
-            ))}
+              ) : (
+                /* Assistant Turn */
+                <div className="space-y-2">
+                  {/* CoT Reasoning for Follow-up message */}
+                  {msg.reasoning_content && (
+                    <div className="pl-7">
+                      <div className="border border-purple-100 bg-purple-50/30 rounded-md overflow-hidden">
+                        <button
+                          onClick={() => toggleChatCoT(msg.id)}
+                          className="w-full px-2.5 py-1.5 flex items-center justify-between text-left font-mono text-[11px] text-purple-800 hover:bg-purple-100/50 transition-colors cursor-pointer group"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <Brain className="w-3.5 h-3.5 text-purple-600" />
+                            <span className="font-semibold text-slate-700 group-hover:text-purple-900">
+                              Thought for {msg.elapsed_time_sec || '1.2'}s
+                            </span>
+                          </div>
+                          {isCoTMsgExpanded ? (
+                            <ChevronDown className="w-3.5 h-3.5 text-purple-600" />
+                          ) : (
+                            <ChevronRight className="w-3.5 h-3.5 text-purple-600" />
+                          )}
+                        </button>
 
-            {/* Live Streaming Delta Bubble */}
-            {isStreaming && (
-              <div className="flex flex-col items-start">
-                <div className="max-w-[92%] rounded-xl p-3 text-xs font-sans leading-relaxed bg-slate-50 text-slate-800 border border-purple-300 rounded-bl-none shadow-xs space-y-2">
-                  {currentReasoning && (
-                    <div className="rounded-lg bg-purple-50 border border-purple-200 p-2 font-mono text-[11px] text-purple-900 space-y-1">
-                      <div className="flex items-center space-x-1 text-purple-700 font-bold">
-                        <Brain className="w-3.5 h-3.5 animate-pulse" />
-                        <span>Live Thinking...</span>
+                        {isCoTMsgExpanded && (
+                          <div className="px-3 py-2 border-t border-purple-100 bg-white font-mono text-[11px] text-slate-600 leading-relaxed whitespace-pre-line">
+                            {msg.reasoning_content}
+                          </div>
+                        )}
                       </div>
-                      <div className="whitespace-pre-wrap leading-relaxed">{currentReasoning}</div>
                     </div>
                   )}
 
-                  <div className="whitespace-pre-wrap">
-                    {currentContent || (
-                      <span className="text-purple-600 italic animate-pulse">
-                        Analyzing telemetry and formulation...
-                      </span>
-                    )}
+                  {/* Tool Call rows for follow-up message */}
+                  {hasTools && (
+                    <div className="pl-7 space-y-1">
+                      {msg.tools!.map((tool) => {
+                        const isExpanded = !!expandedChatTools[tool.id];
+                        return (
+                          <div
+                            key={tool.id}
+                            className="border border-slate-200 rounded-md bg-white text-[11px] font-mono"
+                          >
+                            <div className="px-2.5 py-1.5 flex items-center justify-between hover:bg-slate-50">
+                              <button
+                                onClick={() => toggleChatToolExpanded(tool.id)}
+                                className="flex items-center space-x-2 text-left text-slate-700 hover:text-slate-900 cursor-pointer min-w-0 flex-1 pr-2"
+                              >
+                                {isExpanded ? (
+                                  <ChevronDown className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                                ) : (
+                                  <ChevronRight className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                                )}
+                                <span className="text-slate-500">Ran</span>
+                                <span className="font-semibold text-slate-800">{tool.name}</span>
+                                <span className="text-slate-500 truncate">{tool.summary}</span>
+                              </button>
+                              {tool.inspector_tab && (
+                                <button
+                                  onClick={() => onSelectInspectorTab(tool.inspector_tab!)}
+                                  className="text-teal-600 hover:text-teal-800 font-semibold flex items-center space-x-1 flex-shrink-0 hover:underline cursor-pointer pl-2 text-[10px]"
+                                >
+                                  <span>[{tool.tab_label || 'Inspect'}]</span>
+                                  <ExternalLink className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                            </div>
+
+                            {isExpanded && (
+                              <div className="px-3 py-2 bg-slate-50/70 border-t border-slate-100 space-y-1.5 text-[11px] font-mono">
+                                {tool.command && (
+                                  <div className="text-slate-500 text-[10px]">
+                                    <span className="text-slate-400">$ </span>
+                                    <code>{tool.command}</code>
+                                  </div>
+                                )}
+                                {tool.output_details && (
+                                  <div className="p-2 rounded bg-white border border-slate-200/80 text-slate-600">
+                                    <pre className="text-[10px] overflow-x-auto text-slate-700">
+                                      {JSON.stringify(tool.output_details, null, 2)}
+                                    </pre>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Assistant Content */}
+                  <div className="pl-7">
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs leading-relaxed text-slate-800 whitespace-pre-wrap font-sans">
+                      {msg.content}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Live Streaming Delta Bubble for follow-up turns */}
+        {isStreaming && (
+          <div className="space-y-2 pt-2 border-t border-slate-100">
+            {/* Live Thinking */}
+            {currentReasoning && (
+              <div className="pl-7">
+                <div className="p-2 rounded-md bg-purple-50 border border-purple-200 font-mono text-[11px] text-purple-900 space-y-1">
+                  <div className="flex items-center space-x-1.5 text-purple-700 font-bold">
+                    <Brain className="w-3.5 h-3.5 animate-pulse" />
+                    <span>Thinking...</span>
+                  </div>
+                  <div className="whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
+                    {currentReasoning}
                   </div>
                 </div>
               </div>
             )}
 
-            <div ref={chatBottomRef} />
-          </div>
+            {/* Live Tool Execution in progress */}
+            {activeStreamingTools.length > 0 && (
+              <div className="pl-7 space-y-1">
+                {activeStreamingTools.map((tool) => (
+                  <div
+                    key={tool.id}
+                    className="px-2.5 py-1.5 rounded-md border border-slate-200 bg-white flex items-center justify-between text-[11px] font-mono"
+                  >
+                    <div className="flex items-center space-x-2 text-slate-700">
+                      <Loader2 className="w-3 h-3 text-teal-600 animate-spin" />
+                      <span className="text-slate-500">Running</span>
+                      <span className="font-semibold text-slate-800">{tool.name}</span>
+                      <span className="text-slate-500 truncate">{tool.summary}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
-          {/* Quick Suggestion Chips */}
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            {quickPrompts.map((chip, idx) => (
-              <button
-                key={idx}
-                onClick={() => handleSendChat(chip)}
-                disabled={isStreaming}
-                className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-[11px] font-mono text-slate-600 rounded-md border border-slate-200 transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {chip}
-              </button>
-            ))}
+            {/* Live Streaming Output */}
+            <div className="pl-7">
+              <div className="p-3 bg-slate-50 border border-teal-200 rounded-lg text-xs leading-relaxed text-slate-800 font-sans">
+                {currentContent ? (
+                  <div className="whitespace-pre-wrap">{currentContent}</div>
+                ) : (
+                  <div className="flex items-center space-x-2 text-slate-500 font-mono text-[11px] animate-pulse">
+                    <Loader2 className="w-3 h-3 animate-spin text-teal-600" />
+                    <span>Synthesizing response...</span>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
+        )}
 
-          {/* Prompt Input Form */}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSendChat();
-            }}
-            className="flex items-center space-x-2 pt-1"
-          >
+        <div ref={chatBottomRef} />
+      </div>
+
+      {/* Pinned Bottom Input & Suggestions */}
+      <div className="p-3 border-t border-slate-200 bg-slate-50/50 space-y-2 flex-shrink-0">
+        {/* Quick Suggestion Chips */}
+        <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 scrollbar-none text-[11px] font-mono">
+          {quickPrompts.map((chip, idx) => (
+            <button
+              key={idx}
+              onClick={() => handleSendChat(chip)}
+              disabled={isStreaming || isPipelineRunning}
+              className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-900 rounded-md border border-slate-200 whitespace-nowrap transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
+
+        {/* Prompt Input Form */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSendChat();
+          }}
+          className="flex items-center space-x-2"
+        >
+          <div className="relative flex-1">
             <input
               type="text"
               value={inputPrompt}
               onChange={(e) => setInputPrompt(e.target.value)}
-              disabled={isStreaming}
-              placeholder="Ask Copilot about vibration, cavitation, or PM work order..."
-              className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-sans text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:bg-white"
+              disabled={isStreaming || isPipelineRunning}
+              placeholder="Ask Copilot about DC bus spikes, parameter F0.18, or PM work order..."
+              className="w-full bg-white border border-slate-200 rounded-lg pl-3 pr-8 py-2 text-xs font-sans text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:border-teal-500 shadow-2xs"
             />
-            <button
-              type="submit"
-              disabled={isStreaming || !inputPrompt.trim()}
-              className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white rounded-lg text-xs font-mono font-bold flex items-center space-x-1 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>Send</span>
-            </button>
-          </form>
-        </div>
+          </div>
+          <button
+            type="submit"
+            disabled={isStreaming || isPipelineRunning || !inputPrompt.trim()}
+            className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white rounded-lg text-xs font-mono font-bold flex items-center space-x-1 transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+          >
+            <Send className="w-3.5 h-3.5" />
+            <span>Send</span>
+          </button>
+        </form>
       </div>
     </div>
   );
 };
+
+export default AgentWorkspace;

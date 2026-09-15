@@ -122,6 +122,9 @@ export function App() {
         if (threadId.startsWith('rca-hil-')) {
           const state = await fetchRCAState(threadId);
           setRcaState(state);
+        } else if (scenarioId === 'live_stream' && threadId.startsWith('rca-live-')) {
+          // Live edge stream in nominal monitoring mode: do NOT run trip pipeline!
+          // State is managed by SSE events and handleResetPipeline.
         } else {
           // Run LangGraph pipeline for this scenario & thread
           await runRCAPipeline({

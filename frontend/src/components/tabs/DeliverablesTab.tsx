@@ -93,6 +93,14 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
     window.print();
   };
 
+  const hasActiveIncident = Boolean(
+    rcaState?.has_active_trip ||
+    (rcaState?.fault_code && rcaState.fault_code > 0) ||
+    rcaState?.winning_hypothesis ||
+    rcaState?.incident_report_8d ||
+    rcaState?.sap_work_order
+  );
+
   return (
     <div className="space-y-4">
       {/* Top Banner & Sub-View Switcher */}
@@ -112,62 +120,84 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center space-x-2">
-          {/* View Selector Pills */}
-          <div className="flex items-center bg-slate-100 border border-slate-200 rounded-lg p-0.5 text-xs font-mono">
+        {hasActiveIncident && (
+          <div className="flex items-center space-x-2">
+            {/* View Selector Pills */}
+            <div className="flex items-center bg-slate-100 border border-slate-200 rounded-lg p-0.5 text-xs font-mono">
+              <button
+                onClick={() => setSubView('8d')}
+                className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
+                  subView === '8d'
+                    ? 'bg-white text-slate-900 font-bold shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                8D Report
+              </button>
+              <button
+                onClick={() => setSubView('sap')}
+                className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
+                  subView === 'sap'
+                    ? 'bg-white text-slate-900 font-bold shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                SAP PM01 Order
+              </button>
+              <button
+                onClick={() => setSubView('sop')}
+                className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
+                  subView === 'sop'
+                    ? 'bg-white text-slate-900 font-bold shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                SOP Checklist
+              </button>
+            </div>
+
             <button
-              onClick={() => setSubView('8d')}
-              className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
-                subView === '8d'
-                  ? 'bg-white text-slate-900 font-bold shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={handleCopyJSON}
+              className="flex items-center space-x-1 px-3 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-xs font-mono text-slate-700 rounded-lg shadow-xs transition-colors cursor-pointer"
+              title="Copy all artifact JSON to clipboard"
             >
-              8D Report
+              {copied ? <Check className="w-3.5 h-3.5 text-teal-600" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copied ? 'Copied!' : 'Copy JSON'}</span>
             </button>
+
             <button
-              onClick={() => setSubView('sap')}
-              className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
-                subView === 'sap'
-                  ? 'bg-white text-slate-900 font-bold shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={handlePrint}
+              className="flex items-center space-x-1 px-3 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-xs font-mono text-slate-700 rounded-lg shadow-xs transition-colors cursor-pointer"
             >
-              SAP PM01 Order
-            </button>
-            <button
-              onClick={() => setSubView('sop')}
-              className={`px-3 py-1 rounded-md transition-colors cursor-pointer ${
-                subView === 'sop'
-                  ? 'bg-white text-slate-900 font-bold shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              SOP Checklist
+              <Printer className="w-3.5 h-3.5" />
+              <span>Print</span>
             </button>
           </div>
-
-          <button
-            onClick={handleCopyJSON}
-            className="flex items-center space-x-1 px-3 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-xs font-mono text-slate-700 rounded-lg shadow-xs transition-colors cursor-pointer"
-            title="Copy all artifact JSON to clipboard"
-          >
-            {copied ? <Check className="w-3.5 h-3.5 text-teal-600" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copied ? 'Copied!' : 'Copy JSON'}</span>
-          </button>
-
-          <button
-            onClick={handlePrint}
-            className="flex items-center space-x-1 px-3 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-xs font-mono text-slate-700 rounded-lg shadow-xs transition-colors cursor-pointer"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Print</span>
-          </button>
-        </div>
+        )}
       </div>
 
-      {/* Artifact View 1: 8D Incident Report */}
-      {subView === '8d' && (
+      {/* Nominal State View */}
+      {!hasActiveIncident ? (
+        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-3 shadow-xs">
+          <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 mx-auto">
+            <ShieldCheck className="w-6 h-6" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-900 font-mono">
+            System Operating Nominally — Zero Active Incidents
+          </h3>
+          <p className="text-xs text-slate-500 max-w-lg mx-auto leading-relaxed">
+            The Wecon VM VFD (VFD_VM_01) telemetry is healthy and operating within calibrated ISA-95 envelopes.
+            Global 8D Investigation Reports and SAP S/4HANA PM01 Maintenance Work Orders are generated automatically when a hardware trip occurs.
+          </p>
+          <div className="inline-flex items-center space-x-2 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-mono">
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span>Autonomous Ingestion Active · Modbus 1 Hz Stream Nominal</span>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Artifact View 1: 8D Incident Report */}
+          {subView === '8d' && (
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-5">
           {/* 8D Document Header */}
           <div className="border-b border-slate-100 pb-4 flex flex-wrap items-center justify-between gap-3">
@@ -526,6 +556,8 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
             })}
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );
