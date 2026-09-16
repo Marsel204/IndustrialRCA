@@ -573,14 +573,14 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
               {
                 yAxis: 40.0,
                 name: 'Operating Limit',
-                lineStyle: { color: '#D97706', type: 'dashed', width: 2 },
-                label: { formatter: 'Max Limit 40 Hz', position: 'insideEndTop', color: '#D97706' },
+                lineStyle: { color: '#D97706', type: 'dashed', width: 1.5 },
+                label: { formatter: 'Max Limit 40 Hz', position: 'insideStartTop', color: '#D97706', fontSize: 10 },
               },
               {
                 yAxis: 50.0,
                 name: 'Rated Frequency',
-                lineStyle: { color: '#DC2626', type: 'dashed', width: 1.5 },
-                label: { formatter: 'Rated 50 Hz', position: 'insideEndTop', color: '#DC2626' },
+                lineStyle: { color: '#DC2626', type: 'dashed', width: 2 },
+                label: { formatter: 'Rated 50 Hz', position: 'insideEndTop', color: '#DC2626', fontSize: 10, fontWeight: 'bold' },
               },
             ],
           },
@@ -595,6 +595,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
     const data = series['v_dc'] || [];
     return {
       ...baseChartTheme,
+      grid: { top: 35, right: 35, bottom: 25, left: 55 },
       title: {
         text: 'v_dc · DC Bus Voltage (V DC)',
         textStyle: { color: '#0F172A', fontSize: 12, fontWeight: 'bold' },
@@ -610,7 +611,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
       yAxis: {
         type: 'value',
         min: 0,
-        max: (value: { max: number }) => Math.max(225, Math.ceil(value.max * 1.1)),
+        max: (value: { max: number }) => Math.max(225, Math.ceil(value.max * 1.08)),
         axisLabel: { formatter: '{value} V', fontSize: 10, color: '#334155' },
         splitLine: { lineStyle: { color: '#F1F5F9' } },
       },
@@ -620,14 +621,14 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
           type: 'line',
           showSymbol: false,
           sampling: 'lttb',
-          lineStyle: { width: 2, color: '#DC2626' },
+          lineStyle: { width: 2, color: '#2563EB' },
           areaStyle: {
             color: {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: 'rgba(220, 38, 38, 0.22)' },
-                { offset: 1, color: 'rgba(220, 38, 38, 0.0)' },
+                { offset: 0, color: 'rgba(37, 99, 235, 0.18)' },
+                { offset: 1, color: 'rgba(37, 99, 235, 0.0)' },
               ],
             },
           },
@@ -638,19 +639,35 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
                 yAxis: 195.0,
                 name: 'Err06 Trip Threshold',
                 lineStyle: { color: '#DC2626', type: 'dashed', width: 2 },
-                label: { formatter: 'Trip 195.0 V (Err06)', position: 'insideEndTop', color: '#DC2626' },
+                label: {
+                  formatter: 'Trip 195.0 V (Err06)',
+                  position: 'insideEndTop',
+                  color: '#DC2626',
+                  fontSize: 10,
+                  fontWeight: 'bold',
+                },
               },
               {
                 yAxis: 190.0,
                 name: 'High Alarm',
                 lineStyle: { color: '#D97706', type: 'dotted', width: 1.5 },
-                label: { formatter: 'Alarm 190.0 V', position: 'insideEndTop', color: '#D97706' },
+                label: {
+                  formatter: 'Alarm 190.0 V',
+                  position: 'insideStartTop',
+                  color: '#D97706',
+                  fontSize: 10,
+                },
               },
               {
                 yAxis: 182.0,
                 name: 'Nominal 40Hz',
                 lineStyle: { color: '#10B981', type: 'dotted', width: 1.5 },
-                label: { formatter: 'Nominal 182.0 V', position: 'insideEndBottom', color: '#10B981' },
+                label: {
+                  formatter: 'Nominal 182.0 V',
+                  position: 'insideEndBottom',
+                  color: '#059669',
+                  fontSize: 10,
+                },
               },
             ],
           },
@@ -665,6 +682,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
     const data = series['current'] || [];
     return {
       ...baseChartTheme,
+      grid: { top: 35, right: 35, bottom: 25, left: 55 },
       title: {
         text: 'I_out · Motor Phase Current (Amperes)',
         textStyle: { color: '#0F172A', fontSize: 12, fontWeight: 'bold' },
@@ -708,13 +726,13 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
                 yAxis: 2.50,
                 name: 'Trip Limit',
                 lineStyle: { color: '#DC2626', type: 'dashed', width: 2 },
-                label: { formatter: 'Trip 2.50 A', position: 'insideEndTop', color: '#DC2626' },
+                label: { formatter: 'Trip 2.50 A', position: 'insideEndTop', color: '#DC2626', fontSize: 10, fontWeight: 'bold' },
               },
               {
                 yAxis: 2.00,
                 name: 'High Alarm',
                 lineStyle: { color: '#D97706', type: 'dotted', width: 1.5 },
-                label: { formatter: 'Alarm 2.00 A', position: 'insideEndTop', color: '#D97706' },
+                label: { formatter: 'Alarm 2.00 A', position: 'insideStartTop', color: '#D97706', fontSize: 10 },
               },
             ],
           },
