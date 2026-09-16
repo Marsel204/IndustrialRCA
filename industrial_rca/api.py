@@ -1129,13 +1129,25 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
     to the DeepSeek AI Copilot.
     """
     latest_tel = GLOBAL_TSDB.get_latest("VFD_VM_01") or {}
-    f_out = float(latest_tel.get("f_out", 40.0) or 40.0)
-    f_target = float(latest_tel.get("f_target", 40.0) or 40.0)
-    v_dc = float(latest_tel.get("v_dc", 182.0) or 182.0)
-    current = float(latest_tel.get("current", 1.15) or 1.15)
-    rpm = float(latest_tel.get("rpm", 1199.0) or 1199.0)
-    raw_fc = int(latest_tel.get("fault_code", 0) or 0)
-    status = str(latest_tel.get("status", "RUNNING"))
+
+    def _val(k: str, default: float = 0.0) -> float:
+        v = latest_tel.get(k)
+        if v is None:
+            return default
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return default
+
+    f_out = _val("f_out", 0.0)
+    f_target = _val("f_target", 0.0)
+    if f_target < 0:
+        f_target = round((f_target + 65536.0) / 1000.0, 2) if f_target < -1000 else round((f_target + 65536.0) / 100.0, 2)
+    v_dc = _val("v_dc", 0.0)
+    current = _val("current", 0.0)
+    rpm = _val("rpm", 0.0)
+    raw_fc = int(_val("fault_code", 0.0))
+    status = str(latest_tel.get("status", "TRIPPED" if raw_fc > 0 else "READY"))
 
     # Check active HIL incident
     has_inc = bool(LATEST_HIL_INCIDENT.get("has_incident"))
@@ -1160,6 +1172,8 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
     root_desc = graph_state.get("root_cause_description", "")
     five_whys = graph_state.get("causal_chain_5_whys", [])
 
+    is_motor_disconnected = (current == 0.0 and rpm == 0.0)
+
     prompt_lines = [
         "You are the Industrial RCA AI Copilot, a senior power electronics and plant reliability engineer.",
         "You are directly integrated into the real-time monitoring and Root Cause Analysis system for:",
@@ -1170,14 +1184,30 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
         "=== REAL-TIME TELEMETRY SNAPSHOT (1 Hz Modbus Stream) ===",
         f"- Operating Status: {status}",
         f"- Active Trip Code: {fault_str}",
-        f"- Output Frequency: {f_out:.2f} Hz (Normal Setpoint: 40.00 Hz, Alarm Ceiling: 42.00 Hz, Trip Limit: 50.00 Hz)",
-        f"- Frequency Target: {f_target:.2f} Hz",
-        f"- DC Bus Voltage: {v_dc:.1f} V (Nominal: 182.0 V, Alarm: 190.0 V, Hardware Trip Ceiling: 195.0 V, reaches ~207 V at 50 Hz)",
-        f"- Motor Output Current: {current:.2f} A (Nominal: 1.15 A, Alarm: 2.00 A, Trip Threshold: 2.50 A)",
-        f"- Rotor Speed: {rpm:.1f} RPM (Rated: 1440 RPM)",
+        f"- Output Frequency: {f_out:.2f} Hz",
+        f"- Frequency Target / Setpoint: {f_target:.2f} Hz",
+        f"- DC Bus Voltage: {v_dc:.1f} V (Calibrated: 0.0 V unpowered, ~182 V nominal idle link, 195.0 V trip limit)",
+        f"- Motor Output Current: {current:.2f} A (Nominal FLA: 1.15 A, Trip Limit: 2.50 A)",
+        f"- Rotor Speed: {rpm:.1f} RPM (Synchronous: 1450 RPM)",
         "",
-        "=== INVESTIGATION & DIAGNOSTIC STATE ===",
+        "=== PHYSICAL BENCH SETUP & MOTOR STATE ===",
     ]
+
+    if is_motor_disconnected:
+        prompt_lines.extend([
+            "- **MOTOR CONNECTION / SHAFT STATUS:** Current is 0.00 A and RPM is 0.0 RPM.",
+            "  * The physical 3-phase induction motor is currently DISCONNECTED (or uncoupled) from the VFD output terminals (U/V/W), OR the drive is completely stopped/tripped.",
+            "  * With no motor connected to the inverter output, there is NO stator winding load, so phase current is strictly 0.00 A and rotor speed is strictly 0.0 RPM.",
+            "  * CRITICAL: NEVER claim or hallucinate that current is 1.15 A or that the motor is spinning at 1199 RPM! Always confirm that 0.00 A and 0 RPM correctly reflects the disconnected/idle motor.",
+            "  * Even without a motor connected, the VFD can still energize its DC link, execute frequency modulation, and trip on overvoltage (Err06) or control faults if setpoint / DC bus limits are exceeded.",
+        ])
+    else:
+        prompt_lines.extend([
+            f"- **MOTOR CONNECTION / SHAFT STATUS:** Motor is connected and drawing {current:.2f} A at {rpm:.1f} RPM.",
+        ])
+
+    prompt_lines.append("")
+    prompt_lines.append("=== INVESTIGATION & DIAGNOSTIC STATE ===")
 
     if has_inc or active_fc > 0 or winning_hyp:
         prompt_lines.extend([

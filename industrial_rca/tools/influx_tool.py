@@ -279,6 +279,9 @@ class InfluxDBTelemetryTool:
         latest_tsdb = GLOBAL_TSDB.get_latest(asset_id)
         if latest_tsdb and time.time() - latest_tsdb.get("timestamp", 0) < 60:
             res = dict(latest_tsdb)
+            ft = res.get("f_target")
+            if ft is not None and ft < 0:
+                res["f_target"] = round((ft + 65536.0) / 1000.0, 2) if ft < -1000 else round((ft + 65536.0) / 100.0, 2)
             res["source"] = "embedded_tsdb"
             res["is_simulated"] = False
             res["mqtt_connected"] = mqtt_online
