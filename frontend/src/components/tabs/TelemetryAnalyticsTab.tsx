@@ -658,17 +658,6 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
                   fontSize: 10,
                 },
               },
-              {
-                yAxis: 182.0,
-                name: 'Nominal 40Hz',
-                lineStyle: { color: '#10B981', type: 'dotted', width: 1.5 },
-                label: {
-                  formatter: 'Nominal 182.0 V',
-                  position: 'insideEndBottom',
-                  color: '#059669',
-                  fontSize: 10,
-                },
-              },
             ],
           },
           data,
