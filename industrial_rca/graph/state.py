@@ -40,6 +40,7 @@ class RCAState(TypedDict, total=False):
     detected_anomalies: List[Dict[str, Any]]
     tag_profiles: Dict[str, Dict[str, Any]]
     has_active_trip: bool
+    fault_code: int
 
     # Hypotheses to Test
     hypotheses_to_test: List[Dict[str, Any]]

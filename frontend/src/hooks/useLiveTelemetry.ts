@@ -14,7 +14,10 @@ export function useLiveTelemetry(
   telemetry: TelemetryData | null,
   activeScenarioId?: string
 ): UseLiveTelemetryResult {
-  const isLiveStream = activeScenarioId === 'live_stream';
+  const isLiveStream =
+    activeScenarioId === 'live_stream' ||
+    activeScenarioId === 'hil' ||
+    Boolean(activeScenarioId?.startsWith('ds_hil'));
   const isVfdAsset =
     activeScenarioId === 'live_stream' ||
     activeScenarioId === 'exp_err02' ||
@@ -41,13 +44,13 @@ export function useLiveTelemetry(
           trimmed[k] = v.length > 300 ? v.slice(-300) : v;
         }
         setRollingSeries(trimmed);
-      } else {
+      } else if (!activeScenarioId || telemetry.dataset_id === activeScenarioId || telemetry.dataset_id === 'hil' || activeScenarioId.startsWith('ds_hil')) {
         setRollingTimestamps(telemetry.timestamps || []);
         setRollingSeries(telemetry.series || {});
         setLiveMetric(null);
       }
     }
-  }, [telemetry, isLiveStream]);
+  }, [telemetry, isLiveStream, activeScenarioId]);
 
   // Connect to SSE live stream when in live_stream scenario
   useEffect(() => {

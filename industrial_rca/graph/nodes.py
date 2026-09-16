@@ -60,6 +60,7 @@ def ingest_telemetry_event(state: RCAState) -> Dict[str, Any]:
     meta = ds.metadata
     asset_id = meta.get("asset_id", EQUIPMENT_ID)
 
+    fc_val = int(meta.get("fault_code", state.get("fault_code", 0)) or 0)
     trip_info = {
         "asset_id": asset_id,
         "scenario_name": ds.scenario_name,
@@ -69,6 +70,7 @@ def ingest_telemetry_event(state: RCAState) -> Dict[str, Any]:
         "trip_value": meta.get("trip_value", 0.0),
         "trip_setpoint": meta.get("trip_setpoint", 90.0),
         "anomaly_expected": meta.get("anomaly_expected", False),
+        "fault_code": fc_val,
     }
 
     log_entry = (
@@ -82,6 +84,7 @@ def ingest_telemetry_event(state: RCAState) -> Dict[str, Any]:
         "dataset_name": ds.scenario_name,
         "dataset_id": ds_id,
         "trip_metadata": trip_info,
+        "fault_code": fc_val,
         "pipeline_status": "INGESTED",
         "execution_logs": [log_entry],
     }
@@ -107,7 +110,7 @@ def detect_anomalies(state: RCAState) -> Dict[str, Any]:
 
     tag_profiles = {}
     detected_anomalies = []
-    has_active_trip = False
+    has_active_trip = state.get("has_active_trip", False)
 
     logs = []
 
@@ -191,8 +194,13 @@ def detect_anomalies(state: RCAState) -> Dict[str, Any]:
             "execution_logs": logs,
         }
 
-    if "fault_code" in tag_profiles and tag_profiles["fault_code"]["max"] > 0:
+    fc = int(state.get("fault_code") or trip_meta.get("fault_code") or meta.get("fault_code", 0) or 0)
+    if fc == 0 and "fault_code" in available_cols and len(ds.df_1hz) > 0:
+        fc = int(ds.df_1hz["fault_code"].iloc[-1] or 0)
+    if fc == 0 and "fault_code" in tag_profiles and tag_profiles["fault_code"]["max"] > 0:
         fc = int(tag_profiles["fault_code"]["max"])
+
+    if fc > 0:
         primary_sensor = "current" if fc in (2, 3) else "v_dc"
     else:
         primary_sensor = trip_meta.get("primary_trip_sensor", "v_dc")
@@ -214,6 +222,7 @@ def detect_anomalies(state: RCAState) -> Dict[str, Any]:
         "tag_profiles": tag_profiles,
         "detected_anomalies": detected_anomalies,
         "has_active_trip": True,
+        "fault_code": fc,
         "pipeline_status": "ANOMALIES_DETECTED",
         "execution_logs": logs,
     }
@@ -271,8 +280,15 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
     curr_profile = analytics_tool.profile_tag(ds_id, "current", 0, 3600) if "current" in available_cols else {"max": 0, "mean": 0}
     fout_profile = analytics_tool.profile_tag(ds_id, "f_out", 0, 3600) if "f_out" in available_cols else {"max": 0, "mean": 0}
 
-    trip_meta_code = worker_input.get("trip_metadata", {}).get("fault_code", 0) or 0
-    active_fc = int(fc_max) if fc_max > 0 else int(trip_meta_code)
+    trip_meta_code = int(worker_input.get("trip_metadata", {}).get("fault_code", 0) or 0)
+    if trip_meta_code > 0:
+        active_fc = trip_meta_code
+    elif "fault_code" in available_cols and len(ds.df_1hz) > 0 and int(ds.df_1hz["fault_code"].iloc[-1] or 0) > 0:
+        active_fc = int(ds.df_1hz["fault_code"].iloc[-1])
+    elif fc_max > 0:
+        active_fc = int(fc_max)
+    else:
+        active_fc = 0
 
     if hyp_id == "H_VFD_ERR06":
         # Overfrequency Deceleration Overvoltage (WECON VM Err06)
@@ -282,7 +298,8 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
         metrics["fout_max"] = fout_max
         metrics["fault_code"] = active_fc
 
-        if active_fc == 6 or vdc_max >= 195.0 or (fout_max >= 42.0 and vdc_max >= 190.0):
+        is_confirmed = (active_fc == 6) or (active_fc == 0 and (vdc_max >= 195.0 or (fout_max >= 42.0 and vdc_max >= 190.0)))
+        if is_confirmed:
             status = "CONFIRMED"
             confidence = 0.98
             evidence.append({
@@ -297,7 +314,7 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
             })
             evidence.append({
                 "check": "Modbus Trip Code Register (Reg 700BH)",
-                "observation": "VFD reported Err06 (Deceleration / Overfrequency Overvoltage trip).",
+                "observation": f"VFD reported Err06 (Deceleration / Overfrequency Overvoltage trip). Active fault code: {active_fc}.",
                 "status": "FAULT_LATCHED",
             })
             falsification_rationale = (
@@ -313,13 +330,13 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
             ]
         else:
             status = "REFUTED"
-            confidence = 0.96
+            confidence = 0.97 if active_fc > 0 else 0.96
             evidence.append({
                 "check": "DC Bus Voltage (Reg 1003H / 3004H)",
-                "observation": f"DC bus voltage remained within safe limits (peak {vdc_max:.1f} V < 195.0 V trip threshold).",
+                "observation": f"DC bus voltage ({vdc_max:.1f} V) does not indicate Err06 trip. Active hardware fault register: Err0{active_fc}." if active_fc > 0 else f"DC bus voltage remained within safe limits (peak {vdc_max:.1f} V < 195.0 V trip threshold).",
                 "status": "WITHIN_LIMITS",
             })
-            falsification_rationale = f"REFUTED. DC bus voltage ({vdc_max:.1f} V) did not breach the 195.0 V trip limit."
+            falsification_rationale = f"REFUTED. Drive latched Err0{active_fc} (not Err06 overvoltage)." if active_fc > 0 else f"REFUTED. DC bus voltage ({vdc_max:.1f} V) did not breach the 195.0 V trip limit."
             proposed_actions = []
 
     elif hyp_id == "H_VFD_ERR02":
@@ -328,7 +345,8 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
         metrics["curr_max"] = curr_max
         metrics["fault_code"] = active_fc
 
-        if active_fc == 2 or curr_max >= 2.50:
+        is_confirmed = (active_fc == 2) or (active_fc == 0 and curr_max >= 2.50)
+        if is_confirmed:
             status = "CONFIRMED"
             confidence = 0.98
             evidence.append({
@@ -343,7 +361,7 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
             })
             evidence.append({
                 "check": "Modbus Trip Code Register (Reg 700BH)",
-                "observation": "VFD reported Err02 (Overcurrent during deceleration / forced stop).",
+                "observation": f"VFD reported Err02 (Overcurrent during deceleration / forced stop). Active fault code: {active_fc}.",
                 "status": "FAULT_LATCHED",
             })
             falsification_rationale = (
@@ -362,10 +380,10 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
             confidence = 0.97
             evidence.append({
                 "check": "Output Phase Current (Reg 1005H / 3002H)",
-                "observation": f"Current remained within continuous nominal limits (peak {curr_max:.2f} A < 2.50 A trip limit).",
+                "observation": f"Motor current does not indicate Err02 trip. Active hardware fault register: Err0{active_fc}." if active_fc > 0 else f"Current remained within continuous nominal limits (peak {curr_max:.2f} A < 2.50 A trip limit).",
                 "status": "NOMINAL",
             })
-            falsification_rationale = f"REFUTED. No back-EMF current spike observed (peak {curr_max:.2f} A < 2.50 A)."
+            falsification_rationale = f"REFUTED. Drive latched Err0{active_fc} (not Err02 overcurrent)." if active_fc > 0 else f"REFUTED. No back-EMF current spike observed (peak {curr_max:.2f} A < 2.50 A)."
             proposed_actions = []
 
     elif hyp_id == "H_VFD_ERR03":
@@ -486,7 +504,9 @@ def aggregate_hypotheses(state: RCAState) -> Dict[str, Any]:
             "execution_logs": ["[AGGREGATION] Error: No hypothesis results received."],
         }
 
-    # Sort: CONFIRMED first, then asset-specific match, then by confidence descending
+    fc = int(state.get("fault_code") or state.get("trip_metadata", {}).get("fault_code", 0) or 0)
+
+    # Sort: CONFIRMED first, then exact fault code match, then asset-specific match, then by confidence descending
     def sort_key(r):
         priority = 0
         if r["status"] == "CONFIRMED":
@@ -498,7 +518,18 @@ def aggregate_hypotheses(state: RCAState) -> Dict[str, Any]:
 
         is_vfd = state.get("asset_id") == "VFD_VM_01"
         is_asset_match = 1 if (is_vfd and r["hypothesis_id"].startswith("H_VFD")) or (not is_vfd and not r["hypothesis_id"].startswith("H_VFD")) else 0
-        return (priority, is_asset_match, r["confidence"])
+
+        exact_fc_match = 0
+        if fc == 2 and r["hypothesis_id"] == "H_VFD_ERR02":
+            exact_fc_match = 2
+        elif fc == 6 and r["hypothesis_id"] == "H_VFD_ERR06":
+            exact_fc_match = 2
+        elif fc == 3 and r["hypothesis_id"] == "H_VFD_ERR03":
+            exact_fc_match = 2
+        elif fc == 11 and r["hypothesis_id"] == "H_VFD_ERR11":
+            exact_fc_match = 2
+
+        return (priority, exact_fc_match, is_asset_match, r["confidence"])
 
     sorted_results = sorted(results, key=sort_key, reverse=True)
     winning_hyp = sorted_results[0]
@@ -547,6 +578,7 @@ def aggregate_hypotheses(state: RCAState) -> Dict[str, Any]:
             "occurrence": fmea_entry.get("occurrence", 6),
             "detection": fmea_entry.get("detection", 2),
         },
+        "fault_code": fc,
         "pipeline_status": "HYPOTHESES_AGGREGATED",
         "execution_logs": [log_entry],
     }
@@ -709,6 +741,7 @@ def causal_deep_dive_5_whys(state: RCAState) -> Dict[str, Any]:
         "causal_chain_5_whys": five_whys,
         "root_cause_asset": root_asset,
         "root_cause_description": root_desc,
+        "fault_code": int(state.get("fault_code") or state.get("trip_metadata", {}).get("fault_code", 0) or 0),
         "pipeline_status": "CAUSAL_TRACE_COMPLETED",
         "execution_logs": [log_entry],
     }
@@ -731,7 +764,7 @@ def causal_deep_dive_5_whys(state: RCAState) -> Dict[str, Any]:
                     {"role": "user", "content": prompt},
                 ],
                 model=model_name,
-                max_tokens=2500,
+                max_tokens=4096,
             )
             content_str = ds_res.get("content", "").strip()
             reasoning_str = ds_res.get("reasoning_content", "").strip()

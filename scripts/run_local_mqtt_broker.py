@@ -60,6 +60,10 @@ async def _custom_broadcast(self, session, topic, data, force_qos=None):
     print(f"\n[MQTT-LIVE] [{now_str}] Client: {cid} | Topic: {topic}", flush=True)
     print(f"   Payload: {raw_text}", flush=True)
 
+    # Do NOT forward internal broker statistics ($SYS/...) to the live telemetry feed
+    if topic.startswith("$") or cid == "broker":
+        return await _orig_broadcast(self, session, topic, data, force_qos=force_qos)
+
     # Forward to FastAPI live feed
     try:
         payload_dict = None

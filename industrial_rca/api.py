@@ -247,19 +247,52 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
         fault_info = get_vfd_fault_info(incident.fault_code)
         fault_desc = fault_info.get("description", f"WECON VM VFD Trip Code {incident.fault_code}")
 
+    current_inc_fc = (LATEST_HIL_INCIDENT.get("incident_data") or {}).get("fault_code")
+    # Guard: Prevent redundant pipeline dispatch only if an investigation for the exact same fault code is already in flight
+    if LATEST_HIL_INCIDENT.get("pipeline_status") == "TRIGGERED" and current_inc_fc == incident.fault_code:
+        logger.info(f"HIL RCA pipeline already in flight for fault {incident.fault_code}; ignoring redundant trigger.")
+        return {
+            "status": "ALREADY_RUNNING",
+            "incident_id": (LATEST_HIL_INCIDENT.get("incident_data") or {}).get("incident_id"),
+            "rca_pipeline": "IN_PROGRESS",
+        }
+
     raw_points = incident.pre_fault_telemetry
     if not raw_points:
         now = time.time()
         raw_points = [
-            {"timestamp": now - t, "f_out": 45.0, "f_target": 45.0, "current": 1.4, "v_out": 220.0, "v_dc": 312.0, "fault_code": 0}
+            {"timestamp": now - t, "f_out": 40.0, "f_target": 40.0, "current": 1.2, "v_out": 220.0, "v_dc": 182.0, "fault_code": 0}
             for t in range(60, 0, -1)
         ]
-        raw_points.append({"timestamp": now, "f_out": 0.0, "f_target": 0.0, "current": 2.8, "v_out": 0.0, "v_dc": 745.0, "fault_code": incident.fault_code})
+        raw_points.append({
+            "timestamp": now,
+            "f_out": 0.0,
+            "f_target": 0.0,
+            "current": 3.5 if incident.fault_code in (2, 3) else 1.2,
+            "v_out": 0.0,
+            "v_dc": 202.5 if incident.fault_code == 6 else 182.0,
+            "fault_code": incident.fault_code,
+        })
+    else:
+        # Pre-fault telemetry represents operating condition leading up to the trip.
+        # Clean older latched fault codes so only the trip point marks the transition.
+        if len(raw_points) > 0:
+            for p in raw_points[:-1]:
+                p["fault_code"] = 0
+            raw_points[-1]["fault_code"] = incident.fault_code
+            if incident.fault_code in (2, 3) and float(raw_points[-1].get("current", 0) or 0) < 2.50:
+                raw_points[-1]["current"] = 3.50
+            elif incident.fault_code == 6 and float(raw_points[-1].get("v_dc", 0) or 0) < 195.0:
+                raw_points[-1]["v_dc"] = 202.5
 
     df = pd.DataFrame(raw_points)
-    for col, default in [("f_out", 0.0), ("f_target", 0.0), ("current", 0.0), ("v_out", 0.0), ("v_dc", 0.0), ("fault_code", 0)]:
+    for col, default in [("f_out", 0.0), ("f_target", 0.0), ("current", 0.0), ("v_out", 0.0), ("v_dc", 182.0), ("fault_code", 0)]:
         if col not in df.columns:
             df[col] = default
+
+    if len(df) > 0:
+        df.loc[df.index[:-1], "fault_code"] = 0
+        df.loc[df.index[-1], "fault_code"] = incident.fault_code
 
     if "PT-30101" not in df.columns:
         df["PT-30101"] = np.where(df["fault_code"] > 0, 0.58, 2.40)
@@ -275,6 +308,7 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
     t_norm, sig_norm = generate_high_frequency_vibration(is_cavitating=False)
     t_fault, sig_fault = generate_high_frequency_vibration(is_cavitating=True)
 
+    is_curr_fault = incident.fault_code in (2, 3)
     dataset = TelemetryDataset(
         scenario_name=f"HIL Incident: {fault_desc}",
         df_1hz=df,
@@ -286,9 +320,9 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
             "fault_description": fault_desc,
             "trip_timestamp_sec": len(df) - 1,
             "trip_time_str": time.strftime("%H:%M:%S UTC"),
-            "primary_trip_sensor": "VFD_V_DC" if incident.fault_code == 6 else "VFD_I_OUT",
-            "trip_value": float(df["v_dc"].max()) if (incident.fault_code == 6 and "v_dc" in df.columns and len(df) > 0) else (float(df["current"].max()) if ("current" in df.columns and len(df) > 0) else 0.0),
-            "trip_setpoint": 700.0 if incident.fault_code == 6 else 1.15,
+            "primary_trip_sensor": "current" if is_curr_fault else "v_dc",
+            "trip_value": float(df["current"].max()) if is_curr_fault else float(df["v_dc"].max()),
+            "trip_setpoint": 2.50 if is_curr_fault else 195.0,
         },
         normal_waveform={"t": t_norm, "signal": sig_norm},
         fault_waveform={"t": t_fault, "signal": sig_fault},
@@ -341,6 +375,7 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
                 "dataset_id": ds_id,
                 "asset_id": incident.asset_id,
                 "has_active_trip": True,
+                "fault_code": incident.fault_code,
                 "use_deepseek": True,
                 "deepseek_model": "deepseek-reasoner",
             }
@@ -390,8 +425,7 @@ def clear_incident():
     LATEST_HIL_INCIDENT["received_at"] = None
     LATEST_HIL_INCIDENT["version"] += 1
 
-    GLOBAL_TSDB._last_fault_code = 0
-    GLOBAL_TSDB._last_trip_time = 0.0
+    GLOBAL_TSDB.clear()
 
     _notify_hil_subscribers({
         "event": "hil_incident_cleared",
@@ -543,15 +577,64 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
         except ValueError:
             ts = now
 
-    raw_f_out = _unpack(metric.get("f_out", metric.get("frequency", 40.0)))
-    # If scaled as 4000 for 40.00 Hz (standard Modbus register scaling)
-    f_out = round(raw_f_out / 100.0 if raw_f_out > 200.0 else raw_f_out, 2)
+    topic_name = str(metric.get("_mqtt_topic", metric.get("topic", ""))).lower()
+    if topic_name.startswith("$") or "broker" in topic_name:
+        return {"status": "IGNORED_BROKER_SYS_METRIC"}
 
-    raw_rpm = _unpack(metric.get("rpm", f_out * 29.0))
-    rpm = round(raw_rpm, 1)
+    # Ensure this payload contains real equipment telemetry tags
+    has_telemetry_tag = any(
+        k in metric
+        for k in (
+            "f_out", "frequency", "f_in", "f_target", "v_dc", "bus_voltage",
+            "current", "rpm", "fault_code", "fault", "error", "trip", "d_trigger",
+        )
+    )
+    if not has_telemetry_tag:
+        return {"status": "IGNORED_NON_TELEMETRY_PAYLOAD"}
 
-    raw_v_dc = _unpack(metric.get("v_dc", metric.get("bus_voltage", 182.0)))
-    v_dc = round(raw_v_dc, 1)
+    raw_f_out = _unpack(metric.get("f_out", metric.get("frequency", None)))
+    if raw_f_out is None:
+        latest = GLOBAL_TSDB.get_latest("VFD_VM_01")
+        f_out = float(latest.get("f_out", 0.0)) if latest else 0.0
+    else:
+        # Handle signed 16-bit Modbus rollover if sent as signed int
+        if raw_f_out < 0:
+            raw_f_out += 65536.0
+        # Wecon VM VFD Modbus register 1001H / 3000H resolution is ALWAYS 0.01 Hz (divisor 100.0)
+        # e.g., 3000 = 30.00 Hz, 300 = 3.00 Hz, 4000 = 40.00 Hz, 5000 = 50.00 Hz
+        if raw_f_out > 60.0:
+            f_out = round(raw_f_out / 100.0, 2)
+        else:
+            f_out = round(raw_f_out, 2)
+
+    raw_f_target = _unpack(metric.get("f_target", metric.get("f_in", None)))
+    if raw_f_target is None:
+        f_target = f_out
+    else:
+        # Handle signed 16-bit Modbus rollover (e.g. 50000 sent as -15536)
+        if raw_f_target < 0:
+            raw_f_target += 65536.0
+        # HMI / PLC setpoint register (f_in) resolution is 0.001 Hz (divisor 1000.0)
+        # e.g., 30000 = 30.00 Hz, 3000 = 3.00 Hz, 40000 = 40.00 Hz, 50000 = 50.00 Hz
+        if raw_f_target > 600.0:
+            f_target = round(raw_f_target / 1000.0, 2)
+        elif raw_f_target > 60.0:
+            f_target = round(raw_f_target / 100.0, 2)
+        else:
+            f_target = round(raw_f_target, 2)
+
+    raw_rpm = _unpack(metric.get("rpm", None))
+    if raw_rpm is None:
+        rpm = round(f_out * 29.0, 1) if f_out > 0 else 0.0
+    else:
+        rpm = round(raw_rpm, 1)
+
+    raw_v_dc = _unpack(metric.get("v_dc", metric.get("bus_voltage", None)))
+    if raw_v_dc is None:
+        latest = GLOBAL_TSDB.get_latest("VFD_VM_01")
+        v_dc = float(latest.get("v_dc", 0.0)) if latest else 0.0
+    else:
+        v_dc = round(raw_v_dc, 1)
 
     raw_current = _unpack(metric.get("current", 0.0))
     current = round(raw_current / 100.0 if raw_current > 100.0 else raw_current, 2)
@@ -587,6 +670,7 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
     normalized = {
         "asset_id": asset_id,
         "f_out": f_out,
+        "f_target": f_target,
         "v_dc": v_dc,
         "current": current,
         "rpm": rpm,
@@ -940,6 +1024,7 @@ def get_rca_state(thread_id: str):
         "sap_work_order": vals.get("sap_work_order"),
         "execution_logs": vals.get("execution_logs", []),
         "deepseek_evaluation": vals.get("deepseek_evaluation"),
+        "fault_code": vals.get("fault_code") or vals.get("trip_metadata", {}).get("fault_code", 0),
     }
 
 
@@ -952,9 +1037,15 @@ def run_rca_pipeline(request: RCARunRequest):
     actual_ds_id = SCENARIOS_REGISTRY.get(request.dataset_id, request.dataset_id)
     _ = _resolve_ds(actual_ds_id)
 
+    fc_from_ds = 0
+    ds_obj = TelemetryStore.get(actual_ds_id)
+    if ds_obj and ds_obj.metadata:
+        fc_from_ds = int(ds_obj.metadata.get("fault_code", 0) or 0)
+
     init_state = {
         "dataset_id": actual_ds_id,
         "asset_id": request.asset_id,
+        "fault_code": fc_from_ds,
         "use_deepseek": request.use_deepseek,
         "deepseek_model": request.deepseek_model,
     }
@@ -977,11 +1068,19 @@ def run_rca_pipeline(request: RCARunRequest):
         "is_paused_at_hitl": is_paused,
         "current_step": _get_step_number(vals, is_paused),
         "has_active_trip": vals.get("has_active_trip", False),
+        "anomaly_event": vals.get("anomaly_event"),
+        "hypotheses": vals.get("hypotheses", []),
+        "tested_hypotheses": vals.get("tested_hypotheses", []),
         "winning_hypothesis": vals.get("winning_hypothesis"),
-        "human_review_payload": review_payload,
+        "causal_trace": vals.get("causal_trace"),
         "root_cause_asset": vals.get("root_cause_asset"),
+        "root_cause_description": vals.get("root_cause_description"),
+        "human_review_payload": review_payload,
         "incident_report_8d": vals.get("incident_report_8d"),
         "sap_work_order": vals.get("sap_work_order"),
+        "execution_logs": vals.get("execution_logs", []),
+        "deepseek_evaluation": vals.get("deepseek_evaluation"),
+        "fault_code": vals.get("fault_code") or vals.get("trip_metadata", {}).get("fault_code", fc_from_ds),
     }
 
 
@@ -1015,19 +1114,138 @@ def submit_human_review(request: HumanReviewRequest):
         "incident_report_8d": vals.get("incident_report_8d"),
         "sap_work_order": vals.get("sap_work_order"),
         "root_cause_description": vals.get("root_cause_description"),
+        "execution_logs": vals.get("execution_logs", []),
+        "deepseek_evaluation": vals.get("deepseek_evaluation"),
+        "fault_code": vals.get("fault_code") or vals.get("trip_metadata", {}).get("fault_code", 0),
     }
 
 
 # ── DeepSeek AI Copilot Streaming ─────────────────────────────────────
+
+def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
+    """
+    Constructs a rich, grounded system prompt providing real-time telemetry,
+    hardware status, active incident details, RCA diagnosis, and OEM domain context
+    to the DeepSeek AI Copilot.
+    """
+    latest_tel = GLOBAL_TSDB.get_latest("VFD_VM_01") or {}
+    f_out = float(latest_tel.get("f_out", 40.0) or 40.0)
+    f_target = float(latest_tel.get("f_target", 40.0) or 40.0)
+    v_dc = float(latest_tel.get("v_dc", 182.0) or 182.0)
+    current = float(latest_tel.get("current", 1.15) or 1.15)
+    rpm = float(latest_tel.get("rpm", 1199.0) or 1199.0)
+    raw_fc = int(latest_tel.get("fault_code", 0) or 0)
+    status = str(latest_tel.get("status", "RUNNING"))
+
+    # Check active HIL incident
+    has_inc = bool(LATEST_HIL_INCIDENT.get("has_incident"))
+    inc_data = LATEST_HIL_INCIDENT.get("incident_data") or {}
+    inc_fc = int(inc_data.get("fault_code", 0) or 0)
+    active_fc = inc_fc if has_inc and inc_fc > 0 else raw_fc
+    fault_str = f"Err{active_fc:02d}" if active_fc > 0 else "None (0 - Healthy)"
+
+    # Check RCA graph state
+    graph_state = {}
+    target_tid = thread_id or inc_data.get("thread_id")
+    if target_tid:
+        try:
+            snap = GLOBAL_RCA_GRAPH.get_state({"configurable": {"thread_id": target_tid}})
+            if snap and snap.values:
+                graph_state = snap.values
+        except Exception:
+            pass
+
+    winning_hyp = graph_state.get("winning_hypothesis") or {}
+    root_asset = graph_state.get("root_cause_asset", "")
+    root_desc = graph_state.get("root_cause_description", "")
+    five_whys = graph_state.get("causal_chain_5_whys", [])
+
+    prompt_lines = [
+        "You are the Industrial RCA AI Copilot, a senior power electronics and plant reliability engineer.",
+        "You are directly integrated into the real-time monitoring and Root Cause Analysis system for:",
+        "- Asset ID: VFD_VM_01",
+        "- Equipment Name: Wecon VM Series Inverter (VFD) & 3-Phase Induction Motor Test Bench",
+        "- Controller / HMI: Wecon PLC LX3V and HMI Touch Panel (192.168.1.104) via Modbus RTU / MQTT",
+        "",
+        "=== REAL-TIME TELEMETRY SNAPSHOT (1 Hz Modbus Stream) ===",
+        f"- Operating Status: {status}",
+        f"- Active Trip Code: {fault_str}",
+        f"- Output Frequency: {f_out:.2f} Hz (Normal Setpoint: 40.00 Hz, Alarm Ceiling: 42.00 Hz, Trip Limit: 50.00 Hz)",
+        f"- Frequency Target: {f_target:.2f} Hz",
+        f"- DC Bus Voltage: {v_dc:.1f} V (Nominal: 182.0 V, Alarm: 190.0 V, Hardware Trip Ceiling: 195.0 V, reaches ~207 V at 50 Hz)",
+        f"- Motor Output Current: {current:.2f} A (Nominal: 1.15 A, Alarm: 2.00 A, Trip Threshold: 2.50 A)",
+        f"- Rotor Speed: {rpm:.1f} RPM (Rated: 1440 RPM)",
+        "",
+        "=== INVESTIGATION & DIAGNOSTIC STATE ===",
+    ]
+
+    if has_inc or active_fc > 0 or winning_hyp:
+        prompt_lines.extend([
+            f"- Incident Active: YES (Incident ID: {inc_data.get('incident_id', 'Active')})",
+            f"- Tripped Fault Code: {fault_str} - {inc_data.get('fault_description', winning_hyp.get('name', 'Hardware Fault'))}",
+            f"- Winning Failure Hypothesis: {winning_hyp.get('name', 'Under Investigation')} ({winning_hyp.get('hypothesis_id', 'N/A')})",
+            f"- Upstream Root Cause Asset: {root_asset or 'VFD_VM_01 / PLC_LX_01'}",
+            f"- Physical Root Cause: {root_desc or 'Investigation completed by LangGraph multi-agent causal workflow.'}",
+        ])
+        if five_whys:
+            prompt_lines.append("- 5-Whys Causal Trace:")
+            for w in five_whys[:5]:
+                prompt_lines.append(f"  * {w.get('level', 'Why')}: {w.get('question')} -> {w.get('answer')}")
+        if winning_hyp.get("proposed_actions"):
+            prompt_lines.append("- Recommended Corrective Actions:")
+            for act in winning_hyp["proposed_actions"]:
+                prompt_lines.append(f"  * {act}")
+    else:
+        prompt_lines.extend([
+            "- Incident Active: NO (Equipment is in healthy, nominal monitoring state)",
+            "- System Health: All operational parameters are strictly within ISA-95 envelopes.",
+            "- Continuous safety monitoring is active. Listening for trip triggers over MQTT 1883.",
+        ])
+
+    prompt_lines.extend([
+        "",
+        "=== DOMAIN KNOWLEDGE & EXPERT RULES ===",
+        "1. Wecon VM Inverter Specifications:",
+        "   - Single-phase 220V AC input, rectified to ~310V DC peak, operating with ~182V intermediate DC link under load.",
+        "   - Overvoltage Trip (Err06): Triggered when DC bus exceeds 195.0 V. At 50 Hz, bus voltage rises to ~207 V.",
+        "     If no dynamic braking resistor is installed across terminals P+ and PB, regenerative kinetic energy pumps into the DC bus during decel or overfrequency.",
+        "     Countermeasures: clamp parameter F0.10 to 40.00 Hz, install dynamic braking resistor (nominal 70-100 Ohm, 150-200W) across P+/PB, tune F0.18 deceleration time to >= 5.0s.",
+        "   - Overcurrent Trip (Err02): Triggered when instantaneous current exceeds 2.50 A (217% FLA).",
+        "     Typically caused by abrupt stop command from PLC de-energizing the Run coil instantaneously without a deceleration ramp.",
+        "     Countermeasures: enforce ramp-down routine in PLC ladder logic instead of hard contact cut, tune parameter F0.18 >= 3.0s, Megger test motor (>50 M-Ohm).",
+        "",
+        "=== INSTRUCTIONS FOR YOUR RESPONSES ===",
+        "- You are the engineer's copilot for THIS specific test bench (VFD_VM_01).",
+        "- When the user asks general, status, or greeting questions ('is everything okay?', 'does the device run well?', 'status?', 'what happened?'), ALWAYS reference the actual equipment (Wecon VM Series VFD_VM_01) and quote its real-time telemetry values (frequency, DC bus voltage, current, fault code).",
+        "- NEVER say 'I don't have access to your hardware or sensors', 'what device are you using?', or treat this as a generic chat. You DO have real-time access through the telemetry pipeline shown above.",
+        "- Maintain a helpful, technical, concise, and professional engineering tone.",
+    ])
+
+    return "\n".join(prompt_lines)
+
 
 @api_app.post("/api/v1/copilot/chat/stream")
 def stream_copilot_chat(request: CopilotChatRequest):
     """
     Server-Sent Events (SSE) streaming endpoint for DeepSeek AI Copilot.
     Streams token deltas for both content and reasoning_content chunk by chunk.
+    Automatically injects grounded real-time telemetry, asset topology, and RCA state context.
     """
     model = request.model or "deepseek-chat"
-    messages = request.messages
+    raw_messages = request.messages
+
+    # Inject rich real-time context as system prompt
+    system_prompt = build_copilot_system_prompt(request.thread_id)
+    messages = []
+    has_system = False
+    for m in raw_messages:
+        if m.get("role") == "system":
+            messages.append({"role": "system", "content": system_prompt})
+            has_system = True
+        else:
+            messages.append(m)
+    if not has_system:
+        messages.insert(0, {"role": "system", "content": system_prompt})
 
     def sse_event_generator() -> Generator[str, None, None]:
         try:

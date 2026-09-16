@@ -129,6 +129,10 @@ def debug_node(node_name: str) -> Callable:
                 return result
             except Exception as exc:
                 elapsed_ms = (time.perf_counter() - start_t) * 1000
+                if "GraphInterrupt" in type(exc).__name__ or "Interrupt" in type(exc).__name__:
+                    logger.info(f"[{node_name}] Paused for Human-in-the-Loop review in {elapsed_ms:.1f}ms")
+                    raise exc
+
                 err_detail = f"{type(exc).__name__}: {str(exc)}\n{traceback.format_exc()}"
                 logger.error(f"[{node_name}] FAILED after {elapsed_ms:.1f}ms: {exc}")
 

@@ -60,7 +60,7 @@ class DeepSeekClient:
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.3,
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,
         response_format: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
@@ -114,7 +114,7 @@ class DeepSeekClient:
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.3,
-        max_tokens: int = 2048,
+        max_tokens: int = 4096,
     ) -> Generator[Dict[str, str], None, None]:
         """
         Executes a streaming chat completion call against DeepSeek API or deterministic simulation.

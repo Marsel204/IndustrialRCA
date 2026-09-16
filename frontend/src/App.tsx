@@ -84,12 +84,18 @@ export function App() {
         const inc = await fetchLatestIncident();
         setLatestIncident(inc);
         if (inc?.has_incident && inc.incident_data?.thread_id) {
-          setActiveThreadId(inc.incident_data.thread_id);
-          if (inc.incident_data?.dataset_id) {
-            setActiveScenarioId(inc.incident_data.dataset_id);
+          const state = await fetchRCAState(inc.incident_data.thread_id).catch(() => null);
+          if (state) {
+            setRcaState(state);
+            if (
+              state.pipeline_status === 'CAUSAL_TRACE_COMPLETED' ||
+              state.pipeline_status === 'ANALYSIS_COMPLETE' ||
+              state.pipeline_status === 'COMPLETED' ||
+              state.pipeline_status === 'AWAITING_REVIEW'
+            ) {
+              setIsPipelineRunning(false);
+            }
           }
-          const state = await fetchRCAState(inc.incident_data.thread_id);
-          setRcaState(state);
         }
       } catch (e) {
         console.warn('Failed to fetch latest incident:', e);
@@ -106,6 +112,13 @@ export function App() {
     }
   }, []);
 
+  const userSelectedTabRef = useRef<boolean>(false);
+
+  const handleSelectTab = useCallback((tabId: string) => {
+    userSelectedTabRef.current = true;
+    setInspectorTab(tabId);
+  }, []);
+
   // Load telemetry, spectrum, and run/load RCA for selected scenario
   const loadScenarioData = useCallback(
     async (scenarioId: string, threadId: string) => {
@@ -119,7 +132,7 @@ export function App() {
         // Fetch timeseries, spectrum, and topology for target asset
         const [telData, specData, topoData] = await Promise.all([
           fetchTelemetry(scenarioId),
-          fetchSpectrum(scenarioId),
+          fetchSpectrum(scenarioId).catch(() => null),
           fetchTopology(targetAssetId),
         ]);
         setTelemetry(telData);
@@ -127,9 +140,28 @@ export function App() {
         setTopology(topoData);
 
         // If it's a backend-managed HIL incident, fetch the state directly
-        if (threadId.startsWith('rca-hil-')) {
-          const state = await fetchRCAState(threadId);
-          setRcaState(state);
+        const isHilIncident =
+          threadId.startsWith('rca-hil-') ||
+          scenarioId.startsWith('ds_hil') ||
+          scenarioId === 'hil';
+
+        if (isHilIncident) {
+          try {
+            const state = await fetchRCAState(threadId);
+            if (state && state.pipeline_status !== 'NOT_STARTED') {
+              setRcaState(state);
+              if (
+                state.pipeline_status === 'CAUSAL_TRACE_COMPLETED' ||
+                state.pipeline_status === 'ANALYSIS_COMPLETE' ||
+                state.pipeline_status === 'COMPLETED' ||
+                state.pipeline_status === 'AWAITING_REVIEW'
+              ) {
+                setIsPipelineRunning(false);
+              }
+            }
+          } catch {
+            // Pipeline is actively computing on backend
+          }
         } else if (scenarioId === 'live_stream' && threadId.startsWith('rca-live-')) {
           // Live edge stream in nominal monitoring mode: do NOT run trip pipeline!
           // State is managed by SSE events and handleResetPipeline.
@@ -151,7 +183,13 @@ export function App() {
         console.error('Scenario load error:', err);
         setErrorMessage(err.message || 'Failed to load telemetry data.');
       } finally {
-        setIsPipelineRunning(false);
+        const isHilIncident =
+          threadId.startsWith('rca-hil-') ||
+          scenarioId.startsWith('ds_hil') ||
+          scenarioId === 'hil';
+        if (!isHilIncident) {
+          setIsPipelineRunning(false);
+        }
       }
     },
     [deepseekModel]
@@ -184,6 +222,34 @@ export function App() {
           });
           setIsPipelineRunning(true);
           setActiveThreadId(thId);
+          setRcaState((prev) => ({
+            ...(prev || {
+              thread_id: thId,
+              pipeline_status: 'TRIGGERED',
+              current_step: 1,
+              is_paused_at_hitl: false,
+              has_active_trip: true,
+              fault_code: incData?.fault_code || 2,
+              detected_anomalies: [],
+              tag_profiles: {},
+              hypothesis_results: [],
+              winning_hypothesis: null,
+              falsification_summary: [],
+              fmea_classification: {},
+              causal_chain_5_whys: [],
+              root_cause_asset: 'VFD_VM_01',
+              root_cause_description: '',
+              human_review_required: false,
+              human_review_payload: null,
+              human_review_decision: null,
+              incident_report_8d: null,
+              sap_work_order: null,
+              execution_logs: [],
+              deepseek_evaluation: null,
+            }),
+            has_active_trip: true,
+            fault_code: incData?.fault_code || 2,
+          }));
 
           if (incData?.dataset_id) {
             setActiveScenarioId(incData.dataset_id);
@@ -203,12 +269,17 @@ export function App() {
           // Auto-load full RCA state from LangGraph checkpoint and update UI
           try {
             const state = await fetchRCAState(thId);
-            setRcaState(state);
-            setInspectorTab('hypotheses');
+            const activeFc = latestIncidentRef.current?.incident_data?.fault_code || state?.fault_code || 2;
+            setRcaState(state ? { ...state, fault_code: activeFc } : null);
+            // Only auto-switch to hypotheses tab if the user hasn't explicitly clicked another tab
+            if (!userSelectedTabRef.current) {
+              setInspectorTab('hypotheses');
+            }
           } catch (e) {
             console.error('Failed to load completed RCA state:', e);
           }
         } else if (eventData.event === 'hil_incident_cleared') {
+          userSelectedTabRef.current = false;
           setLatestIncident({
             has_incident: false,
             incident_data: null,
@@ -389,9 +460,10 @@ export function App() {
         <section className="w-full lg:w-[48%] flex flex-col h-auto lg:h-[calc(100vh-140px)] min-h-[620px] lg:min-h-0">
           <AgentWorkspace
             rcaState={rcaState}
+            latestIncident={latestIncident}
             apiOnline={apiOnline}
             deepseekModel={deepseekModel}
-            onSelectInspectorTab={(tabId) => setInspectorTab(tabId)}
+            onSelectInspectorTab={handleSelectTab}
             onOpenReviewModal={() => setIsReviewModalOpen(true)}
             activeScenarioName={activeScenario?.name}
             isPipelineRunning={isPipelineRunning}
@@ -402,7 +474,7 @@ export function App() {
         <section className="w-full lg:w-[52%] flex flex-col h-auto lg:h-[calc(100vh-140px)] min-h-[620px] lg:min-h-0">
           <ArtifactInspector
             activeTab={inspectorTab}
-            onSelectTab={(tabId) => setInspectorTab(tabId)}
+            onSelectTab={handleSelectTab}
             telemetry={telemetry}
             spectrum={spectrum}
             topology={topology}

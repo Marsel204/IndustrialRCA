@@ -90,14 +90,15 @@ export function streamCopilotChat(
   model: string,
   onDelta: (delta: { content: string; reasoning_content: string }) => void,
   onDone: () => void,
-  onError: (err: any) => void
+  onError: (err: any) => void,
+  threadId?: string
 ): () => void {
   const controller = new AbortController();
 
   fetch(`${API_BASE}/copilot/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, model }),
+    body: JSON.stringify({ messages, model, thread_id: threadId }),
     signal: controller.signal,
   })
     .then(async (response) => {

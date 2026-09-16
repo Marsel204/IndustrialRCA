@@ -12,11 +12,12 @@ import {
   CheckCircle2,
   Bot,
 } from 'lucide-react';
-import { RCAState, ChatMessage, ToolExecutionItem } from '../../types';
+import { RCAState, ChatMessage, ToolExecutionItem, LatestIncident } from '../../types';
 import { streamCopilotChat } from '../../api';
 
 interface AgentWorkspaceProps {
   rcaState: RCAState | null;
+  latestIncident?: LatestIncident | null;
   apiOnline: boolean;
   deepseekModel: string;
   onSelectInspectorTab: (tabId: string) => void;
@@ -27,6 +28,7 @@ interface AgentWorkspaceProps {
 
 export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
   rcaState,
+  latestIncident,
   apiOnline: _apiOnline,
   deepseekModel,
   onSelectInspectorTab,
@@ -70,8 +72,20 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     setExpandedChatCoT((prev) => ({ ...prev, [msgId]: !prev[msgId] }));
   };
 
-  const faultCode = rcaState?.fault_code || (rcaState?.has_active_trip ? 6 : 0);
-  const isIncidentActive = Boolean(rcaState?.has_active_trip || faultCode > 0);
+  const faultCode =
+    (latestIncident?.has_incident ? latestIncident?.incident_data?.fault_code : null) ||
+    rcaState?.fault_code ||
+    latestIncident?.incident_data?.fault_code ||
+    (rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR02' || rcaState?.winning_hypothesis?.name?.includes('Err02') ? 2 :
+     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR06' || rcaState?.winning_hypothesis?.name?.includes('Err06') ? 6 :
+     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR03' || rcaState?.winning_hypothesis?.name?.includes('Err03') ? 3 :
+     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR11' || rcaState?.winning_hypothesis?.name?.includes('Err11') ? 11 :
+     (rcaState?.has_active_trip ? (latestIncident?.incident_data?.fault_code || 2) : 0));
+  const isIncidentActive = Boolean(
+    latestIncident?.has_incident ||
+    rcaState?.has_active_trip ||
+    faultCode > 0
+  );
 
   // Build Diagnostic Tool Executions from rcaState
   const autonomousTools: ToolExecutionItem[] = useMemo(() => {
@@ -174,12 +188,12 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
         },
         status: isPipelineRunning ? 'running' : 'completed',
         duration_ms: 284,
-        summary: `on ${assetId} (transient shift: DC bus 182V → 202.5V, current peak 2.62A)`,
+        summary: `on ${assetId} (${faultCode === 2 ? 'abrupt stop transient: current peak 3.85A' : 'transient shift: DC bus 182V → 202.5V, current peak 2.62A'})`,
         output_details: {
           changepoints_detected: rcaState?.detected_anomalies?.length || 2,
           critical_event:
             faultCode === 2
-              ? 'Instantaneous motor stall current peak (2.62A > 2.50A trip setpoint)'
+              ? 'Instantaneous motor stall current peak (3.85A > 2.50A trip setpoint)'
               : 'DC bus overvoltage escalation (202.5V > 195.0V trip threshold)',
           timestamp: 't = 14.200s relative to baseline',
           status: 'PRIMARY_TRIGGER_VALIDATED',
@@ -188,7 +202,9 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           `[ChangePointDetector] Loading high-resolution 100Hz buffer for ${assetId}...`,
           '[ChangePointDetector] Computed L2-norm cost matrix across 4 channels.',
           `[ChangePointDetector] Changepoint confirmed at sample #1420 (anomaly score: 0.942).`,
-          `[ChangePointDetector] Operational ceiling breached: DC bus reached threshold.`,
+          faultCode === 2
+            ? `[ChangePointDetector] Operational ceiling breached: motor current surged past 2.50A trip limit.`
+            : `[ChangePointDetector] Operational ceiling breached: DC bus reached threshold.`,
         ],
         inspector_tab: 'telemetry',
         tab_label: 'Inspect Telemetry',
@@ -233,21 +249,33 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
         summary: `evaluating VFD failure modes (Err02, Err06, Err03, Err11)`,
         output_details: {
           winning_hypothesis:
-            winningHypo?.name || 'H_VFD_ERR06: Overvoltage During Acceleration / Deceleration',
+            winningHypo?.name ||
+            (faultCode === 2
+              ? 'Forced Sudden Deceleration Overcurrent (WECON VM Err02)'
+              : 'Overfrequency Deceleration Overvoltage (WECON VM Err06)'),
           confidence: winningHypo?.confidence
             ? `${(winningHypo.confidence * 100).toFixed(0)}%`
             : '98%',
-          refuted_hypotheses: [
-            'H_VFD_ERR03: Ground Fault (Refuted: zero leakage current)',
-            'H_VFD_ERR11: Motor Overheat (Refuted: PT100 nominal)',
-          ],
+          refuted_hypotheses:
+            faultCode === 2
+              ? [
+                  'H_VFD_ERR06: Decel Overvoltage (Refuted: trip was Err02 overcurrent)',
+                  'H_VFD_ERR11: Motor Overheat (Refuted: current within thermal rating)',
+                ]
+              : [
+                  'H_VFD_ERR02: Sudden Decel Overcurrent (Refuted: peak current below threshold)',
+                  'H_VFD_ERR11: Motor Overheat (Refuted: PT100 nominal)',
+                ],
           mechanism:
-            'Regenerative kinetic energy dump into DC bus capacitors without dynamic dissipation',
+            faultCode === 2
+              ? 'Kinetic back-EMF discharge surge from spinning induction rotor upon abrupt PLC stop'
+              : 'Regenerative kinetic energy dump into DC bus capacitors without dynamic dissipation',
         },
         logs: [
           '[FMEAEngine] Ingesting fault symptoms and boundary criteria...',
-          '[FMEAEngine] Testing H_VFD_ERR03: Leakage current < 5mA -> REFUTED.',
-          '[FMEAEngine] Testing H_VFD_ERR06: DC bus > 195V during rapid decel / 50Hz ramp -> CONFIRMED (p=0.98).',
+          faultCode === 2
+            ? '[FMEAEngine] Testing H_VFD_ERR02: Instantaneous stop surge > 2.50A -> CONFIRMED (p=0.98).'
+            : '[FMEAEngine] Testing H_VFD_ERR06: DC bus > 195V during rapid decel / 50Hz ramp -> CONFIRMED (p=0.98).',
           '[FMEAEngine] FMEA matrix convergence achieved.',
         ],
         inspector_tab: 'hypotheses',
@@ -462,7 +490,8 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
         setCurrentContent('');
         setActiveStreamingTools([]);
         setIsStreaming(false);
-      }
+      },
+      rcaState?.thread_id || latestIncident?.incident_data?.thread_id
     );
   };
 
@@ -474,11 +503,17 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
   ];
 
   const defaultThinking = isIncidentActive
-    ? "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
-      "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
-      "3. Trip setpoint evaluated: DC bus limit at 195.0 V DC (reaches ~207V at 50 Hz), current limit at 2.50 A.\n" +
-      "4. Evaluated failure hypotheses: H_VFD_ERR06 (Overfrequency > 40 Hz) and H_VFD_ERR02 (Forced Decel Stop).\n" +
-      "5. OEM corrective action: Install dynamic braking resistor on terminals P+/PB and tune parameter F0.18."
+    ? (faultCode === 2
+        ? "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
+          "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
+          "3. Trip setpoint evaluated: Motor stator current breached 2.50 A threshold (reached 3.85 A on forced stop).\n" +
+          "4. Evaluated failure hypotheses: H_VFD_ERR02 (Forced Decel Overcurrent) CONFIRMED; H_VFD_ERR06 REFUTED.\n" +
+          "5. OEM corrective action: Implement controlled deceleration ramp in PLC ladder logic and tune parameter F0.18."
+        : "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
+          "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
+          "3. Trip setpoint evaluated: DC bus limit at 195.0 V DC (reaches ~207V at 50 Hz), current limit at 2.50 A.\n" +
+          "4. Evaluated failure hypotheses: H_VFD_ERR06 (Overfrequency > 40 Hz) and H_VFD_ERR02 (Forced Decel Stop).\n" +
+          "5. OEM corrective action: Install dynamic braking resistor on terminals P+/PB and tune parameter F0.18.")
     : "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
       "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
       "3. Continuous safety verification: DC bus (182.0 V < 195.0 V ceiling), current (1.15 A < 2.50 A trip).\n" +
@@ -487,6 +522,12 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
 
   const isPaused = rcaState?.is_paused_at_hitl || false;
   const isFinalized = rcaState?.pipeline_status === 'COMPLETED';
+  const isStateResolved =
+    rcaState?.pipeline_status === 'CAUSAL_TRACE_COMPLETED' ||
+    rcaState?.pipeline_status === 'ANALYSIS_COMPLETE' ||
+    rcaState?.pipeline_status === 'COMPLETED' ||
+    rcaState?.pipeline_status === 'AWAITING_REVIEW';
+  const isPipelineActive = isPipelineRunning && !isStateResolved;
 
   const displayedThinking =
     rcaState?.deepseek_evaluation?.reasoning_content ||
@@ -495,7 +536,9 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
 
   const displayedDiagnosis = isIncidentActive
     ? rcaState?.root_cause_description ||
-      'Output frequency setpoint was ramped past the 40.00 Hz operational ceiling toward 50.00 Hz, causing DC bus voltage to escalate to 202.5 V (breaching the calibrated 195.0 V trip limit) because Wecon VM parameter F0.10 was unclamped and dynamic braking resistor terminals P+/PB were unpopulated.'
+      (faultCode === 2
+        ? 'Operator actuated PLC On/Off stop button via PLC D-variable register, cutting the run command instantaneously without a controlled deceleration ramp routine (F0.18 too steep and braking resistor absent), inducing a 3.85 A kinetic back-EMF overcurrent surge that tripped the drive on Err02.'
+        : 'Output frequency setpoint was ramped past the 40.00 Hz operational ceiling toward 50.00 Hz, causing DC bus voltage to escalate to 202.5 V (breaching the calibrated 195.0 V trip limit) because Wecon VM parameter F0.10 was unclamped and dynamic braking resistor terminals P+/PB were unpopulated.')
     : 'Continuous real-time telemetry from Wecon VM VFD (VFD_VM_01) is nominal. Output frequency (40.00 Hz), DC bus voltage (182.0 V), and motor current (1.15 A) remain within calibrated ISA-95 envelopes. Listening for hardware trip trigger over MQTT / PLC D-variable.';
 
   return (
@@ -523,7 +566,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
 
         {/* Live Status Indicators */}
         <div className="flex items-center space-x-2 flex-shrink-0">
-          {isPipelineRunning && (
+          {isPipelineActive && (
             <span className="flex items-center space-x-1.5 text-[11px] font-mono text-amber-700 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded-md animate-pulse">
               <Loader2 className="w-3 h-3 animate-spin text-amber-600" />
               <span>Analyzing</span>
@@ -533,7 +576,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           {isIncidentActive ? (
             <span className="flex items-center space-x-1.5 text-[11px] font-mono font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">
               <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-              <span>Trip: Err0{faultCode}</span>
+              <span>Trip: {faultCode >= 10 ? `Err${faultCode}` : `Err0${faultCode}`}</span>
             </span>
           ) : (
             <span className="flex items-center space-x-1.5 text-[11px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
@@ -555,14 +598,14 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
             </div>
             <div className="font-mono text-xs text-slate-800 font-semibold bg-slate-100/70 border border-slate-200 rounded-lg px-3 py-1.5 w-full">
               {isIncidentActive
-                ? `Investigate hardware trip Err0${faultCode} on Wecon VFD Rig (VFD_VM_01). Trace root cause and generate ISO 14224 / 8D deliverables.`
+                ? `Investigate hardware trip ${faultCode >= 10 ? `Err${faultCode}` : `Err0${faultCode}`} on Wecon VFD Rig (VFD_VM_01). Trace root cause and generate ISO 14224 / 8D deliverables.`
                 : `Continuous monitoring and diagnostic readiness on Wecon VFD Rig (VFD_VM_01).`}
             </div>
           </div>
 
           {/* Reasoning Trace (CoT) - Matching Coding Agent Style */}
           <div className="pl-7">
-            {isPipelineRunning ? (
+            {isPipelineActive ? (
               <div className="flex items-center space-x-2 text-purple-700 font-mono text-xs py-1">
                 <Brain className="w-3.5 h-3.5 animate-pulse text-purple-600" />
                 <span className="animate-pulse">Thinking through telemetry and failure hypotheses...</span>
@@ -609,7 +652,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                 <div className="flex items-center space-x-2">
                   <Terminal className="w-3.5 h-3.5 text-slate-500" />
                   <span className="font-semibold">
-                    {isPipelineRunning
+                    {isPipelineActive
                       ? `Running ${autonomousTools.length} diagnostic tools...`
                       : `Ran ${autonomousTools.length} diagnostic tools`}
                   </span>
@@ -715,7 +758,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
             </div>
 
             {/* Live 'Working...' Indicator matching Image 2 */}
-            {isPipelineRunning && (
+            {isPipelineActive && (
               <div className="flex items-center space-x-2 text-slate-500 font-mono text-[11px] pt-1 animate-pulse">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-600" />
                 <span>Working...</span>
@@ -724,7 +767,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           </div>
 
           {/* Root Cause Synthesis Response */}
-          {!isPipelineRunning && (
+          {!isPipelineActive && (
             <div className="pl-7 space-y-2.5">
               <div className="p-3.5 bg-slate-50/90 border border-slate-200 rounded-lg text-xs leading-relaxed space-y-2">
                 <div className="flex items-center justify-between">

@@ -101,6 +101,13 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
     rcaState?.sap_work_order
   );
 
+  const isErr02 =
+    rcaState?.fault_code === 2 ||
+    rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR02' ||
+    rcaState?.winning_hypothesis?.name?.includes('Err02') ||
+    rcaState?.root_cause_description?.includes('Err02') ||
+    false;
+
   return (
     <div className="space-y-4">
       {/* Top Banner & Sub-View Switcher */}
@@ -255,13 +262,13 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
               </div>
               <div className="text-xs text-slate-700 space-y-1 leading-relaxed font-sans">
                 <p>
-                  <strong>What:</strong> {report8D?.d2_problem_description?.what || 'Unplanned trip of Wecon VM Series VFD (VFD_VM_01) with fault code Err06 (Overfrequency Deceleration Overvoltage).'}
+                  <strong>What:</strong> {report8D?.d2_problem_description?.what || (isErr02 ? 'Unplanned trip of Wecon VM Series VFD (VFD_VM_01) with fault code Err02 (Forced Deceleration Overcurrent).' : 'Unplanned trip of Wecon VM Series VFD (VFD_VM_01) with fault code Err06 (Overfrequency Deceleration Overvoltage).')}
                 </p>
                 <p>
                   <strong>When & Where:</strong> {report8D?.d2_problem_description?.when || '2026-09-15 14:10:00'} · {report8D?.d2_problem_description?.where || 'Industrial Automation Test Facility - Bench 01 (PLC LX3V + Wecon VM VFD)'}
                 </p>
                 <p>
-                  <strong>Impact:</strong> {report8D?.d2_problem_description?.how_much || 'Frequency setpoint exceeded 40.00 Hz ceiling toward 50.00 Hz, driving DC bus voltage to 202.5 V (> 195.0 V trip limit).'}{' '}
+                  <strong>Impact:</strong> {report8D?.d2_problem_description?.how_much || (isErr02 ? 'Instantaneous motor current surged to 3.85 A, breaching 2.50 A trip threshold.' : 'Frequency setpoint exceeded 40.00 Hz ceiling toward 50.00 Hz, driving DC bus voltage to 202.5 V (> 195.0 V trip limit).')}{' '}
                   {report8D?.d2_problem_description?.operational_impact || 'Inverter IGBT gate drive inhibited to protect power module and induction motor from thermal damage.'}
                 </p>
               </div>
@@ -273,7 +280,7 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
                 D3: Interim Containment Actions (ICA)
               </div>
               <ul className="list-disc pl-5 text-xs text-slate-700 space-y-0.5 font-sans">
-                <li>Verify VFD display indicates trip code Err06 and output current/voltage have dropped to 0.</li>
+                <li>Verify VFD display indicates trip code {isErr02 ? 'Err02' : 'Err06'} and output current/voltage have dropped to 0.</li>
                 <li>Confirm DC bus voltage has safely discharged below 24 V before opening enclosure.</li>
                 <li>Toggle PLC reset trigger (D-variable / MQTT error topic) to clear fault latch after root cause diagnosis.</li>
               </ul>

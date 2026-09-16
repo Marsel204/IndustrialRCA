@@ -38,6 +38,16 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
     ? normalizedTab
     : 'telemetry';
 
+  // Trigger a resize event when telemetry tab becomes active to ensure ECharts instances align perfectly
+  React.useEffect(() => {
+    if (currentTab === 'telemetry') {
+      const timer = setTimeout(() => {
+        window.dispatchEvent(new Event('resize'));
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [currentTab]);
+
   return (
     <div className="flex flex-col h-full bg-slate-50/50 border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
       {/* Tab Navigation Header Bar */}
@@ -65,21 +75,27 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
         })}
       </div>
 
-      {/* Tab Content Canvas */}
+      {/* Tab Content Canvas (Preserved in DOM to prevent canvas tearing / unmount flicker) */}
       <div className="flex-1 overflow-y-auto p-4">
-        {currentTab === 'telemetry' && (
+        <div className={currentTab === 'telemetry' ? 'block' : 'hidden'}>
           <TelemetryAnalyticsTab
             telemetry={telemetry}
             spectrum={spectrum}
             activeScenarioId={activeScenarioId}
           />
-        )}
+        </div>
 
-        {currentTab === 'topology' && <TopologyTab topology={topology} />}
+        <div className={currentTab === 'topology' ? 'block' : 'hidden'}>
+          <TopologyTab topology={topology} />
+        </div>
 
-        {currentTab === 'hypotheses' && <FMEAMatrixTab rcaState={rcaState} />}
+        <div className={currentTab === 'hypotheses' ? 'block' : 'hidden'}>
+          <FMEAMatrixTab rcaState={rcaState} />
+        </div>
 
-        {currentTab === 'deliverables' && <DeliverablesTab rcaState={rcaState} />}
+        <div className={currentTab === 'deliverables' ? 'block' : 'hidden'}>
+          <DeliverablesTab rcaState={rcaState} />
+        </div>
       </div>
     </div>
   );

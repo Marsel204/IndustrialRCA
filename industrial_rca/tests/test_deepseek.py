@@ -19,7 +19,7 @@ def test_deepseek_chat_completion():
     client = DeepSeekClient()
     res = client.chat_completion([
         {"role": "user", "content": "Ping"}
-    ], max_tokens=20)
+    ], model="deepseek-chat", max_tokens=20)
     assert res["success"] is True
     assert len(res["content"]) > 0
 

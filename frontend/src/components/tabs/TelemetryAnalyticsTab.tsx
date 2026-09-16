@@ -609,8 +609,8 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
       },
       yAxis: {
         type: 'value',
-        min: 150,
-        max: 225,
+        min: 0,
+        max: (value: { max: number }) => Math.max(225, Math.ceil(value.max * 1.1)),
         axisLabel: { formatter: '{value} V', fontSize: 10, color: '#334155' },
         splitLine: { lineStyle: { color: '#F1F5F9' } },
       },

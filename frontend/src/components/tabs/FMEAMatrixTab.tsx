@@ -112,18 +112,127 @@ const DEFAULT_5_WHYS = [
   },
 ];
 
+const DEFAULT_HYPOTHESES_ERR02 = [
+  {
+    hypothesis_id: 'H_VFD_ERR02',
+    name: 'Forced Sudden Deceleration Overcurrent (WECON VM Err02)',
+    status: 'CONFIRMED',
+    confidence: 0.98,
+    falsification_rationale:
+      'Operator actuated PLC On/Off stop button via PLC D-variable register, cutting the run command instantaneously without a controlled deceleration ramp routine, inducing a kinetic back-EMF overcurrent surge that tripped the drive on Err02.',
+    evidence: [
+      { check: 'Output Phase Current (Reg 1005H / 3002H)', observation: 'Instantaneous motor current surged to 3.85 A, breaching 2.50 A trip threshold (217% rated FLA).', status: 'CONFIRMED' },
+      { check: 'PLC Stop Trigger (D Variable / MQTT Error Topic)', observation: 'Operator actuated PLC On/Off stop button; hard contact de-energization commanded instantaneous decel stop.', status: 'CONFIRMED' },
+      { check: 'Modbus Trip Code Register (Reg 700BH)', observation: 'VFD reported Err02 (Overcurrent during deceleration / forced stop).', status: 'CONFIRMED' },
+    ],
+    proposed_actions: [
+      'Implement controlled deceleration ramp profile in PLC ladder logic instead of instantaneous coil de-energization',
+      'Tune VFD parameter F0.18 deceleration time to >= 3.0 seconds',
+      'Conduct 500V DC Megger insulation resistance test on induction motor IND_MOTOR_01 (> 50 M-Ohm)',
+      'Audit PLC D-variable stop routine on HMI touch panel',
+    ],
+  },
+  {
+    hypothesis_id: 'H_VFD_ERR06',
+    name: 'Overfrequency Deceleration Overvoltage (WECON VM Err06)',
+    status: 'REFUTED',
+    confidence: 0.03,
+    falsification_rationale:
+      'Hardware trip register latched Err02 (Overcurrent). DC bus voltage remained within safe limits during this event.',
+    evidence: [
+      { check: 'DC Bus Voltage (Reg 1003H / 3004H)', observation: 'DC bus voltage remained below trip limit.', status: 'PASSED' },
+      { check: 'VFD Fault Register (Reg 700BH)', observation: 'Latched Err02, not Err06.', status: 'PASSED' },
+    ],
+    proposed_actions: [],
+  },
+  {
+    hypothesis_id: 'H_VFD_ERR03',
+    name: 'Deceleration Overcurrent (WECON VM Err03)',
+    status: 'REFUTED',
+    confidence: 0.02,
+    falsification_rationale:
+      'Modbus fault code register Reg 700BH did not report Err03.',
+    evidence: [
+      { check: 'Deceleration Ramp Current', observation: 'Trip was instantaneous Err02 from PLC stop, not linear ramp Err03.', status: 'PASSED' },
+    ],
+    proposed_actions: [],
+  },
+  {
+    hypothesis_id: 'H_VFD_ERR11',
+    name: 'Motor Thermal Overload (WECON VM Err11)',
+    status: 'REFUTED',
+    confidence: 0.04,
+    falsification_rationale:
+      'Motor continuous current remained well below parameter F2.03 rated motor thermal limit.',
+    evidence: [
+      { check: 'Motor Thermal Current I2t', observation: 'Thermal accumulator well below 100% trip threshold.', status: 'PASSED' },
+    ],
+    proposed_actions: [],
+  },
+];
+
+const DEFAULT_5_WHYS_ERR02 = [
+  {
+    level: 'Why 1',
+    question: 'Why did Wecon VM Series VFD (VFD_VM_01) trip with fault code Err02?',
+    answer: 'Motor output current (Reg 1005H / 3002H) spiked instantaneously past the 2.50 A trip threshold (reached 3.85 A, 217% of continuous rated FLA).',
+    evidence: 'Modbus current register Reg 1005H logged instantaneous 3.85 A transient at trip timestamp; drive tripped on Err02.',
+    asset_involved: 'VFD_VM_01',
+  },
+  {
+    level: 'Why 2',
+    question: 'Why did the motor output current experience an instantaneous spike?',
+    answer: 'A hard stop command was issued while the induction motor was spinning at 1199 RPM, producing an abrupt back-EMF kinetic surge.',
+    evidence: 'Rotor rotational speed collapsed from 1199 RPM to 0 RPM in a single controller scan cycle without controlled ramp.',
+    asset_involved: 'IND_MOTOR_01',
+  },
+  {
+    level: 'Why 3',
+    question: 'Why was a hard instantaneous stop commanded rather than a controlled deceleration?',
+    answer: 'The PLC On/Off stop button was triggered via PLC D-variable register, cutting the inverter run contact without ramping down frequency.',
+    evidence: 'PLC internal register / MQTT error topic registered instantaneous toggle of the Run coil to OFF.',
+    asset_involved: 'PLC_LX_01',
+  },
+  {
+    level: 'Why 4',
+    question: 'Why did the VFD attempt an instantaneous stop instead of ramping down safely?',
+    answer: 'VFD Parameter F0.18 (Deceleration Time) was configured to 0.1s / Coast-to-stop was disabled, forcing the inverter IGBTs to absorb abrupt rotational kinetic energy.',
+    evidence: 'Parameter audit: F0.18 deceleration time set too aggressively for motor inertia; dynamic braking resistor absent.',
+    asset_involved: 'VFD_VM_01',
+  },
+  {
+    level: 'Why 5 (Root Cause)',
+    question: 'Why did the PLC control logic trigger a hard instantaneous stop?',
+    answer: 'The PLC logic in Experiment 1 de-energizes the run command via a single D-variable bit toggle without enforcing an intermediate deceleration ramp routine, overloading the inverter output stage.',
+    evidence: 'PLC ladder logic inspection confirms direct de-energization coil mapped to MQTT control error topic without timer ramp.',
+    asset_involved: 'PLC_LX_01',
+  },
+];
+
 interface FMEAMatrixTabProps {
   rcaState: RCAState | null;
 }
 
 export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
-  const [expandedHypId, setExpandedHypId] = useState<string>('H_VFD_ERR06');
+  const isErr02 = rcaState?.fault_code === 2 || rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR02';
+  const defaultHypos = isErr02 ? DEFAULT_HYPOTHESES_ERR02 : DEFAULT_HYPOTHESES;
+  const defaultWhys = isErr02 ? DEFAULT_5_WHYS_ERR02 : DEFAULT_5_WHYS;
 
   const rawHypotheses = rcaState?.hypothesis_results;
-  const hypotheses = rawHypotheses && rawHypotheses.length > 0 ? rawHypotheses : DEFAULT_HYPOTHESES;
+  const hypotheses = rawHypotheses && rawHypotheses.length > 0 ? rawHypotheses : defaultHypos;
   const winningHyp = rcaState?.winning_hypothesis || hypotheses.find((h) => h.status === 'CONFIRMED');
   const rawWhys = rcaState?.causal_chain_5_whys;
-  const fiveWhys = rawWhys && rawWhys.length > 0 ? rawWhys : DEFAULT_5_WHYS;
+  const fiveWhys = rawWhys && rawWhys.length > 0 ? rawWhys : defaultWhys;
+
+  const [expandedHypId, setExpandedHypId] = useState<string>(
+    winningHyp?.hypothesis_id || (isErr02 ? 'H_VFD_ERR02' : 'H_VFD_ERR06')
+  );
+
+  React.useEffect(() => {
+    if (winningHyp?.hypothesis_id) {
+      setExpandedHypId(winningHyp.hypothesis_id);
+    }
+  }, [winningHyp?.hypothesis_id]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {

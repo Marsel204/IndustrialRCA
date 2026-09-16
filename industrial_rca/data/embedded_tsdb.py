@@ -211,18 +211,25 @@ class EmbeddedTSDB:
         f_out = float(metric.get("f_out", 0.0) or 0.0)
 
         if fault_code == 0:
-            if v_dc >= 195.0 or (f_out >= 42.0 and v_dc >= 190.0):
+            if v_dc >= 195.0:
                 fault_code = 6  # Err06 Overfrequency / Deceleration Overvoltage trip
             elif current >= 2.50:
                 fault_code = 2  # Err02 Forced Sudden Deceleration Overcurrent trip
 
-        if fault_code > 0:
+        last_code = getattr(self, "_last_fault_code", 0)
+
+        # Reset latch when equipment is healthy and fault is cleared
+        if fault_code == 0:
+            self._last_fault_code = 0
+            return None
+
+        # Rising-edge trigger: only fire once when transitioning from healthy (0) to fault, or changing fault code
+        if fault_code > 0 and fault_code != last_code:
             now = time.time()
-            last_code = getattr(self, "_last_fault_code", None)
-            if fault_code != last_code or (now - self._last_trip_time > 5.0):
-                self._last_trip_time = now
-                self._last_fault_code = fault_code
-                return fault_code
+            self._last_trip_time = now
+            self._last_fault_code = fault_code
+            return fault_code
+
         return None
 
     def _enrich_rca_tags(self, df: pd.DataFrame):
@@ -275,10 +282,17 @@ class EmbeddedTSDB:
         return df
 
     def clear(self):
-        """Clears memory buffer for tests."""
+        """Clears memory buffer and SQLite table for tests and resets."""
         with self._lock:
             self._buffer.clear()
             self._last_trip_time = 0.0
+            self._last_fault_code = 0
+        try:
+            with sqlite3.connect(self.db_path, timeout=1.0) as conn:
+                conn.execute("DELETE FROM vfd_telemetry;")
+                conn.commit()
+        except Exception:
+            pass
 
 
 # Global Singleton Embedded TSDB instance

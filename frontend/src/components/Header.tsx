@@ -36,6 +36,8 @@ export const Header: React.FC<HeaderProps> = ({
   isSimulated = true,
 }) => {
   const activeScenario = scenarios.find((s) => s.id === activeScenarioId);
+  const incFaultNum = latestIncident?.incident_data?.fault_code || 6;
+  const incFaultStr = incFaultNum >= 10 ? `Err${incFaultNum}` : `Err0${incFaultNum}`;
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-xs">
@@ -52,7 +54,7 @@ export const Header: React.FC<HeaderProps> = ({
                 🚨 HARDWARE FAULT AUTOMATICALLY CAPTURED FROM EDGE BENCH
               </span>
               <span className="ml-2 font-mono text-xs text-rose-900">
-                Asset: {latestIncident.incident_data?.asset_id || 'VFD_VM_01'} | Code: Err0{latestIncident.incident_data?.fault_code || 6} ({latestIncident.incident_data?.fault_description || 'Deceleration Overvoltage'})
+                Asset: {latestIncident.incident_data?.asset_id || 'VFD_VM_01'} | Code: {incFaultStr} ({latestIncident.incident_data?.fault_description || 'Deceleration Overvoltage'})
               </span>
             </div>
           </div>
@@ -145,7 +147,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Fault Status Pill */}
           {latestIncident?.has_incident ? (
             <span className="px-2.5 py-1 rounded text-[11px] font-mono font-bold bg-rose-50 text-rose-700 border border-rose-200 flex items-center space-x-1.5 animate-pulse shadow-xs">
-              <span>🚨 FAULT ACTIVE: Err0{latestIncident.incident_data?.fault_code || 6}</span>
+              <span>🚨 FAULT ACTIVE: {incFaultStr}</span>
             </span>
           ) : (
             <span className="px-2.5 py-1 rounded text-[11px] font-mono font-medium bg-slate-100 text-slate-700 border border-slate-200 flex items-center space-x-1.5 shadow-xs">
