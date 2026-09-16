@@ -496,12 +496,6 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     );
   };
 
-  const quickPrompts = [
-    'Why does DC bus reach ~207V at 50 Hz and trip Err06 above 195V?',
-    'What caused the instantaneous Err02 current spike on PLC On/Off stop?',
-    'What braking resistor (P+/PB) is needed to prevent overvoltage trips?',
-    'How does increasing parameter F0.18 prevent regeneration trips?',
-  ];
 
   const defaultThinking = isIncidentActive
     ? (faultCode === 2
@@ -1036,22 +1030,8 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
         <div ref={chatBottomRef} />
       </div>
 
-      {/* Pinned Bottom Input & Suggestions */}
-      <div className="p-3 border-t border-slate-200 bg-slate-50/50 space-y-2 flex-shrink-0">
-        {/* Quick Suggestion Chips */}
-        <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 scrollbar-none text-[11px] font-mono">
-          {quickPrompts.map((chip, idx) => (
-            <button
-              key={idx}
-              onClick={() => handleSendChat(chip)}
-              disabled={isStreaming || isPipelineRunning}
-              className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-900 rounded-md border border-slate-200 whitespace-nowrap transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
-            >
-              {chip}
-            </button>
-          ))}
-        </div>
-
+      {/* Pinned Bottom Input */}
+      <div className="p-3 border-t border-slate-200 bg-slate-50/50 flex-shrink-0">
         {/* Prompt Input Form */}
         <form
           onSubmit={(e) => {
