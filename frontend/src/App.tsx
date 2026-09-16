@@ -495,7 +495,7 @@ export function App() {
       {/* Minimal Footer */}
       <footer className="border-t border-slate-200 bg-white py-2 px-4 text-center text-slate-500 font-mono text-[11px] flex flex-wrap items-center justify-between gap-2 max-w-[1720px] mx-auto w-full">
         <div>
-          Global PetroChem Refining Corp · Machinery Reliability Center of Excellence
+          Industrial Automation & Mechatronics Lab · Wecon VFD Reliability Center
         </div>
         <div className="flex items-center space-x-3">
           <span>Standards: ISA-95 · ISO 14224 · ISO 10816 · Global 8D</span>

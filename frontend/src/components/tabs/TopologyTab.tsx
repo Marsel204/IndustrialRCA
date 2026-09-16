@@ -221,7 +221,17 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
             <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
               <span className="text-slate-500 block text-[10px]">Role in Incident</span>
               <span className="font-bold text-slate-900">
-                {selectedNode?.id === 'STR-301A'
+                {selectedNode?.id === 'PLC_LX_01'
+                  ? 'Upstream Root Trigger (PLC Ladder / D-Register)'
+                  : selectedNode?.id === 'VFD_VM_01'
+                  ? 'Tripped Asset (Latched Hardware Fault)'
+                  : selectedNode?.id === 'DC_BUS_LINK'
+                  ? 'DC Link Intermediate Bus'
+                  : selectedNode?.id === 'BRK_RESISTOR_01'
+                  ? 'Dynamic Braking Circuit'
+                  : selectedNode?.id === 'IND_MOTOR_01'
+                  ? 'Coupled Induction Motor'
+                  : selectedNode?.id === 'STR-301A'
                   ? 'Primary Root Cause'
                   : selectedNode?.id === 'P-301A'
                   ? 'Tripped Machinery'
@@ -248,15 +258,15 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
                     </div>
                     {sensor.trip_limit && (
                       <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                        Limit: {sensor.trip_limit} {sensor.unit}
+                        Trip: {sensor.trip_limit} {sensor.unit || ''}
                       </span>
                     )}
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-xs font-mono text-slate-400 italic">
-                No active analog transmitters bound directly to this passive junction node.
+              <p className="text-xs text-slate-500 italic">
+                No telemetry sensors mapped to this node.
               </p>
             )}
           </div>
@@ -278,7 +288,7 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
                 className="flex items-center space-x-1.5 text-slate-800 font-bold hover:text-teal-700 cursor-pointer"
               >
                 {treeExpanded.enterprise ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                <span>🏢 Global PetroChem Refining Corp (L5)</span>
+                <span>🏢 {topology?.isa95_hierarchy?.enterprise || 'Industrial Automation & Mechatronics Lab'} (L5)</span>
               </button>
 
               {treeExpanded.enterprise && (
@@ -289,7 +299,7 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
                       className="flex items-center space-x-1.5 text-blue-700 font-semibold hover:text-blue-800 cursor-pointer"
                     >
                       {treeExpanded.site ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                      <span>📍 Site Alpha - Baytown Complex (L4)</span>
+                      <span>📍 {topology?.isa95_hierarchy?.site || 'Electrical Test Facility - Bench 01'} (L4)</span>
                     </button>
 
                     {treeExpanded.site && (
@@ -300,43 +310,82 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
                             className="flex items-center space-x-1.5 text-amber-700 font-semibold hover:text-amber-800 cursor-pointer"
                           >
                             {treeExpanded.area ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                            <span>⚙️ Area 03 - Steam Generation (L3)</span>
+                            <span>⚙️ {topology?.isa95_hierarchy?.area || 'Area 01 - Power Electronics & Motion Control'} (L3)</span>
                           </button>
 
                           {treeExpanded.area && (
                             <div className="ml-4 mt-1 pl-2.5 border-l border-slate-200 space-y-1">
                               <div className="text-teal-700 font-semibold">
-                                💧 Unit 300 - HP Boiler Feedwater (L2)
+                                🔌 {topology?.isa95_hierarchy?.unit || 'Bench 01 - Variable Frequency Drive Test Rig'} (L2)
                               </div>
 
                               <div className="ml-3 space-y-1 text-slate-700">
                                 <div className="text-slate-500 text-[10px] font-bold uppercase mt-1">
                                   Equipment Modules (L1/L2):
                                 </div>
-                                <div className="flex items-center space-x-2 py-0.2">
+                                <div
+                                  onClick={() => setSelectedNodeId('GRID_AC_220V')}
+                                  className="flex items-center space-x-2 py-0.5 cursor-pointer hover:text-teal-700"
+                                >
                                   <span>•</span>
-                                  <span className="font-bold text-slate-800">TK-300:</span>
-                                  <span className="text-slate-600">Feedwater Deaerator Vessel</span>
+                                  <span className="font-bold text-slate-800">GRID_AC_220V:</span>
+                                  <span className="text-slate-600">220V AC Mains Utility Supply</span>
                                 </div>
-                                <div className="flex items-center space-x-2 py-0.2 text-rose-700 font-bold">
+                                <div
+                                  onClick={() => setSelectedNodeId('CB_01')}
+                                  className="flex items-center space-x-2 py-0.5 cursor-pointer hover:text-teal-700"
+                                >
                                   <span>•</span>
-                                  <span>STR-301A:</span>
-                                  <span className="font-normal text-rose-800">Suction Strainer (Blinded Root Cause)</span>
+                                  <span className="font-bold text-slate-800">CB_01:</span>
+                                  <span className="text-slate-600">16A Thermal-Mag MCCB Breaker</span>
                                 </div>
-                                <div className="flex items-center space-x-2 py-0.2">
+                                <div
+                                  onClick={() => setSelectedNodeId('PLC_LX_01')}
+                                  className="flex items-center space-x-2 py-0.5 text-rose-700 font-bold cursor-pointer hover:underline"
+                                >
                                   <span>•</span>
-                                  <span className="font-bold text-slate-800">LINE-30101:</span>
-                                  <span className="text-slate-600">Suction Feed Piping Header</span>
+                                  <span>PLC_LX_01:</span>
+                                  <span className="font-normal text-rose-800">Wecon LX PLC (Root Trigger D-Var)</span>
                                 </div>
-                                <div className="flex items-center space-x-2 py-0.2 text-amber-700 font-bold">
+                                <div
+                                  onClick={() => setSelectedNodeId('HMI_TOUCH_01')}
+                                  className="flex items-center space-x-2 py-0.5 cursor-pointer hover:text-teal-700"
+                                >
                                   <span>•</span>
-                                  <span>P-301A:</span>
-                                  <span className="font-normal text-amber-800">HP Boiler Feed Pump (Tripped)</span>
+                                  <span className="font-bold text-slate-800">HMI_TOUCH_01:</span>
+                                  <span className="text-slate-600">Operator HMI (192.168.1.104)</span>
                                 </div>
-                                <div className="flex items-center space-x-2 py-0.2">
+                                <div
+                                  onClick={() => setSelectedNodeId('VFD_VM_01')}
+                                  className="flex items-center space-x-2 py-0.5 text-amber-700 font-bold cursor-pointer hover:underline"
+                                >
                                   <span>•</span>
-                                  <span className="font-bold text-slate-800">M-301A:</span>
-                                  <span className="text-slate-600">450 kW Induction Motor</span>
+                                  <span>VFD_VM_01:</span>
+                                  <span className="font-normal text-amber-800">Wecon VM Series VFD (Tripped Asset)</span>
+                                </div>
+                                <div
+                                  onClick={() => setSelectedNodeId('DC_BUS_LINK')}
+                                  className="flex items-center space-x-2 py-0.5 cursor-pointer hover:text-teal-700"
+                                >
+                                  <span>•</span>
+                                  <span className="font-bold text-slate-800">DC_BUS_LINK:</span>
+                                  <span className="text-slate-600">DC Bus Link (182V nom · 195V trip)</span>
+                                </div>
+                                <div
+                                  onClick={() => setSelectedNodeId('BRK_RESISTOR_01')}
+                                  className="flex items-center space-x-2 py-0.5 cursor-pointer hover:text-teal-700"
+                                >
+                                  <span>•</span>
+                                  <span className="font-bold text-slate-800">BRK_RESISTOR_01:</span>
+                                  <span className="text-slate-600">Dynamic Braking Resistor (P+/PB)</span>
+                                </div>
+                                <div
+                                  onClick={() => setSelectedNodeId('IND_MOTOR_01')}
+                                  className="flex items-center space-x-2 py-0.5 cursor-pointer hover:text-teal-700"
+                                >
+                                  <span>•</span>
+                                  <span className="font-bold text-slate-800">IND_MOTOR_01:</span>
+                                  <span className="text-slate-600">3-Phase Induction Motor (1440 RPM)</span>
                                 </div>
                               </div>
                             </div>
