@@ -284,6 +284,7 @@ export function App() {
             incident_data: null,
             pipeline_status: 'READY',
           });
+          setRcaState(null);
           setActiveScenarioId('live_stream');
           setInspectorTab('telemetry');
           fetchTelemetry('live_stream').then(setTelemetry).catch(console.warn);
