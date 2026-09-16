@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronUp,
   GitCommit,
+  Network,
   Wrench,
 } from 'lucide-react';
 import { RCAState } from '../../types';
@@ -355,7 +356,7 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 flex-1 flex flex-col min-h-full">
       {/* Header Banner */}
       <div className="bg-white border border-slate-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
         <div className="flex items-center space-x-3">
@@ -572,17 +573,21 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
           </div>
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-xl p-6 text-center space-y-2 shadow-xs">
-          <GitCommit className="w-5 h-5 text-slate-400 mx-auto" />
-          <h4 className="text-xs font-bold font-mono text-slate-800 uppercase">
-            Upstream ISA-95 Causal Trace (5-Whys Root Cause Chain) — Standby
-          </h4>
-          <p className="text-xs text-slate-500 max-w-md mx-auto font-sans leading-relaxed">
-            The 5-Whys root cause causal tree is synthesized automatically by the LangGraph diagnostic engine when a physical hardware trip occurs and a root failure mode is confirmed.
-          </p>
-          <div className="inline-flex items-center space-x-1.5 px-2.5 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full text-[11px] font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-            <span>Awaiting Trip Trigger</span>
+        <div className="bg-white border border-slate-200 rounded-xl p-8 text-center flex-1 flex flex-col items-center justify-center space-y-3.5 shadow-xs min-h-[200px]">
+          <div className="w-12 h-12 rounded-2xl bg-teal-50 border border-teal-200/80 flex items-center justify-center text-teal-600 shadow-xs">
+            <Network className="w-6 h-6 text-teal-600" />
+          </div>
+          <div>
+            <h4 className="text-xs font-bold font-mono text-slate-800 uppercase tracking-wide">
+              Upstream ISA-95 Causal Trace (5-Whys Root Cause Chain) — Standby
+            </h4>
+            <p className="text-xs text-slate-500 max-w-md mx-auto font-sans leading-relaxed mt-1">
+              The 5-Whys root cause causal tree is synthesized automatically by the LangGraph diagnostic engine when a physical hardware trip occurs and a root failure mode is confirmed.
+            </p>
+          </div>
+          <div className="inline-flex items-center space-x-1.5 px-3 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-full text-xs font-mono">
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse" />
+            <span>Autonomous Causal Engine On Standby</span>
           </div>
         </div>
       )}

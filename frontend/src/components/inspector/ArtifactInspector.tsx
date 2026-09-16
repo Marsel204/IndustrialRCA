@@ -76,7 +76,7 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
       </div>
 
       {/* Tab Content Canvas (Preserved in DOM to prevent canvas tearing / unmount flicker) */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col">
         <div className={currentTab === 'telemetry' ? 'block' : 'hidden'}>
           <TelemetryAnalyticsTab
             telemetry={telemetry}
@@ -89,7 +89,7 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
           <TopologyTab topology={topology} />
         </div>
 
-        <div className={currentTab === 'hypotheses' ? 'block' : 'hidden'}>
+        <div className={currentTab === 'hypotheses' ? 'flex-1 flex flex-col min-h-full' : 'hidden'}>
           <FMEAMatrixTab rcaState={rcaState} />
         </div>
 
