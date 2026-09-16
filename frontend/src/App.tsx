@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Header } from './components/Header';
-import { PipelineStepper } from './components/PipelineStepper';
 import { AgentWorkspace } from './components/agent/AgentWorkspace';
 import { ArtifactInspector } from './components/inspector/ArtifactInspector';
 import { ReviewSignOffModal } from './components/agent/ReviewSignOffModal';
@@ -428,13 +427,6 @@ export function App() {
         isPipelineRunning={isPipelineRunning}
         mqttConnected={mqttConnected}
         isSimulated={isSimulated}
-      />
-
-      {/* 7-Step Macro Stepper */}
-      <PipelineStepper
-        currentStep={rcaState?.current_step || 1}
-        isPausedAtHitl={rcaState?.is_paused_at_hitl || false}
-        pipelineStatus={rcaState?.pipeline_status || 'READY'}
       />
 
       {/* Error Alert Banner */}

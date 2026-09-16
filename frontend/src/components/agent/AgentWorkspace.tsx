@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { RCAState, ChatMessage, ToolExecutionItem, LatestIncident } from '../../types';
 import { streamCopilotChat } from '../../api';
+import { PipelineStepper } from '../PipelineStepper';
 
 interface AgentWorkspaceProps {
   rcaState: RCAState | null;
@@ -601,6 +602,17 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                 ? `Investigate hardware trip ${faultCode >= 10 ? `Err${faultCode}` : `Err0${faultCode}`} on Wecon VFD Rig (VFD_VM_01). Trace root cause and generate ISO 14224 / 8D deliverables.`
                 : `Continuous monitoring and diagnostic readiness on Wecon VFD Rig (VFD_VM_01).`}
             </div>
+          </div>
+
+          {/* LangGraph 7-Step Autonomous Diagnostic Plan Stepper */}
+          <div className="pl-7">
+            <PipelineStepper
+              currentStep={rcaState?.current_step || (isIncidentActive ? 7 : 1)}
+              isPausedAtHitl={rcaState?.is_paused_at_hitl || false}
+              pipelineStatus={rcaState?.pipeline_status || (isIncidentActive ? 'ANALYSIS_COMPLETE' : 'MONITORING')}
+              compact={true}
+              onSelectStepTab={onSelectInspectorTab}
+            />
           </div>
 
           {/* Reasoning Trace (CoT) - Matching Coding Agent Style */}
