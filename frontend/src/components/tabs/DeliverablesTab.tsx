@@ -207,24 +207,32 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
           {subView === '8d' && (
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-5">
           {/* 8D Document Header */}
-          <div className="border-b border-slate-100 pb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] font-mono text-teal-700 font-bold tracking-wider uppercase">
+          <div className="border-b border-slate-100 pb-4 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] font-mono text-teal-700 font-bold tracking-wider uppercase">
                 Global 8D Standard Root Cause Corrective Action (RCCA)
-              </div>
-              <h2 className="text-base font-bold text-slate-900">
-                Incident Investigation Report: {report8D?.incident_id || 'INC-2026-0915-VFD'}
-              </h2>
-              <div className="text-xs font-mono text-slate-500 mt-0.5">
-                Asset: {report8D?.asset_id || 'VFD_VM_01'} ({report8D?.asset_name || 'Wecon VM Series Variable Frequency Drive'}) · Classification: Level 1 Critical Test Rig Inverter Trip
+              </span>
+              <div className="flex items-center space-x-2 text-xs font-mono text-slate-500">
+                <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px] shadow-xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  <span>CLOSED & APPROVED</span>
+                </span>
+                <span>·</span>
+                <span>Date: 2026-09-15</span>
               </div>
             </div>
 
-            <div className="text-right font-mono text-xs text-slate-500">
-              <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold block mb-1">
-                STATUS: CLOSED & APPROVED
-              </span>
-              <span>Date: 2026-09-15 · Automation Test Facility</span>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">
+                Incident Investigation Report: {report8D?.incident_id || 'INC-2026-0915-VFD'}
+              </h2>
+              <div className="text-xs font-mono text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span>Asset: <strong>{report8D?.asset_id || 'VFD_VM_01'}</strong> ({report8D?.asset_name || 'Wecon VM Series Variable Frequency Drive'})</span>
+                <span>·</span>
+                <span>Classification: Level 1 Critical Test Rig Inverter Trip</span>
+                <span>·</span>
+                <span>Automation Test Facility</span>
+              </div>
             </div>
           </div>
 
@@ -374,24 +382,28 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
       {subView === 'sap' && (
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-5">
           {/* SAP Header */}
-          <div className="border-b border-slate-100 pb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] font-mono text-blue-700 font-bold tracking-wider uppercase">
+          <div className="border-b border-slate-100 pb-4 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] font-mono text-blue-700 font-bold tracking-wider uppercase">
                 SAP S/4HANA Plant Maintenance (PM) Order PM01
-              </div>
-              <h2 className="text-base font-bold text-slate-900">
-                Work Order #{sapOrder?.order_number || '40092841'} · Notification #{sapOrder?.notification_number || '10082914'}
-              </h2>
-              <div className="text-xs font-mono text-slate-500 mt-0.5">
-                Equipment: {sapOrder?.equipment_id || '10049201'} - {sapOrder?.equipment_name || 'VFD_VM_01 Wecon VM Series Inverter & Motor Bench'}
+              </span>
+              <div className="flex items-center space-x-2 text-xs font-mono">
+                <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-semibold text-[11px] shadow-xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  <span>{sapOrder?.priority || '1 - Emergency / Immediate Outage'}</span>
+                </span>
+                <span className="text-slate-400">·</span>
+                <span className="text-slate-500 text-[11px]">CRTD REL PMCO</span>
               </div>
             </div>
 
-            <div className="text-right font-mono text-xs">
-              <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-bold block mb-1">
-                {sapOrder?.priority || '1 - Emergency / Immediate Outage'}
-              </span>
-              <span className="text-slate-500">System Status: {sapOrder?.system_status || 'CRTD REL PMCO'}</span>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">
+                Work Order #{sapOrder?.order_number || '40092841'} · Notification #{sapOrder?.notification_number || '10082914'}
+              </h2>
+              <div className="text-xs font-mono text-slate-500 mt-1">
+                Equipment: <strong>{sapOrder?.equipment_id || '10049201'}</strong> - {sapOrder?.equipment_name || 'VFD_VM_01 Wecon VM Series Inverter & Motor Bench'}
+              </div>
             </div>
           </div>
 
