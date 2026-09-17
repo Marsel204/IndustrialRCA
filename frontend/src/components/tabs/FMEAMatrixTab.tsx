@@ -402,13 +402,13 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
       {/* Hypotheses Cards Grid */}
       <div className="space-y-2.5">
         {hypotheses.length > 0 ? (
-          hypotheses.map((h) => {
+          hypotheses.map((h, idx) => {
             const isExpanded = expandedHypId === h.hypothesis_id;
             const isWinner = winningHyp?.hypothesis_id === h.hypothesis_id;
 
             return (
               <div
-                key={h.hypothesis_id}
+                key={`${h.hypothesis_id}-${idx}`}
                 className={`bg-white border rounded-xl transition-all overflow-hidden ${
                   isWinner
                     ? 'border-teal-400 ring-1 ring-teal-400/20 shadow-xs'
