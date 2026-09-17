@@ -330,4 +330,7 @@ export interface LiveMetric {
   is_simulated?: boolean;
   telemetry_connected?: boolean;
   simulation_enabled?: boolean;
+  simulation_scenario?: string;
+  simulation_phase?: 'NORMAL' | 'TRIPPED' | string;
+  simulation_countdown?: number;
 }

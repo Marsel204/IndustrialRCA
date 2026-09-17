@@ -11,7 +11,12 @@ interface TelemetryAnalyticsTabProps {
   telemetry: TelemetryData | null;
   spectrum: SpectrumData | null;
   activeScenarioId?: string;
-  onToggleSimulation?: (enabled: boolean) => void;
+  onToggleSimulation?: (enabled: boolean, scenario?: string, duration?: number) => void;
+  isSimulated?: boolean;
+  telemetryConnected?: boolean;
+  simulationScenario?: string;
+  simulationPhase?: string;
+  simulationCountdown?: number;
 }
 
 const EMPTY_TIMESTAMPS: number[] = [];
@@ -23,6 +28,11 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
   spectrum,
   activeScenarioId,
   onToggleSimulation,
+  isSimulated: _isSimulated = false,
+  telemetryConnected: _telemetryConnected = false,
+  simulationScenario: _simulationScenario = 'nominal',
+  simulationPhase: _simulationPhase = 'IDLE',
+  simulationCountdown: _simulationCountdown = 0,
 }) => {
   const {
     isLiveStream,

@@ -25,6 +25,7 @@ import {
   submitHumanReview,
   fetchLatestIncident,
   subscribeTelemetryEvents,
+  subscribeLiveTelemetryStream,
   clearIncident,
   toggleSimulationMode,
 } from './api';
@@ -48,6 +49,9 @@ export function App() {
   const [mqttConnected, setMqttConnected] = useState<boolean>(false);
   const [telemetryConnected, setTelemetryConnected] = useState<boolean>(false);
   const [isSimulated, setIsSimulated] = useState<boolean>(false);
+  const [simulationScenario, setSimulationScenario] = useState<string>('nominal');
+  const [simulationPhase, setSimulationPhase] = useState<string>('IDLE');
+  const [simulationCountdown, setSimulationCountdown] = useState<number>(0);
   const [_isLoading, setIsLoading] = useState<boolean>(true);
   const [isPipelineRunning, setIsPipelineRunning] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -73,6 +77,8 @@ export function App() {
         if (health?.mqtt_connected !== undefined) setMqttConnected(Boolean(health.mqtt_connected));
         if (health?.telemetry_connected !== undefined) setTelemetryConnected(Boolean(health.telemetry_connected));
         if (health?.is_simulated !== undefined) setIsSimulated(Boolean(health.is_simulated));
+        if (health?.simulation_scenario) setSimulationScenario(health.simulation_scenario);
+        if (health?.simulation_phase) setSimulationPhase(health.simulation_phase);
       } catch {
         setApiOnline(false);
       }
@@ -310,6 +316,8 @@ export function App() {
         if (health?.mqtt_connected !== undefined) setMqttConnected(Boolean(health.mqtt_connected));
         if (health?.telemetry_connected !== undefined) setTelemetryConnected(Boolean(health.telemetry_connected));
         if (health?.is_simulated !== undefined) setIsSimulated(Boolean(health.is_simulated));
+        if (health?.simulation_scenario) setSimulationScenario(health.simulation_scenario);
+        if (health?.simulation_phase) setSimulationPhase(health.simulation_phase);
       } catch {
         setApiOnline(false);
       }
@@ -317,11 +325,29 @@ export function App() {
     return () => clearInterval(timer);
   }, []);
 
+  // Listen to live telemetry metrics for realtime simulation countdown & phase updates
+  useEffect(() => {
+    const unsub = subscribeLiveTelemetryStream((metric) => {
+      if (metric.is_simulated !== undefined) setIsSimulated(Boolean(metric.is_simulated));
+      if (metric.simulation_scenario) setSimulationScenario(metric.simulation_scenario);
+      if (metric.simulation_phase) setSimulationPhase(metric.simulation_phase);
+      if (metric.simulation_countdown !== undefined) setSimulationCountdown(metric.simulation_countdown);
+    });
+    return () => unsub();
+  }, []);
+
   // User-Controlled Simulation Mode Toggle
-  const handleToggleSimulation = async (enabled: boolean) => {
+  const handleToggleSimulation = async (
+    enabled: boolean,
+    scenario: string = 'nominal',
+    duration: number = 5
+  ) => {
     try {
-      const res = await toggleSimulationMode(enabled);
+      const res = await toggleSimulationMode(enabled, scenario, duration);
       setIsSimulated(res.simulation_enabled);
+      if (res.scenario) setSimulationScenario(res.scenario);
+      if (res.phase) setSimulationPhase(res.phase);
+      if (res.countdown !== undefined) setSimulationCountdown(res.countdown);
       setTelemetryConnected(res.simulation_enabled || mqttConnected);
       if (activeScenarioId === 'live_stream') {
         const telData = await fetchTelemetry('live_stream').catch(() => null);
@@ -345,6 +371,8 @@ export function App() {
         incident_data: null,
         pipeline_status: 'READY',
       });
+      setSimulationPhase('IDLE');
+      setSimulationCountdown(0);
       setActiveScenarioId('live_stream');
       const newThread = `rca-live-${Date.now()}`;
       setActiveThreadId(newThread);
@@ -447,6 +475,9 @@ export function App() {
         mqttConnected={mqttConnected}
         telemetryConnected={telemetryConnected}
         isSimulated={isSimulated}
+        simulationScenario={simulationScenario}
+        simulationPhase={simulationPhase}
+        simulationCountdown={simulationCountdown}
         onToggleSimulation={handleToggleSimulation}
       />
 
@@ -494,6 +525,12 @@ export function App() {
             rcaState={rcaState}
             activeScenarioId={activeScenarioId}
             onToggleSimulation={handleToggleSimulation}
+            isSimulated={isSimulated}
+            telemetryConnected={telemetryConnected}
+            simulationScenario={simulationScenario}
+            simulationPhase={simulationPhase}
+            simulationCountdown={simulationCountdown}
+            onSimulateScenario={(sc) => handleToggleSimulation(true, sc, 5)}
           />
         </section>
       </main>

@@ -14,7 +14,13 @@ interface ArtifactInspectorProps {
   topology: TopologyData | null;
   rcaState: RCAState | null;
   activeScenarioId: string;
-  onToggleSimulation?: (enabled: boolean) => void;
+  isSimulated?: boolean;
+  telemetryConnected?: boolean;
+  simulationScenario?: string;
+  simulationPhase?: string;
+  simulationCountdown?: number;
+  onToggleSimulation?: (enabled: boolean, scenario?: string, duration?: number) => void;
+  onSimulateScenario?: (scenario: string) => void;
 }
 
 export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
@@ -25,7 +31,13 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
   topology,
   rcaState,
   activeScenarioId,
+  isSimulated = false,
+  telemetryConnected = false,
+  simulationScenario = 'nominal',
+  simulationPhase = 'IDLE',
+  simulationCountdown = 0,
   onToggleSimulation,
+  onSimulateScenario,
 }) => {
   const TABS = [
     { id: 'telemetry', label: 'Telemetry & FFT Spectrum', icon: Waves },
@@ -85,6 +97,11 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
             spectrum={spectrum}
             activeScenarioId={activeScenarioId}
             onToggleSimulation={onToggleSimulation}
+            isSimulated={isSimulated}
+            telemetryConnected={telemetryConnected}
+            simulationScenario={simulationScenario}
+            simulationPhase={simulationPhase}
+            simulationCountdown={simulationCountdown}
           />
         </div>
 
@@ -93,7 +110,13 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
         </div>
 
         <div className={currentTab === 'hypotheses' ? 'flex-1 flex flex-col min-h-full' : 'hidden'}>
-          <FMEAMatrixTab rcaState={rcaState} />
+          <FMEAMatrixTab
+            rcaState={rcaState}
+            simulationScenario={simulationScenario}
+            simulationPhase={simulationPhase}
+            simulationCountdown={simulationCountdown}
+            onSimulateScenario={onSimulateScenario}
+          />
         </div>
 
         <div className={currentTab === 'deliverables' ? 'block' : 'hidden'}>

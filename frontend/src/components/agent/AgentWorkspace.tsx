@@ -186,7 +186,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
   // Build Diagnostic Tool Executions from rcaState
   const autonomousTools: ToolExecutionItem[] = useMemo(() => {
     const assetId = rcaState?.root_cause_asset || 'VFD_VM_01';
-    const faultStr = faultCode > 0 ? `Err0${faultCode}` : 'Nominal';
+    const faultStr = faultCode > 0 ? (faultCode >= 10 ? `Err${faultCode}` : `Err0${faultCode}`) : 'Nominal';
     const winningHypo = rcaState?.winning_hypothesis;
 
     if (!isIncidentActive) {
@@ -284,12 +284,24 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
         },
         status: isPipelineRunning ? 'running' : 'completed',
         duration_ms: 284,
-        summary: `on ${assetId} (${faultCode === 2 ? 'abrupt stop transient: current peak 3.85A' : 'transient shift: DC bus 182V → 202.5V, current peak 2.62A'})`,
+        summary: `on ${assetId} (${
+          faultCode === 2
+            ? 'abrupt stop transient: current peak 3.85A'
+            : faultCode === 3
+            ? 'deceleration ramp transient: current surge 2.75A'
+            : faultCode === 11
+            ? 'sustained thermal overload: current 2.45A'
+            : 'transient shift: DC bus 182V → 202.5V, current peak 2.62A'
+        })`,
         output_details: {
           changepoints_detected: rcaState?.detected_anomalies?.length || 2,
           critical_event:
             faultCode === 2
               ? 'Instantaneous motor stall current peak (3.85A > 2.50A trip setpoint)'
+              : faultCode === 3
+              ? 'Deceleration ramp current surge (2.75A > 2.50A trip threshold)'
+              : faultCode === 11
+              ? 'Sustained thermal overload current (2.45A > 2.00A thermal threshold)'
               : 'DC bus overvoltage escalation (202.5V > 195.0V trip threshold)',
           timestamp: 't = 14.200s relative to baseline',
           status: 'PRIMARY_TRIGGER_VALIDATED',
@@ -300,6 +312,10 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           `[ChangePointDetector] Changepoint confirmed at sample #1420 (anomaly score: 0.942).`,
           faultCode === 2
             ? `[ChangePointDetector] Operational ceiling breached: motor current surged past 2.50A trip limit.`
+            : faultCode === 3
+            ? `[ChangePointDetector] Decel ramp limit breached: current surged to 2.75A during ramp.`
+            : faultCode === 11
+            ? `[ChangePointDetector] Continuous thermal limit breached: motor drawn 2.45A sustained.`
             : `[ChangePointDetector] Operational ceiling breached: DC bus reached threshold.`,
         ],
         inspector_tab: 'telemetry',
@@ -348,6 +364,10 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
             winningHypo?.name ||
             (faultCode === 2
               ? 'Forced Sudden Deceleration Overcurrent (WECON VM Err02)'
+              : faultCode === 3
+              ? 'Deceleration Ramp Overcurrent (WECON VM Err03)'
+              : faultCode === 11
+              ? 'Motor Thermal Overload (WECON VM Err11)'
               : 'Overfrequency Deceleration Overvoltage (WECON VM Err06)'),
           confidence: winningHypo?.confidence
             ? `${(winningHypo.confidence * 100).toFixed(0)}%`
@@ -356,21 +376,43 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
             faultCode === 2
               ? [
                   'H_VFD_ERR06: Decel Overvoltage (Refuted: trip was Err02 overcurrent)',
+                  'H_VFD_ERR03: Decel Ramp OC (Refuted: trip was instantaneous abrupt stop)',
                   'H_VFD_ERR11: Motor Overheat (Refuted: current within thermal rating)',
+                ]
+              : faultCode === 3
+              ? [
+                  'H_VFD_ERR06: Decel Overvoltage (Refuted: trip was Err03 decel ramp overcurrent)',
+                  'H_VFD_ERR02: Sudden Decel Stop (Refuted: trip occurred during controlled ramp)',
+                  'H_VFD_ERR11: Motor Overheat (Refuted: winding temp within tolerance)',
+                ]
+              : faultCode === 11
+              ? [
+                  'H_VFD_ERR06: Decel Overvoltage (Refuted: trip was Err11 thermal overload)',
+                  'H_VFD_ERR02: Sudden Decel Stop (Refuted: no abrupt deceleration command)',
+                  'H_VFD_ERR03: Decel Ramp OC (Refuted: trip was thermal accumulation, not ramp surge)',
                 ]
               : [
                   'H_VFD_ERR02: Sudden Decel Overcurrent (Refuted: peak current below threshold)',
+                  'H_VFD_ERR03: Decel Ramp OC (Refuted: DC bus voltage exceeded 195V ceiling)',
                   'H_VFD_ERR11: Motor Overheat (Refuted: PT100 nominal)',
                 ],
           mechanism:
             faultCode === 2
               ? 'Kinetic back-EMF discharge surge from spinning induction rotor upon abrupt PLC stop'
+              : faultCode === 3
+              ? 'Deceleration ramp time F0.18 too short for high load inertia, causing excessive regenerative energy and overcurrent'
+              : faultCode === 11
+              ? 'Continuous mechanical overload exceeding rated motor full-load current (2.0A), triggering electronic thermal relay'
               : 'Regenerative kinetic energy dump into DC bus capacitors without dynamic dissipation',
         },
         logs: [
           '[FMEAEngine] Ingesting fault symptoms and boundary criteria...',
           faultCode === 2
             ? '[FMEAEngine] Testing H_VFD_ERR02: Instantaneous stop surge > 2.50A -> CONFIRMED (p=0.98).'
+            : faultCode === 3
+            ? '[FMEAEngine] Testing H_VFD_ERR03: Decel ramp current surge > 2.50A -> CONFIRMED (p=0.98).'
+            : faultCode === 11
+            ? '[FMEAEngine] Testing H_VFD_ERR11: Sustained current > 2.00A thermal threshold -> CONFIRMED (p=0.98).'
             : '[FMEAEngine] Testing H_VFD_ERR06: DC bus > 195V during rapid decel / 50Hz ramp -> CONFIRMED (p=0.98).',
           '[FMEAEngine] FMEA matrix convergence achieved.',
         ],
@@ -395,11 +437,30 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           work_order_id: rcaState?.sap_work_order?.order_number || 'WO-VFD-2026-0042',
           notification:
             rcaState?.sap_work_order?.notification_number || 'NOTIF-2026-0089',
-          actions_required: [
-            'Install external dynamic braking resistor on terminals P+ and PB (100 Ohm, 200W)',
-            'Tune Wecon VM parameter F0.18 (Decel time) from 0.5s to 3.0s',
-            'Verify parameter F0.10 voltage clamp configuration',
-          ],
+          actions_required:
+            faultCode === 2
+              ? [
+                  'Implement controlled deceleration ramp in PLC ladder logic before cutting run signal',
+                  'Tune Wecon VM parameter F0.18 (Decel time) from 0.5s to 3.0s',
+                  'Install dynamic braking resistor on terminals P+ and PB (100 Ohm, 200W)',
+                ]
+              : faultCode === 3
+              ? [
+                  'Increase deceleration time parameter F0.18 from 0.5s to 3.5s to reduce regenerative current',
+                  'Enable overcurrent stall prevention during deceleration (Parameter F3.00 = 1)',
+                  'Install external dynamic braking resistor on terminals P+ and PB (100 Ohm, 200W)',
+                ]
+              : faultCode === 11
+              ? [
+                  'Inspect driven mechanical equipment for mechanical binding, bearing wear, or load jamming',
+                  'Verify motor cooling fan clearance and ensure ambient ventilation airflow is unobstructed',
+                  'Calibrate motor electronic thermal overload protection parameter F1.07 to motor nameplate FLA',
+                ]
+              : [
+                  'Install external dynamic braking resistor on terminals P+ and PB (100 Ohm, 200W)',
+                  'Tune Wecon VM parameter F0.18 (Decel time) from 0.5s to 3.0s',
+                  'Verify parameter F0.10 voltage clamp configuration',
+                ],
         },
         logs: [
           '[CMMSConnector] Connecting to SAP PM REST API endpoint...',
@@ -629,6 +690,18 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           "3. Trip setpoint evaluated: Motor stator current breached 2.50 A threshold (reached 3.85 A on forced stop).\n" +
           "4. Evaluated failure hypotheses: H_VFD_ERR02 (Forced Decel Overcurrent) CONFIRMED; H_VFD_ERR06 REFUTED.\n" +
           "5. OEM corrective action: Implement controlled deceleration ramp in PLC ladder logic and tune parameter F0.18."
+        : faultCode === 3
+        ? "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
+          "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
+          "3. Trip setpoint evaluated: Deceleration ramp current breached 2.50 A trip threshold (reached 2.75 A).\n" +
+          "4. Evaluated failure hypotheses: H_VFD_ERR03 (Decel Ramp Overcurrent) CONFIRMED; H_VFD_ERR06/02 REFUTED.\n" +
+          "5. OEM corrective action: Increase deceleration time F0.18 to 3.5s and activate overcurrent stall prevention."
+        : faultCode === 11
+        ? "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
+          "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
+          "3. Trip setpoint evaluated: Motor stator current exceeded 2.00 A continuous thermal rating (drawing 2.45 A sustained).\n" +
+          "4. Evaluated failure hypotheses: H_VFD_ERR11 (Motor Thermal Overload) CONFIRMED; transient faults REFUTED.\n" +
+          "5. OEM corrective action: Inspect mechanical load for binding, ensure cooling airflow, and verify F1.07 setpoint."
         : "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
           "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
           "3. Trip setpoint evaluated: DC bus limit at 195.0 V DC (reaches ~207V at 50 Hz), current limit at 2.50 A.\n" +
@@ -663,6 +736,10 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     ? rcaState?.root_cause_description ||
       (faultCode === 2
         ? 'Operator actuated PLC On/Off stop button via PLC D-variable register, cutting the run command instantaneously without a controlled deceleration ramp routine (F0.18 too steep and braking resistor absent), inducing a 3.85 A kinetic back-EMF overcurrent surge that tripped the drive on Err02.'
+        : faultCode === 3
+        ? 'Drive commanded a deceleration ramp with parameter F0.18 set too fast (0.5s) for the high load inertia, generating excessive regenerative current and causing motor stator current to surge to 2.75 A (breaching 2.50 A trip threshold), tripping the drive on Err03 (Deceleration Ramp Overcurrent).'
+        : faultCode === 11
+        ? 'Motor operated continuously under sustained mechanical overload, drawing 2.45 A (exceeding continuous thermal rating of 2.00 A) for longer than the calibrated thermal inverse-time threshold, tripping the VFD on Err11 (Motor Thermal Overload).'
         : 'Output frequency setpoint was ramped past the 40.00 Hz operational ceiling toward 50.00 Hz, causing DC bus voltage to escalate to 202.5 V (breaching the calibrated 195.0 V trip limit) because Wecon VM parameter F0.10 was unclamped and dynamic braking resistor terminals P+/PB were unpopulated.')
     : (isTelemetryConnected
         ? `Continuous real-time telemetry from Wecon VM VFD (VFD_VM_01) is nominal. Output frequency (${currentF} Hz), DC bus voltage (${currentVdc} V), and motor current (${currentA} A) remain within calibrated ISA-95 envelopes. Listening for hardware trip trigger over MQTT / PLC D-variable.`

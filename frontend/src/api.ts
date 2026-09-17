@@ -223,17 +223,33 @@ export async function clearIncident(): Promise<{ status: string; message: string
   return res.json();
 }
 
-export async function toggleSimulationMode(enabled: boolean): Promise<{ simulation_enabled: boolean; status: string }> {
+export interface SimulationStatusResponse {
+  simulation_enabled: boolean;
+  is_simulated: boolean;
+  scenario: string;
+  phase: 'IDLE' | 'NORMAL' | 'TRIPPED' | 'STOPPED' | string;
+  countdown: number;
+}
+
+export async function toggleSimulationMode(
+  enabled: boolean,
+  scenario: string = 'nominal',
+  normalDurationSec: number = 5.0
+): Promise<{ simulation_enabled: boolean; scenario: string; phase: string; countdown: number; status: string }> {
   const res = await fetch(`${API_BASE}/telemetry/simulation`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled }),
+    body: JSON.stringify({
+      enabled,
+      scenario,
+      normal_duration_sec: normalDurationSec,
+    }),
   });
   if (!res.ok) throw new Error(`Failed to toggle simulation mode: ${res.statusText}`);
   return res.json();
 }
 
-export async function fetchSimulationStatus(): Promise<{ simulation_enabled: boolean }> {
+export async function fetchSimulationStatus(): Promise<SimulationStatusResponse> {
   const res = await fetch(`${API_BASE}/telemetry/simulation`);
   if (!res.ok) throw new Error(`Failed to fetch simulation status: ${res.statusText}`);
   return res.json();
