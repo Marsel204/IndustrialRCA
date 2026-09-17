@@ -13,8 +13,8 @@ import {
   Bot,
   RotateCcw,
 } from 'lucide-react';
-import { RCAState, ChatMessage, ToolExecutionItem, LatestIncident } from '../../types';
-import { streamCopilotChat } from '../../api';
+import { RCAState, ChatMessage, ToolExecutionItem, LatestIncident, LiveMetric } from '../../types';
+import { streamCopilotChat, fetchLiveMetrics, subscribeLiveTelemetryStream } from '../../api';
 import { PipelineStepper } from '../PipelineStepper';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -138,6 +138,15 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
   const [currentReasoning, setCurrentReasoning] = useState<string>('');
   const [currentContent, setCurrentContent] = useState<string>('');
   const [activeStreamingTools, setActiveStreamingTools] = useState<ToolExecutionItem[]>([]);
+  const [liveMetric, setLiveMetric] = useState<LiveMetric | null>(null);
+
+  useEffect(() => {
+    fetchLiveMetrics().then(setLiveMetric).catch(() => {});
+    const unsubscribe = subscribeLiveTelemetryStream((metric) => {
+      setLiveMetric(metric);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
@@ -601,6 +610,11 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     prevThreadIdRef.current = rcaState?.thread_id;
   }, [rcaState?.thread_id]);
 
+  const currentF = liveMetric ? liveMetric.f_out.toFixed(2) : '10.00';
+  const currentVdc = liveMetric ? liveMetric.v_dc.toFixed(1) : '51.0';
+  const currentA = liveMetric ? liveMetric.current.toFixed(2) : '0.00';
+  const currentRpm = liveMetric ? liveMetric.rpm.toFixed(0) : '0';
+
   const defaultThinking = isIncidentActive
     ? (faultCode === 2
         ? "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
@@ -613,11 +627,11 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           "3. Trip setpoint evaluated: DC bus limit at 195.0 V DC (reaches ~207V at 50 Hz), current limit at 2.50 A.\n" +
           "4. Evaluated failure hypotheses: H_VFD_ERR06 (Overfrequency > 40 Hz) and H_VFD_ERR02 (Forced Decel Stop).\n" +
           "5. OEM corrective action: Install dynamic braking resistor on terminals P+/PB and tune parameter F0.18.")
-    : "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
-      "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
-      "3. Continuous safety verification: DC bus (182.0 V < 195.0 V ceiling), current (1.15 A < 2.50 A trip).\n" +
-      "4. All health diagnostics green. Zero hardware trip codes active.\n" +
-      "5. System operating nominal edge monitoring. Ready for hardware trip triggers.";
+    : `1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n` +
+      `2. Operating envelope: ${currentF} Hz nominal, ${currentVdc} V DC bus nominal, ${currentA} A current, ${currentRpm} RPM.\n` +
+      `3. Continuous safety verification: DC bus (${currentVdc} V < 195.0 V ceiling), current (${currentA} A < 2.50 A trip).\n` +
+      `4. All health diagnostics green. Zero hardware trip codes active.\n` +
+      `5. System operating nominal edge monitoring. Ready for hardware trip triggers.`;
 
   const isPaused = rcaState?.is_paused_at_hitl || false;
   const isFinalized = rcaState?.pipeline_status === 'COMPLETED';
@@ -638,7 +652,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
       (faultCode === 2
         ? 'Operator actuated PLC On/Off stop button via PLC D-variable register, cutting the run command instantaneously without a controlled deceleration ramp routine (F0.18 too steep and braking resistor absent), inducing a 3.85 A kinetic back-EMF overcurrent surge that tripped the drive on Err02.'
         : 'Output frequency setpoint was ramped past the 40.00 Hz operational ceiling toward 50.00 Hz, causing DC bus voltage to escalate to 202.5 V (breaching the calibrated 195.0 V trip limit) because Wecon VM parameter F0.10 was unclamped and dynamic braking resistor terminals P+/PB were unpopulated.')
-    : 'Continuous real-time telemetry from Wecon VM VFD (VFD_VM_01) is nominal. Output frequency (40.00 Hz), DC bus voltage (182.0 V), and motor current (1.15 A) remain within calibrated ISA-95 envelopes. Listening for hardware trip trigger over MQTT / PLC D-variable.';
+    : `Continuous real-time telemetry from Wecon VM VFD (VFD_VM_01) is nominal. Output frequency (${currentF} Hz), DC bus voltage (${currentVdc} V), and motor current (${currentA} A) remain within calibrated ISA-95 envelopes. Listening for hardware trip trigger over MQTT / PLC D-variable.`;
 
   return (
     <div className="flex flex-col h-full bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden text-slate-800 font-sans">
