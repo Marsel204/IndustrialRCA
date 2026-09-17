@@ -11,6 +11,7 @@ import {
   Terminal,
   CheckCircle2,
   Bot,
+  RotateCcw,
 } from 'lucide-react';
 import { RCAState, ChatMessage, ToolExecutionItem, LatestIncident } from '../../types';
 import { streamCopilotChat } from '../../api';
@@ -496,6 +497,25 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     );
   };
 
+  const handleClearChat = () => {
+    setMessages([]);
+    setCurrentReasoning('');
+    setCurrentContent('');
+    setActiveStreamingTools([]);
+    setInputPrompt('');
+    setExpandedChatTools({});
+    setExpandedChatCoT({});
+    setIsStreaming(false);
+  };
+
+  // Automatically reset chat when the active investigation thread changes
+  const prevThreadIdRef = useRef<string | undefined>(rcaState?.thread_id);
+  useEffect(() => {
+    if (rcaState?.thread_id && prevThreadIdRef.current && rcaState.thread_id !== prevThreadIdRef.current) {
+      handleClearChat();
+    }
+    prevThreadIdRef.current = rcaState?.thread_id;
+  }, [rcaState?.thread_id]);
 
   const defaultThinking = isIncidentActive
     ? (faultCode === 2
@@ -559,8 +579,19 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           </div>
         </div>
 
-        {/* Live Status Indicators */}
+        {/* Live Status Indicators & Actions */}
         <div className="flex items-center space-x-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={handleClearChat}
+            disabled={isStreaming || (messages.length === 0 && !currentContent && !inputPrompt)}
+            className="flex items-center space-x-1.5 px-2.5 py-1 text-[11px] font-mono font-medium text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 active:bg-slate-200 border border-slate-200 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
+            title="Reset chat conversation"
+          >
+            <RotateCcw className={`w-3 h-3 text-slate-500 ${isStreaming ? 'animate-spin' : ''}`} />
+            <span>Reset Chat</span>
+          </button>
+
           {isPipelineActive && (
             <span className="flex items-center space-x-1.5 text-[11px] font-mono text-amber-700 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded-md animate-pulse">
               <Loader2 className="w-3 h-3 animate-spin text-amber-600" />
