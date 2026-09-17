@@ -6,15 +6,24 @@ Production-grade industrial RCA system built with **Python 3.11+**, **LangGraph*
 
 ## ⚡ Quickstart
 
-### 1. Launch FastAPI Backend Server
+### 🚀 One-Click Launch (Windows)
+Double-click **`launch.bat`** (or **`start_system.bat`**) in the project root:
+```cmd
+launch.bat
+```
+> Automatically verifies environment, launches the local MQTT broker (`1883`), starts the FastAPI backend (`8000`), starts the React Vite frontend (`5173`), and opens your default browser to [http://localhost:5173](http://localhost:5173).
+> To cleanly stop all services, double-click **`stop_system.bat`**.
+
+### 1. Manual Service Launch
+
+#### A. Launch FastAPI Backend Server
 ```bash
-# Start standalone FastAPI REST/SSE backend on port 8000
 python -m uvicorn industrial_rca.api:api_app --host 0.0.0.0 --port 8000
 ```
 > - **API Docs & OpenAPI Schema:** Open [http://localhost:8000/docs](http://localhost:8000/docs)
 > - **Health Endpoint:** Open [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
 
-### 2. Launch Modern React 19 Frontend
+#### B. Launch Modern React 19 Frontend
 ```bash
 cd frontend
 npm install
@@ -22,13 +31,10 @@ npm run dev
 ```
 > - **Web Application:** Open [http://localhost:5173](http://localhost:5173) (Vite Dev Server)
 
-### 3. Run Interactive Terminal CLI (Rich TUI)
+### 2. Run Interactive Terminal CLI (Rich TUI)
 ```bash
-# Using DeepSeek-V3
-python main.py --auto-approve --use-deepseek --deepseek-model deepseek-chat
-
-# Using DeepSeek-R1 (with Chain-of-Thought reasoning display)
-python main.py --auto-approve --use-deepseek --deepseek-model deepseek-reasoner
+# Autonomous investigation with DeepSeek V4.1 Flash
+python main.py --auto-approve --use-deepseek --deepseek-model deepseek-flash
 ```
 
 ### 4. Run Automated Test Suite
