@@ -1,7 +1,7 @@
 # Comprehensive Testing & Verification Plan for IndustrialRCA
 
 **Project:** Industrial Root Cause Analysis (RCA) System  
-**Feature:** Hardware-in-the-Loop (HIL) Ingestion Middleware (WECON VM VFD, HMI, Mosquitto, InfluxDB, Node-RED, FastAPI, LangGraph)  
+**Feature:** Hardware-in-the-Loop (HIL) Ingestion Middleware (WECON VM VFD, HMI, Mosquitto, InfluxDB, FastAPI, LangGraph, React Frontend)  
 **Target Branch:** `dev` ➔ `main` (PR #1)  
 **Status:** Pre-Merge Validation  
 
@@ -28,24 +28,18 @@ This plan outlines the end-to-end verification methodology to validate the entir
       │
       │ (RS-485 Port S+, S- / Modbus Slave ID 1, 9600 8-N-1)
       ▼
-[V-Box Edge Gateway]
+[V-Box Edge Gateway / Modbus Bridge]
       │ (MQTT JSON stream: factory/bench01/vfd/telemetry)
       ▼
 [Mosquitto MQTT Broker] (Port 1883)
-      │
-      ▼
-[Node-RED Orchestrator] (Port 1880)
       ├── (Continuous 1 Hz stream) ──> [InfluxDB 2.7] (Port 8086, Bucket: telemetry)
-      └── (Trip condition: Reg 700BH > 0)
-                  │
-                  ▼ (Fetches 60s pre-fault window from InfluxDB)
-      [HTTP POST to http://host.docker.internal:8000/api/v1/telemetry/incident]
+      └── (Trip condition: Reg 700BH > 0 / HTTP POST or direct MQTT subscription)
                   │
                   ▼
-      [IndustrialRCA FastAPI Endpoint: app.py]
+      [IndustrialRCA FastAPI Backend: industrial_rca/api.py] (Port 8000)
                   │
-                  ▼
-      [LangGraph Graph Engine: workflow.py]
+                  ├──> [LangGraph RCA Engine: workflow.py]
+                  └── (Live SSE Streaming) ──> [React 19 Frontend: frontend/] (Port 5173)
 ```
 
 ---
@@ -63,11 +57,10 @@ python -m pytest industrial_rca/tests -v
 - [ ] **`test_vfd_oem_spec`**: Validates WECON VM VFD register addresses (`3000H` through `700BH`, `2000H`, `2001H`) and setpoint thresholds.
 - [ ] **`test_vfd_fault_taxonomy`**: Confirms ISO 14224 codes and FMEA knowledge base mapping for `Err02`, `Err03`, `Err06`, and `Err11`.
 - [ ] **`test_topology_traversal_hil_bench`**: Confirms ISA-95 graph traversal from `MOTOR_M01` upstream to `VFD_VM_01` and `HMI_TOUCH_01`.
-- [ ] **`test_nodered_flow_json_structure`**: Validates `flows.json` format, MQTT input topic, and HTTP POST destination.
 - [ ] **`test_fastapi_incident_endpoint`**: Submits a sample incident to `/api/v1/telemetry/incident` using `TestClient` and asserts HTTP 200 and dataset registration in `TelemetryStore`.
 - [ ] **`test_fastapi_health_endpoint`**: Verifies `/api/v1/telemetry/health` returns status `ONLINE`.
 - [ ] **Core RCA Tests (13 tests)**: Verifies statistical profiler, sliding change-point detector, 20 kHz FFT spectral analyzer, and LangGraph pipeline approval/rejection paths.
-- **Expected Outcome:** `19 passed, 0 failed`.
+- **Expected Outcome:** Pytest suite passes cleanly.
 
 ---
 
@@ -77,10 +70,10 @@ Verify that the local Docker containers spin up with correct ports, volumes, and
 
 ### Step 2.1: Spin up Middleware
 ```powershell
-# Launch Mosquitto, InfluxDB, and Node-RED
+# Launch Mosquitto and InfluxDB
 docker compose -f docker-compose.infra.yml up -d
 
-# Verify all 3 containers are healthy and running
+# Verify containers are healthy and running
 docker compose -f docker-compose.infra.yml ps
 ```
 
@@ -89,14 +82,8 @@ docker compose -f docker-compose.infra.yml ps
 | :--- | :--- | :--- | :--- |
 | **Mosquitto MQTT** | `1883` | `Test-NetConnection -ComputerName localhost -Port 1883` | `TcpTestSucceeded: True` |
 | **InfluxDB 2.7** | `8086` | [http://localhost:8086/health](http://localhost:8086/health) | `{"status":"pass"}` |
-| **Node-RED UI** | `1880` | [http://localhost:1880](http://localhost:1880) | Node-RED flow editor loads |
-| **FastAPI REST** | `8000` | [http://localhost:8000/api/v1/telemetry/health](http://localhost:8000/api/v1/telemetry/health) | `{"status":"ONLINE"}` |
-| **Streamlit UI** | `8501` | [http://localhost:8501](http://localhost:8501) | Control room dashboard loads |
-
-### Step 2.3: Verify Node-RED Flow Deployment
-1. Open `http://localhost:1880` in your browser.
-2. If the flow is not already visible, click **Menu (top-right) ➔ Import ➔ Select `infra/nodered/flows.json` ➔ Deploy**.
-3. Confirm that the MQTT node shows a green status indicator: **`connected`**.
+| **FastAPI REST/SSE** | `8000` | [http://localhost:8000/api/v1/telemetry/health](http://localhost:8000/api/v1/telemetry/health) | `{"status":"ONLINE"}` |
+| **React Frontend** | `5173` | [http://localhost:5173](http://localhost:5173) | Modern Reliability Dashboard loads |
 
 ---
 
@@ -104,11 +91,14 @@ docker compose -f docker-compose.infra.yml ps
 
 Before connecting physical machinery, simulate the exact MQTT telemetry stream from your PC to verify the entire software data flow.
 
-### Step 3.1: Start the Dashboard & REST Daemon
+### Step 3.1: Start the Backend & Frontend
 ```powershell
-streamlit run app.py
+# Terminal 1: FastAPI Backend
+python -m uvicorn industrial_rca.api:api_app --host 0.0.0.0 --port 8000
+
+# Terminal 2: React Vite Frontend
+cd frontend ; npm run dev
 ```
-*(Leave this running in Terminal 1. The FastAPI daemon will start on port 8000 automatically).*
 
 ### Step 3.2: Run Simulated InfluxDB Write & Incident Dispatch
 Open Terminal 2 and run this PowerShell simulation to post a direct incident:
@@ -214,12 +204,11 @@ Prove that commanding rapid deceleration without a braking resistor causes regen
    - The motor coasts down to standstill.
 
 #### Telemetry & RCA Pipeline Verification:
-- [ ] V-Box publishes payload with `fault_code: 6` and `v_dc > 700.0`.
-- [ ] Node-RED switch node catches `fault_code > 0`.
-- [ ] Node-RED queries preceding 60 seconds from InfluxDB bucket `telemetry`.
-- [ ] Node-RED POSTs payload to `http://host.docker.internal:8000/api/v1/telemetry/incident`.
+- [ ] V-Box / Bridge publishes payload with `fault_code: 6` and `v_dc > 700.0`.
+- [ ] Edge bridge captures `fault_code > 0` and queries preceding 60 seconds.
+- [ ] Edge bridge POSTs payload to `http://localhost:8000/api/v1/telemetry/incident` or MQTT broker.
 - [ ] IndustrialRCA returns HTTP 200 `INCIDENT_INGESTED`.
-- [ ] Streamlit UI displays **`🚨 LIVE HIL TRIP DETECTED`** banner with asset `VFD_VM_01` and code `6`.
+- [ ] React UI displays **`🚨 HARDWARE FAULT AUTOMATICALLY CAPTURED FROM EDGE BENCH`** banner with asset `VFD_VM_01` and code `6`.
 
 #### Reset Procedure:
 1. Tap **FAULT RESET** on HMI (writes `7` to register `2000H`).
@@ -243,9 +232,9 @@ Prove that lowering the electronic thermal overload parameter `F2.03` below actu
    - The drive shuts down motor output.
 
 #### Telemetry & RCA Pipeline Verification:
-- [ ] V-Box publishes `fault_code: 11` with elevated `current`.
-- [ ] Node-RED captures trip and POSTs 60-second telemetry context to IndustrialRCA.
-- [ ] Streamlit UI updates with **`🚨 LIVE HIL TRIP DETECTED: Code 11 (Err11)`**.
+- [ ] V-Box / Bridge publishes `fault_code: 11` with elevated `current`.
+- [ ] Edge bridge captures trip and POSTs 60-second telemetry context to IndustrialRCA.
+- [ ] React UI updates with incident banner for Code 11 (`Err11`).
 
 #### Reset Procedure:
 1. Restore **`F2.03`** to the true motor nameplate FLA (e.g., `1.15A`).
@@ -283,7 +272,7 @@ Verify the automated analytical deliverables produced by the system.
 | Checkpoint | Acceptance Condition | Result |
 | :--- | :--- | :---: |
 | **Pytest Suite** | 19/19 tests pass without errors or regression | `PASS` |
-| **Edge Infrastructure** | Mosquitto (1883), InfluxDB (8086), Node-RED (1880) all online | `PASS` |
+| **Edge Infrastructure** | Mosquitto (1883) and InfluxDB (8086) online | `PASS` |
 | **FastAPI REST Endpoint** | `POST /api/v1/telemetry/incident` responds with HTTP 200 in $<200\text{ ms}$ | `PASS` |
 | **Simulated Injection** | Pre-fault buffer registered and displayed on UI without hardware | `PASS` |
 | **Physical HMI Control** | Touch screen slider changes motor speed from 0 to 50 Hz via Modbus `2001H` | `READY FOR BENCH` |
@@ -295,5 +284,5 @@ Verify the automated analytical deliverables produced by the system.
 
 ## 🚀 Pre-Merge Approval Recommendation
 
-1. **Automated & Ingestion layers:** **READY TO MERGE**. All software components, edge Docker configurations, Node-RED flows, and API endpoints are tested and passing.
+1. **Automated & Ingestion layers:** **READY TO MERGE**. All software components, edge Docker configurations, and API endpoints are tested and passing.
 2. **Physical Bench Execution:** Can be executed on the physical bench following **Phase 4 & Phase 5** instructions above at any time.

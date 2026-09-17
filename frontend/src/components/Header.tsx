@@ -4,14 +4,12 @@ import {
   RotateCcw,
   Server,
   Bot,
-  AlertOctagon,
 } from 'lucide-react';
 import { Scenario, LatestIncident } from '../types';
 
 interface HeaderProps {
   scenarios: Scenario[];
   activeScenarioId: string;
-  onSelectScenario: (scenarioId: string) => void;
   apiOnline: boolean;
   latestIncident: LatestIncident | null;
   onResetPipeline: () => void;
@@ -25,7 +23,6 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   scenarios,
   activeScenarioId,
-  onSelectScenario,
   apiOnline,
   latestIncident,
   onResetPipeline,

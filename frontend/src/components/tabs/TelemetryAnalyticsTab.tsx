@@ -1,7 +1,7 @@
 import React, { useMemo, useCallback } from 'react';
 import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
-import { Radio, Waves, Zap, Gauge, Activity, Cpu, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Waves } from 'lucide-react';
 import { TelemetryData, SpectrumData } from '../../types';
 import { useLiveTelemetry } from '../../hooks/useLiveTelemetry';
 import { TelemetryMetricsCards } from '../telemetry/TelemetryMetricsCards';

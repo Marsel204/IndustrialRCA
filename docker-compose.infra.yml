@@ -27,19 +27,6 @@ services:
     volumes:
       - influxdb_data:/var/lib/influxdb2
 
-  nodered:
-    image: nodered/node-red:latest
-    container_name: rca_nodered
-    restart: unless-stopped
-    ports:
-      - "1880:1880"
-    volumes:
-      - nodered_data:/data
-    depends_on:
-      - mosquitto
-      - influxdb
-
 volumes:
   mosquitto_data:
   influxdb_data:
-  nodered_data:

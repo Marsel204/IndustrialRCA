@@ -419,7 +419,6 @@ export function App() {
       <Header
         scenarios={scenarios}
         activeScenarioId={activeScenarioId}
-        onSelectScenario={(sId) => setActiveScenarioId(sId)}
         apiOnline={apiOnline}
         latestIncident={latestIncident}
         onResetPipeline={handleResetPipeline}

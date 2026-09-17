@@ -6,18 +6,21 @@ Production-grade industrial RCA system built with **Python 3.11+**, **LangGraph*
 
 ## ⚡ Quickstart
 
-### 1. Launch Interactive Web GUI & REST API Daemon
+### 1. Launch FastAPI Backend Server
 ```bash
-streamlit run app.py
+# Start standalone FastAPI REST/SSE backend on port 8000
+python -m uvicorn industrial_rca.api:api_app --host 0.0.0.0 --port 8000
 ```
-> - **Web GUI Dashboard:** Open [http://localhost:8501](http://localhost:8501)
-> - **HIL Ingestion API (FastAPI):** Open [http://localhost:8000/docs](http://localhost:8000/docs)
-*(The FastAPI server automatically runs in a background thread on port 8000 when starting Streamlit).*
+> - **API Docs & OpenAPI Schema:** Open [http://localhost:8000/docs](http://localhost:8000/docs)
+> - **Health Endpoint:** Open [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
 
-### 2. Standalone Ingestion API Execution (Optional)
+### 2. Launch Modern React 19 Frontend
 ```bash
-uvicorn app:api_app --host 0.0.0.0 --port 8000
+cd frontend
+npm install
+npm run dev
 ```
+> - **Web Application:** Open [http://localhost:5173](http://localhost:5173) (Vite Dev Server)
 
 ### 3. Run Interactive Terminal CLI (Rich TUI)
 ```bash
@@ -49,35 +52,30 @@ This platform supports real physical industrial hardware (HMI touch screen, WECO
       │
       │ (RS-485 Port S+, S- / Modbus Slave ID 1, 9600 8-N-1)
       ▼
-[V-Box Edge Gateway]
+[V-Box Edge Gateway / Modbus Bridge]
       │ (MQTT JSON stream: factory/bench01/vfd/telemetry)
       ▼
 [Mosquitto MQTT Broker] (Port 1883)
-      │
-      ▼
-[Node-RED Orchestrator] (Port 1880)
       ├── (Continuous 1 Hz stream) ──> [InfluxDB 2.7] (Port 8086, Bucket: telemetry)
-      └── (Trip condition: Reg 700BH > 0)
-                  │
-                  ▼ (Fetches 60s pre-fault window from InfluxDB)
-      [HTTP POST to http://host.docker.internal:8000/api/v1/telemetry/incident]
+      └── (Trip condition: Reg 700BH > 0 / HTTP POST or direct MQTT subscription)
                   │
                   ▼
-      [IndustrialRCA FastAPI Endpoint: app.py]
+      [IndustrialRCA FastAPI Backend: industrial_rca/api.py] (Port 8000)
                   │
-                  ▼
-      [LangGraph Graph Engine: workflow.py]
-        ├── telemetry_analytics.py (Voltage spikes, decel trends)
-        ├── topology_tracer.py (Asset linking via asset_topology.json)
-        ├── oem_manuals.py (WECON VM Err codes: Err02, Err03, Err06, Err11)
-        └── deepseek_client.py (Root cause deduction & remediation)
+                  ├──> [LangGraph RCA Engine: workflow.py]
+                  │      ├── telemetry_analytics.py (Voltage spikes, decel trends)
+                  │      ├── topology_tracer.py (Asset linking via asset_topology.json)
+                  │      ├── oem_manuals.py (WECON VM Err codes: Err02, Err03, Err06, Err11)
+                  │      └── deepseek_client.py (Root cause deduction & remediation)
+                  │
+                  └── (Live SSE Streaming) ──> [React 19 Frontend: frontend/] (Port 5173)
 ```
 
 ---
 
 ### 2. Edge Transport Middleware Deployment (`docker-compose.infra.yml`)
 
-The infrastructure stack runs Eclipse Mosquitto, InfluxDB 2.7, and Node-RED in Docker:
+The infrastructure stack runs Eclipse Mosquitto and InfluxDB 2.7 in Docker:
 
 ```bash
 # Start edge transport middleware
@@ -89,12 +87,6 @@ docker compose -f docker-compose.infra.yml ps
 
 - **Mosquitto MQTT Broker:** `mqtt://<HOST_IP>:1883` (Anonymous access enabled)
 - **InfluxDB 2.7:** `http://<HOST_IP>:8086` (Org: `factory`, Bucket: `telemetry`, Token: `rca_super_secret_token_123`)
-- **Node-RED Web Flow Editor:** `http://<HOST_IP>:1880`
-
-To import the pre-configured ingestion pipeline into Node-RED:
-1. Open `http://localhost:1880`.
-2. Click the hamburger menu $\to$ **Import** $\to$ select [`infra/nodered/flows.json`](file:///c:/HMI/RCA/infra/nodered/flows.json).
-3. Click **Deploy**.
 
 ---
 
@@ -173,9 +165,9 @@ In the V-Box / HMI cloud configurator:
 
 ---
 
-### 7. Incident Reporting Destination (Node-RED ➔ IndustrialRCA)
+### 7. Incident Reporting Destination (Edge Gateway ➔ IndustrialRCA)
 
-When a trip is detected (`fault_code > 0`), Node-RED pulls the 60-second pre-fault buffer from InfluxDB and sends an HTTP POST:
+When a trip is detected (`fault_code > 0`), the Edge Gateway / ingestion bridge posts the incident payload directly to FastAPI:
 
 - **Target URL (from Docker):** `http://host.docker.internal:8000/api/v1/telemetry/incident`
 - **Target URL (from external LAN):** `http://<HOST_IP>:8000/api/v1/telemetry/incident`
@@ -220,7 +212,7 @@ When a trip is detected (`fault_code > 0`), Node-RED pulls the 60-second pre-fau
 2. On the HMI screen, set target frequency to **`45.00 Hz`** and tap **START**.
 3. Once running at steady speed, drag the frequency slider to **`0.00 Hz`** or tap **STOP**.
 4. The motor regenerates kinetic energy into the DC bus; DC voltage (`3004H`) surges past $700\text{ V DC}$ and trips **`Err06`** (`fault_code = 6`).
-5. V-Box publishes `fault_code: 6` $\to$ Node-RED catches the trip $\to$ queries 60s buffer $\to$ POSTs incident to IndustrialRCA.
+5. V-Box / Bridge captures the trip condition $\to$ POSTs incident to IndustrialRCA or publishes to MQTT broker.
 
 #### 2. Motor Thermal Overload (`Err11`)
 1. On the VFD keypad, set parameter **`F2.03 = 0.3`** (lowered below idle motor current, e.g. 0.3A).

@@ -3,13 +3,10 @@ Unit & Integration Tests for Hardware-in-the-Loop (HIL) Ingestion Architecture.
 Validates:
 - WECON VM VFD specifications and fault taxonomy lookup
 - ISA-95 asset topology traversal with HMI, VFD, and motor nodes
-- Node-RED flow configuration structure
 - FastAPI REST incident ingestion endpoint (/api/v1/telemetry/incident)
 """
 
-import json
 import pytest
-from pathlib import Path
 from starlette.testclient import TestClient
 
 from industrial_rca.data.oem_manuals import (
@@ -20,7 +17,7 @@ from industrial_rca.data.oem_manuals import (
 )
 from industrial_rca.tools.topology_tracer import AssetTopologyTracer
 from industrial_rca.data.telemetry_generator import TelemetryStore
-from industrial_rca.hil_api import api_app
+from industrial_rca.api import api_app
 
 
 def test_vfd_oem_spec():
@@ -77,29 +74,6 @@ def test_topology_traversal_hil_bench():
     upstream_ids = [u["asset_id"] for u in upstream]
     assert "VFD_VM_01" in upstream_ids
     assert "HMI_TOUCH_01" in upstream_ids
-
-
-def test_nodered_flow_json_structure():
-    """Verify flows.json parses cleanly and contains critical pipeline nodes."""
-    flow_path = Path(__file__).resolve().parent.parent.parent / "infra" / "nodered" / "flows.json"
-    assert flow_path.exists(), "flows.json not found"
-
-    with open(flow_path, "r", encoding="utf-8") as f:
-        nodes = json.load(f)
-
-    types = [n.get("type") for n in nodes]
-    assert "mqtt in" in types
-    assert "http request" in types
-    assert "switch" in types
-
-    # Check MQTT topic
-    mqtt_node = next(n for n in nodes if n.get("type") == "mqtt in")
-    assert mqtt_node["topic"] == "factory/bench01/vfd/telemetry"
-
-    # Check API destination URL
-    http_nodes = [n for n in nodes if n.get("type") == "http request"]
-    api_post_node = next((n for n in http_nodes if "api/v1/telemetry/incident" in n.get("url", "")), None)
-    assert api_post_node is not None
 
 
 def test_fastapi_incident_endpoint():
