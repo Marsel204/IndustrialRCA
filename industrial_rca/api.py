@@ -196,6 +196,10 @@ class CopilotChatRequest(BaseModel):
     model: Optional[str] = Field(default="deepseek-flash", description="Model to use")
 
 
+class SimulationToggleRequest(BaseModel):
+    enabled: bool = Field(default=False, description="Enable or disable simulated telemetry fallback")
+
+
 # ── Health & Diagnostics ──────────────────────────────────────────────
 
 @api_app.get("/api/v1/health")
@@ -204,7 +208,10 @@ def get_health():
     cache_stats = GLOBAL_TELEMETRY_CACHE.get_stats()
     mqtt_online = influx_tool.is_mqtt_active()
     latest_tsdb = GLOBAL_TSDB.get_latest("VFD_VM_01")
-    is_real = bool(latest_tsdb and (time.time() - latest_tsdb.get("timestamp", 0) < 60))
+    is_real = bool(latest_tsdb and (time.time() - latest_tsdb.get("timestamp", 0) < 30))
+    sim_enabled = influx_tool.is_simulation_enabled()
+    telemetry_connected = is_real or sim_enabled
+
     return {
         "status": "ONLINE",
         "service": "Industrial RCA Unified Backend API",
@@ -215,8 +222,27 @@ def get_health():
         "latest_hil_incident": LATEST_HIL_INCIDENT.get("incident_data"),
         "hil_status": LATEST_HIL_INCIDENT.get("pipeline_status"),
         "mqtt_connected": mqtt_online,
-        "is_simulated": not is_real,
-        "telemetry_source": "hardware" if is_real else "fallback_simulation",
+        "telemetry_connected": telemetry_connected,
+        "is_simulated": sim_enabled,
+        "simulation_enabled": sim_enabled,
+        "telemetry_source": "hardware" if is_real else ("simulation" if sim_enabled else "disconnected"),
+    }
+
+
+@api_app.get("/api/v1/telemetry/simulation")
+def get_telemetry_simulation_mode():
+    """Returns whether simulated telemetry fallback is currently enabled by user."""
+    return {"simulation_enabled": influx_tool.is_simulation_enabled()}
+
+
+@api_app.post("/api/v1/telemetry/simulation")
+def set_telemetry_simulation_mode(request: SimulationToggleRequest):
+    """Explicitly enables or disables fallback simulated telemetry upon hardware disconnection."""
+    influx_tool.set_simulation_mode(request.enabled)
+    logger.info(f"Telemetry simulation mode updated: enabled={request.enabled}")
+    return {
+        "simulation_enabled": influx_tool.is_simulation_enabled(),
+        "status": "SIMULATION_ENABLED" if request.enabled else "SIMULATION_DISABLED",
     }
 
 
@@ -1129,6 +1155,12 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
     to the DeepSeek AI Copilot.
     """
     latest_tel = GLOBAL_TSDB.get_latest("VFD_VM_01") or {}
+    now = time.time()
+    pkt_time = latest_tel.get("timestamp", 0)
+    has_fresh_packet = bool(latest_tel and (now - pkt_time < 30))
+    is_sim = influx_tool.is_simulation_enabled()
+    mqtt_active = influx_tool.is_mqtt_active()
+    is_telemetry_live = has_fresh_packet or is_sim
 
     def _val(k: str, default: float = 0.0) -> float:
         v = latest_tel.get(k)
@@ -1181,32 +1213,71 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
         "- Equipment Name: Wecon VM Series Inverter (VFD) & 3-Phase Induction Motor Test Bench",
         "- Controller / HMI: Wecon PLC LX3V and HMI Touch Panel (192.168.1.104) via Modbus RTU / MQTT",
         "",
-        "=== REAL-TIME TELEMETRY SNAPSHOT (1 Hz Modbus Stream) ===",
-        f"- Operating Status: {status}",
-        f"- Active Trip Code: {fault_str}",
-        f"- Output Frequency: {f_out:.2f} Hz",
-        f"- Frequency Target / Setpoint: {f_target:.2f} Hz",
-        f"- DC Bus Voltage: {v_dc:.1f} V (Calibrated: 0.0 V unpowered, ~182 V nominal idle link, 195.0 V trip limit)",
-        f"- Motor Output Current: {current:.2f} A (Nominal FLA: 1.15 A, Trip Limit: 2.50 A)",
-        f"- Rotor Speed: {rpm:.1f} RPM (Synchronous: 1450 RPM)",
-        "",
-        "=== PHYSICAL BENCH SETUP & MOTOR STATE ===",
     ]
 
-    if is_motor_disconnected:
+    if not is_telemetry_live:
         prompt_lines.extend([
-            "- **MOTOR CONNECTION / SHAFT STATUS:** Current is 0.00 A and RPM is 0.0 RPM.",
-            "  * The physical 3-phase induction motor is currently DISCONNECTED (or uncoupled) from the VFD output terminals (U/V/W), OR the drive is completely stopped/tripped.",
-            "  * With no motor connected to the inverter output, there is NO stator winding load, so phase current is strictly 0.00 A and rotor speed is strictly 0.0 RPM.",
-            "  * CRITICAL: NEVER claim or hallucinate that current is 1.15 A or that the motor is spinning at 1199 RPM! Always confirm that 0.00 A and 0 RPM correctly reflects the disconnected/idle motor.",
-            "  * Even without a motor connected, the VFD can still energize its DC link, execute frequency modulation, and trip on overvoltage (Err06) or control faults if setpoint / DC bus limits are exceeded.",
+            "=== ⚠️ CRITICAL TELEMETRY STATUS: DISCONNECTED / OFFLINE ⚠️ ===",
+            "- Connection State: DISCONNECTED (OFFLINE)",
+            f"- MQTT Broker: {'PORT 1883 OPEN (No data packets received in >30s)' if mqtt_active else 'PORT 1883 CLOSED / INACTIVE'}",
+            "- Live Modbus RTU Telemetry: NONE received in >30 seconds.",
+            "- Simulation Mode: DISABLED by user (Offline).",
+            "- Current Sensor Values: 0.00 Hz, 0.0 V, 0.00 A, 0 RPM (All Channels Inactive / Disconnected)",
+            "",
+            "*** MANDATORY DIRECTIVES FOR DEEPSEEK COPILOT ***",
+            "1. THE LIVE TELEMETRY STREAM IS CURRENTLY DISCONNECTED AND OFFLINE.",
+            "2. When the user asks about the motor, VFD, operating status, frequency, current, RPM, or general questions ('what is the motor speed?', 'is it running?', 'is everything ok?'):",
+            "   - YOU MUST IMMEDIATELY AND PROMINENTLY INFORM THE USER THAT TELEMETRY IS CURRENTLY DISCONNECTED / OFF.",
+            "   - Clarify that no live Modbus packets are being received from the MQTT broker (port 1883) or Modbus gateway.",
+            "   - Explain that sensor readings are 0.0 because the telemetry stream is inactive, NOT because the physical motor is running or in a specific verified operational state.",
+            "   - Guide the user that they can either:",
+            "     a) Start the hardware telemetry bridge (e.g. `scripts/modbus_rtu_bridge.py`), or",
+            "     b) Click the '[Enable Simulation]' button in the top navigation bar to test with simulated telemetry.",
+            "3. DO NOT hallucinate that the motor is running, DO NOT fabricate fake frequency or voltage numbers, and DO NOT claim the motor is physically disconnected from terminals when the telemetry data link itself is offline.",
+            "",
+        ])
+    elif is_sim:
+        prompt_lines.extend([
+            "=== 🧪 TELEMETRY CONNECTION STATUS: SIMULATION ACTIVE 🧪 ===",
+            "- Connection State: SYNTHETIC SIMULATION (Explicitly enabled by user)",
+            "- Operating Status: RUNNING (Simulated)",
+            f"- Output Frequency: {f_out:.2f} Hz (Simulated)",
+            f"- Frequency Target: {f_target:.2f} Hz",
+            f"- DC Bus Voltage: {v_dc:.1f} V (Simulated)",
+            f"- Motor Output Current: {current:.2f} A (Simulated)",
+            f"- Rotor Speed: {rpm:.1f} RPM (Simulated)",
+            "",
+            "*** NOTE FOR COPILOT ***",
+            "- Telemetry is currently in SIMULATION MODE (user-requested synthetic data feed). Remind the user when discussing readings that these values are synthetic test data, not physical hardware telemetry.",
+            "",
         ])
     else:
         prompt_lines.extend([
-            f"- **MOTOR CONNECTION / SHAFT STATUS:** Motor is connected and drawing {current:.2f} A at {rpm:.1f} RPM.",
+            "=== ✅ TELEMETRY CONNECTION STATUS: LIVE RIG STREAMING (MQTT 1883) ===",
+            "- Connection State: LIVE HARDWARE CONNECTED (1 Hz Modbus RTU over MQTT)",
+            f"- Operating Status: {status}",
+            f"- Active Trip Code: {fault_str}",
+            f"- Output Frequency: {f_out:.2f} Hz",
+            f"- Frequency Target / Setpoint: {f_target:.2f} Hz",
+            f"- DC Bus Voltage: {v_dc:.1f} V (Calibrated: 0.0 V unpowered, ~182 V nominal idle link, 195.0 V trip limit)",
+            f"- Motor Output Current: {current:.2f} A (Nominal FLA: 1.15 A, Trip Limit: 2.50 A)",
+            f"- Rotor Speed: {rpm:.1f} RPM (Synchronous: 1450 RPM)",
+            "",
+            "=== PHYSICAL BENCH SETUP & MOTOR STATE ===",
         ])
+        if is_motor_disconnected:
+            prompt_lines.extend([
+                "- **MOTOR CONNECTION / SHAFT STATUS:** Current is 0.00 A and RPM is 0.0 RPM.",
+                "  * The physical 3-phase induction motor is currently uncoupled or disconnected from the VFD output terminals (U/V/W), OR the drive is stopped.",
+                "  * With no motor connected, phase current is strictly 0.00 A and rotor speed is strictly 0.0 RPM.",
+                "  * CRITICAL: NEVER claim or hallucinate that current is 1.15 A or that the motor is spinning at 1199 RPM! Always confirm that 0.00 A and 0 RPM correctly reflects the disconnected/idle motor.",
+            ])
+        else:
+            prompt_lines.extend([
+                f"- **MOTOR CONNECTION / SHAFT STATUS:** Motor is connected and drawing {current:.2f} A at {rpm:.1f} RPM.",
+            ])
+        prompt_lines.append("")
 
-    prompt_lines.append("")
     prompt_lines.append("=== INVESTIGATION & DIAGNOSTIC STATE ===")
 
     if has_inc or active_fc > 0 or winning_hyp:
@@ -1227,9 +1298,9 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
                 prompt_lines.append(f"  * {act}")
     else:
         prompt_lines.extend([
-            "- Incident Active: NO (Equipment is in healthy, nominal monitoring state)",
-            "- System Health: All operational parameters are strictly within ISA-95 envelopes.",
-            "- Continuous safety monitoring is active. Listening for trip triggers over MQTT 1883.",
+            f"- Incident Active: NO ({'Equipment is in healthy monitoring state' if is_telemetry_live else 'Awaiting telemetry connection'})",
+            f"- System Health: {'Operational parameters within ISA-95 envelopes.' if is_telemetry_live else 'Telemetry offline.'}",
+            "- Continuous safety monitoring: Listening for trip triggers over MQTT 1883.",
         ])
 
     prompt_lines.extend([
@@ -1246,8 +1317,10 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
         "",
         "=== INSTRUCTIONS FOR YOUR RESPONSES ===",
         "- You are the engineer's copilot for THIS specific test bench (VFD_VM_01).",
-        "- When the user asks general, status, or greeting questions ('is everything okay?', 'does the device run well?', 'status?', 'what happened?'), ALWAYS reference the actual equipment (Wecon VM Series VFD_VM_01) and quote its real-time telemetry values (frequency, DC bus voltage, current, fault code).",
-        "- NEVER say 'I don't have access to your hardware or sensors', 'what device are you using?', or treat this as a generic chat. You DO have real-time access through the telemetry pipeline shown above.",
+        "- When the user asks general, status, or greeting questions ('is everything okay?', 'does the device run well?', 'status?', 'what happened?'):",
+        "  * If telemetry is DISCONNECTED: Immediately state that telemetry is offline and no live packets are arriving from MQTT/Modbus.",
+        "  * If telemetry is CONNECTED or SIMULATED: Reference the actual equipment (Wecon VM Series VFD_VM_01) and quote its telemetry values (frequency, DC bus voltage, current, fault code).",
+        "- NEVER say 'I don't have access to your hardware or sensors', 'what device are you using?', or treat this as a generic chat. You have direct system integration with the telemetry pipeline above.",
         "- Maintain a helpful, technical, concise, and professional engineering tone.",
     ])
 

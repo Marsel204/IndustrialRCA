@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Bot,
   RotateCcw,
+  Activity,
 } from 'lucide-react';
 import { RCAState, ChatMessage, ToolExecutionItem, LatestIncident, LiveMetric } from '../../types';
 import { streamCopilotChat, fetchLiveMetrics, subscribeLiveTelemetryStream } from '../../api';
@@ -610,10 +611,16 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     prevThreadIdRef.current = rcaState?.thread_id;
   }, [rcaState?.thread_id]);
 
-  const currentF = liveMetric ? liveMetric.f_out.toFixed(2) : '10.00';
-  const currentVdc = liveMetric ? liveMetric.v_dc.toFixed(1) : '51.0';
-  const currentA = liveMetric ? liveMetric.current.toFixed(2) : '0.00';
-  const currentRpm = liveMetric ? liveMetric.rpm.toFixed(0) : '0';
+  const isTelemetryConnected = Boolean(
+    liveMetric &&
+    liveMetric.telemetry_connected !== false &&
+    liveMetric.status !== 'OFFLINE'
+  );
+
+  const currentF = liveMetric && isTelemetryConnected ? liveMetric.f_out.toFixed(2) : '0.00';
+  const currentVdc = liveMetric && isTelemetryConnected ? liveMetric.v_dc.toFixed(1) : '0.0';
+  const currentA = liveMetric && isTelemetryConnected ? liveMetric.current.toFixed(2) : '0.00';
+  const currentRpm = liveMetric && isTelemetryConnected ? liveMetric.rpm.toFixed(0) : '0';
 
   const defaultThinking = isIncidentActive
     ? (faultCode === 2
@@ -627,11 +634,16 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           "3. Trip setpoint evaluated: DC bus limit at 195.0 V DC (reaches ~207V at 50 Hz), current limit at 2.50 A.\n" +
           "4. Evaluated failure hypotheses: H_VFD_ERR06 (Overfrequency > 40 Hz) and H_VFD_ERR02 (Forced Decel Stop).\n" +
           "5. OEM corrective action: Install dynamic braking resistor on terminals P+/PB and tune parameter F0.18.")
-    : `1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n` +
-      `2. Operating envelope: ${currentF} Hz nominal, ${currentVdc} V DC bus nominal, ${currentA} A current, ${currentRpm} RPM.\n` +
-      `3. Continuous safety verification: DC bus (${currentVdc} V < 195.0 V ceiling), current (${currentA} A < 2.50 A trip).\n` +
-      `4. All health diagnostics green. Zero hardware trip codes active.\n` +
-      `5. System operating nominal edge monitoring. Ready for hardware trip triggers.`;
+    : (isTelemetryConnected
+        ? `1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n` +
+          `2. Operating envelope: ${currentF} Hz nominal, ${currentVdc} V DC bus nominal, ${currentA} A current, ${currentRpm} RPM.\n` +
+          `3. Continuous safety verification: DC bus (${currentVdc} V < 195.0 V ceiling), current (${currentA} A < 2.50 A trip).\n` +
+          `4. All health diagnostics green. Zero hardware trip codes active.\n` +
+          `5. System operating nominal edge monitoring. Ready for hardware trip triggers.`
+        : "1. Telemetry Link Status: DISCONNECTED / OFFLINE (Port 1883 / Modbus RTU).\n" +
+          "2. Ingestion Status: No active telemetry packets received from Wecon VFD bench.\n" +
+          "3. Sensor Monitoring: Channel readings are 0.0 (Data feed offline).\n" +
+          "4. Action Required: Start physical Modbus bridge or click 'Enable Simulation' in the header to simulate test data.");
 
   const isPaused = rcaState?.is_paused_at_hitl || false;
   const isFinalized = rcaState?.pipeline_status === 'COMPLETED';
@@ -652,7 +664,9 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
       (faultCode === 2
         ? 'Operator actuated PLC On/Off stop button via PLC D-variable register, cutting the run command instantaneously without a controlled deceleration ramp routine (F0.18 too steep and braking resistor absent), inducing a 3.85 A kinetic back-EMF overcurrent surge that tripped the drive on Err02.'
         : 'Output frequency setpoint was ramped past the 40.00 Hz operational ceiling toward 50.00 Hz, causing DC bus voltage to escalate to 202.5 V (breaching the calibrated 195.0 V trip limit) because Wecon VM parameter F0.10 was unclamped and dynamic braking resistor terminals P+/PB were unpopulated.')
-    : `Continuous real-time telemetry from Wecon VM VFD (VFD_VM_01) is nominal. Output frequency (${currentF} Hz), DC bus voltage (${currentVdc} V), and motor current (${currentA} A) remain within calibrated ISA-95 envelopes. Listening for hardware trip trigger over MQTT / PLC D-variable.`;
+    : (isTelemetryConnected
+        ? `Continuous real-time telemetry from Wecon VM VFD (VFD_VM_01) is nominal. Output frequency (${currentF} Hz), DC bus voltage (${currentVdc} V), and motor current (${currentA} A) remain within calibrated ISA-95 envelopes. Listening for hardware trip trigger over MQTT / PLC D-variable.`
+        : 'Live telemetry stream from Wecon VM VFD (VFD_VM_01) is currently DISCONNECTED. No live sensor packets received from MQTT broker (port 1883). Connect physical hardware bridge or click "Enable Simulation" in the navigation bar.');
 
   return (
     <div className="flex flex-col h-full bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden text-slate-800 font-sans">
@@ -954,22 +968,40 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                   </button>
                 </div>
               ) : (
-                <div className="p-3 bg-emerald-50/40 border border-emerald-200/80 rounded-lg flex items-center justify-between gap-3 shadow-2xs">
+                <div className={`p-3 rounded-lg flex items-center justify-between gap-3 shadow-2xs ${
+                  isTelemetryConnected
+                    ? 'bg-emerald-50/40 border border-emerald-200/80'
+                    : 'bg-slate-50 border border-slate-200'
+                }`}>
                   <div className="flex items-center space-x-2.5 min-w-0">
-                    <div className="w-8 h-8 rounded-md bg-emerald-100/70 border border-emerald-200 flex items-center justify-center text-emerald-700 flex-shrink-0">
-                      <CheckCircle2 className="w-4 h-4" />
+                    <div className={`w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 ${
+                      isTelemetryConnected
+                        ? 'bg-emerald-100/70 border border-emerald-200 text-emerald-700'
+                        : 'bg-slate-200 border border-slate-300 text-slate-600'
+                    }`}>
+                      {isTelemetryConnected ? <CheckCircle2 className="w-4 h-4" /> : <Activity className="w-4 h-4" />}
                     </div>
                     <div className="min-w-0">
-                      <div className="text-xs font-mono font-bold text-emerald-900 truncate">
-                        System Nominal · Zero Active Incidents
+                      <div className={`text-xs font-mono font-bold truncate ${
+                        isTelemetryConnected ? 'text-emerald-900' : 'text-slate-800'
+                      }`}>
+                        {isTelemetryConnected ? 'System Nominal · Zero Active Incidents' : 'Telemetry Link Disconnected'}
                       </div>
-                      <div className="text-[11px] text-emerald-700/80 font-sans truncate">
-                        All telemetry channels within calibrated operational envelopes · RCA standby
+                      <div className={`text-[11px] font-sans truncate ${
+                        isTelemetryConnected ? 'text-emerald-700/80' : 'text-slate-500'
+                      }`}>
+                        {isTelemetryConnected
+                          ? 'All telemetry channels within calibrated operational envelopes · RCA standby'
+                          : 'Awaiting 1 Hz telemetry from MQTT broker (port 1883) or user-enabled simulation'}
                       </div>
                     </div>
                   </div>
-                  <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-[10px] font-mono font-bold rounded-md border border-emerald-200">
-                    Nominal
+                  <span className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded-md border ${
+                    isTelemetryConnected
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                      : 'bg-slate-200 text-slate-700 border-slate-300'
+                  }`}>
+                    {isTelemetryConnected ? 'Nominal' : 'Offline'}
                   </span>
                 </div>
               )}

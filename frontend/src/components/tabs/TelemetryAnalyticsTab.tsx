@@ -11,6 +11,7 @@ interface TelemetryAnalyticsTabProps {
   telemetry: TelemetryData | null;
   spectrum: SpectrumData | null;
   activeScenarioId?: string;
+  onToggleSimulation?: (enabled: boolean) => void;
 }
 
 const EMPTY_TIMESTAMPS: number[] = [];
@@ -21,6 +22,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
   telemetry,
   spectrum,
   activeScenarioId,
+  onToggleSimulation,
 }) => {
   const {
     isLiveStream,
@@ -767,6 +769,10 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
 
   // For live stream: prefer liveMetric, but fall back to rollingSeries last point when liveMetric
   // has physically-invalid zero values (e.g., stale init before first SSE message arrives).
+  const isTelemetryConnected = isLiveStream
+    ? (liveMetric ? (liveMetric.telemetry_connected !== false && liveMetric.status !== 'OFFLINE') : false)
+    : true;
+
   const _lmFOut  = isLiveStream && liveMetric ? liveMetric.f_out  : null;
   const _lmVDc   = isLiveStream && liveMetric ? liveMetric.v_dc   : null;
   const _lmAmp   = isLiveStream && liveMetric ? liveMetric.current : null;
@@ -775,21 +781,63 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
   const _serVDc   = series['v_dc']?.[series['v_dc'].length - 1];
   const _serAmp   = series['current']?.[series['current'].length - 1];
   const _serRpm   = series['rpm']?.[series['rpm'].length - 1];
-  // f_out and v_dc should never be 0 in RUNNING state — fall back to series if so
-  const currentFOut = ((_lmFOut !== null && _lmFOut !== 0) ? _lmFOut : (_serFOut ?? _lmFOut)) ?? 40.0;
-  const currentVDc  = ((_lmVDc  !== null && _lmVDc  !== 0) ? _lmVDc  : (_serVDc  ?? _lmVDc )) ?? 182.0;
-  const currentAmp  = _lmAmp  !== null ? _lmAmp  : (_serAmp  ?? 0.0);
-  const currentRpm  = ((_lmRpm  !== null && _lmRpm  !== 0) ? _lmRpm  : (_serRpm  ?? _lmRpm )) ?? 1199.0;
-  const currentStatus = (isLiveStream && liveMetric ? liveMetric.status : undefined) || ((series['fault_code']?.[series['fault_code'].length - 1] || 0) > 0 ? 'TRIPPED' : 'RUNNING');
+
+  const currentFOut = isTelemetryConnected
+    ? (((_lmFOut !== null && _lmFOut !== 0) ? _lmFOut : (_serFOut ?? _lmFOut)) ?? 40.0)
+    : 0.0;
+  const currentVDc  = isTelemetryConnected
+    ? (((_lmVDc  !== null && _lmVDc  !== 0) ? _lmVDc  : (_serVDc  ?? _lmVDc )) ?? 182.0)
+    : 0.0;
+  const currentAmp  = isTelemetryConnected
+    ? (_lmAmp  !== null ? _lmAmp  : (_serAmp  ?? 0.0))
+    : 0.0;
+  const currentRpm  = isTelemetryConnected
+    ? (((_lmRpm  !== null && _lmRpm  !== 0) ? _lmRpm  : (_serRpm  ?? _lmRpm )) ?? 1199.0)
+    : 0.0;
+  const currentStatus = isLiveStream
+    ? (liveMetric ? liveMetric.status : (isTelemetryConnected ? 'RUNNING' : 'OFFLINE'))
+    : ((series['fault_code']?.[series['fault_code'].length - 1] || 0) > 0 ? 'TRIPPED' : 'RUNNING');
 
   const latestTi = series['TI-301-DE']?.[series['TI-301-DE'].length - 1] ?? 48.5;
   const latestVi = series['VI-301-R']?.[series['VI-301-R'].length - 1] ?? 1.80;
   const latestDps = series['DPS-30101']?.[series['DPS-30101'].length - 1] ?? 0.12;
   const latestPt = series['PT-30101']?.[series['PT-30101'].length - 1] ?? 2.40;
-  const freqStatus = currentFOut > 42 ? 'WARNING' : 'NOMINAL';
+  const freqStatus = !isTelemetryConnected
+    ? 'OFFLINE'
+    : currentFOut > 42
+    ? 'WARNING'
+    : 'NOMINAL';
 
   return (
     <div className="space-y-4">
+      {/* Offline Alert Banner */}
+      {isLiveStream && !isTelemetryConnected && (
+        <div className="bg-amber-50/90 border border-amber-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center space-x-3">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
+            </span>
+            <div>
+              <div className="font-mono text-xs font-bold text-amber-950 flex items-center gap-2">
+                <span>⚠️ TELEMETRY OFFLINE · NO LIVE HARDWARE PACKETS DETECTED</span>
+              </div>
+              <div className="text-[11px] text-amber-800">
+                Awaiting 1 Hz Modbus RTU packets on MQTT port 1883. Metrics show 0.0 until hardware connects or simulation is enabled.
+              </div>
+            </div>
+          </div>
+          {onToggleSimulation && (
+            <button
+              onClick={() => onToggleSimulation(true)}
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white font-mono text-xs font-bold rounded-lg shadow-xs transition-colors cursor-pointer flex items-center space-x-1.5"
+            >
+              <span>🧪 Enable Simulation Mode</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Live Hardware Summary Cards */}
       <TelemetryMetricsCards
         isVfdAsset={isVfdAsset}

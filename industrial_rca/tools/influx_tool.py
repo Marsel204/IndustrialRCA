@@ -56,6 +56,15 @@ class InfluxDBTelemetryTool:
         self.measurement = measurement
         self.timeout_sec = timeout_sec
         self._latest_cache: Optional[Dict[str, Any]] = None
+        self._simulation_enabled: bool = False
+
+    def set_simulation_mode(self, enabled: bool) -> None:
+        """Explicitly enables or disables fallback simulated telemetry."""
+        self._simulation_enabled = bool(enabled)
+
+    def is_simulation_enabled(self) -> bool:
+        """Returns whether simulated telemetry fallback is permitted by user."""
+        return self._simulation_enabled
 
     def update_latest(self, metric: Dict[str, Any]):
         """Sets the latest live telemetry metric received from MQTT or edge feed."""
@@ -203,9 +212,22 @@ class InfluxDBTelemetryTool:
                 self._enrich_rca_tags(df)
                 return df
         except Exception as e:
-            logger.debug(f"InfluxDB query failed or unreachable: {e}. Falling back to simulation.")
+            logger.debug(f"InfluxDB query failed or unreachable: {e}.")
 
-        return self._generate_fallback_live_dataframe(asset_id=asset_id, count=limit)
+        # Check if embedded TSDB has recent telemetry (< 30s)
+        try:
+            latest_tsdb = GLOBAL_TSDB.get_latest(asset_id)
+            if latest_tsdb and (time.time() - latest_tsdb.get("timestamp", 0) < 30):
+                tsdb_df = GLOBAL_TSDB.get_window(seconds=min(limit, 300), asset_id=asset_id)
+                if tsdb_df is not None and not tsdb_df.empty:
+                    return tsdb_df
+        except Exception:
+            pass
+
+        if self._simulation_enabled:
+            return self._generate_fallback_live_dataframe(asset_id=asset_id, count=limit)
+
+        return self._generate_offline_dataframe(asset_id=asset_id, count=limit)
 
     def _enrich_rca_tags(self, df: pd.DataFrame) -> None:
         """Injects standardized RCA equipment tags for cross-system compatibility."""
@@ -228,6 +250,28 @@ class InfluxDBTelemetryTool:
                 df["current"] * 60.0,
                 84.2,
             )
+
+    def _generate_offline_dataframe(
+        self, asset_id: str = VFD_EQUIPMENT_ID, count: int = 300
+    ) -> pd.DataFrame:
+        """Generates a flat zeroed-out offline telemetry buffer when hardware is disconnected."""
+        now = time.time()
+        t_sec = np.arange(count)
+        df = pd.DataFrame({
+            "timestamp_sec": t_sec,
+            "timestamp": [now - (count - 1 - i) for i in range(count)],
+            "asset_id": asset_id,
+            "f_out": np.zeros(count),
+            "f_target": np.zeros(count),
+            "v_dc": np.zeros(count),
+            "v_out": np.zeros(count),
+            "current": np.zeros(count),
+            "rpm": np.zeros(count),
+            "fault_code": np.zeros(count, dtype=int),
+            "status": ["OFFLINE"] * count,
+        })
+        self._enrich_rca_tags(df)
+        return df
 
     def _generate_fallback_live_dataframe(
         self, asset_id: str = VFD_EQUIPMENT_ID, count: int = 300
@@ -273,11 +317,14 @@ class InfluxDBTelemetryTool:
         """
         Retrieves the single latest live telemetry reading and status.
         Returns dict matching the LiveMetric contract.
+        If hardware stream is inactive, returns OFFLINE / zero state unless
+        the user has explicitly enabled simulation mode.
         """
         mqtt_online = self.is_mqtt_active()
+        now = time.time()
 
         latest_tsdb = GLOBAL_TSDB.get_latest(asset_id)
-        if latest_tsdb and time.time() - latest_tsdb.get("timestamp", 0) < 60:
+        if latest_tsdb and (now - latest_tsdb.get("timestamp", 0) < 30):
             res = dict(latest_tsdb)
             ft = res.get("f_target")
             if ft is not None and ft < 0:
@@ -285,13 +332,17 @@ class InfluxDBTelemetryTool:
             res["source"] = "embedded_tsdb"
             res["is_simulated"] = False
             res["mqtt_connected"] = mqtt_online
+            res["telemetry_connected"] = True
+            res["simulation_enabled"] = self._simulation_enabled
             return res
 
-        if self._latest_cache and time.time() - self._latest_cache.get("timestamp", 0) < 60:
+        if self._latest_cache and (now - self._latest_cache.get("timestamp", 0) < 30):
             cached = dict(self._latest_cache)
             cached["source"] = "mqtt_live_cache"
             cached["is_simulated"] = False
             cached["mqtt_connected"] = mqtt_online
+            cached["telemetry_connected"] = True
+            cached["simulation_enabled"] = self._simulation_enabled
             return cached
 
         flux = f'''
@@ -306,7 +357,7 @@ class InfluxDBTelemetryTool:
             if records:
                 # Merge fields across records to handle unpivoted or pivoted outputs
                 merged_fields: Dict[str, Any] = {}
-                latest_ts = time.time()
+                latest_ts = now
                 for r in records:
                     if "_field" in r and "_value" in r and r["_value"] is not None:
                         merged_fields[str(r["_field"])] = r["_value"]
@@ -319,25 +370,49 @@ class InfluxDBTelemetryTool:
                     elif "timestamp" in r:
                         latest_ts = r["timestamp"]
 
-                fault_code = int(merged_fields.get("fault_code", 0) or 0)
-                status = "TRIPPED" if fault_code > 0 else "RUNNING"
-                return {
-                    "asset_id": asset_id,
-                    "f_out": float(merged_fields.get("f_out", 40.0)),
-                    "v_dc": float(merged_fields.get("v_dc", 182.0)),
-                    "current": float(merged_fields.get("current", 1.15)),
-                    "rpm": float(merged_fields.get("rpm", 1199.0)),
-                    "fault_code": fault_code,
-                    "status": status,
-                    "timestamp": float(latest_ts) if isinstance(latest_ts, (int, float)) else time.time(),
-                    "source": "influxdb",
-                    "is_simulated": False,
-                    "mqtt_connected": mqtt_online,
-                }
+                ts_float = float(latest_ts) if isinstance(latest_ts, (int, float)) else now
+                if now - ts_float < 30:
+                    fault_code = int(merged_fields.get("fault_code", 0) or 0)
+                    status = "TRIPPED" if fault_code > 0 else "RUNNING"
+                    return {
+                        "asset_id": asset_id,
+                        "f_out": float(merged_fields.get("f_out", 40.0)),
+                        "v_dc": float(merged_fields.get("v_dc", 182.0)),
+                        "current": float(merged_fields.get("current", 1.15)),
+                        "rpm": float(merged_fields.get("rpm", 1199.0)),
+                        "fault_code": fault_code,
+                        "status": status,
+                        "timestamp": ts_float,
+                        "source": "influxdb",
+                        "is_simulated": False,
+                        "mqtt_connected": mqtt_online,
+                        "telemetry_connected": True,
+                        "simulation_enabled": self._simulation_enabled,
+                    }
         except Exception as e:
-            logger.debug(f"InfluxDB latest metric query failed: {e}. Using fallback.")
+            logger.debug(f"InfluxDB latest metric query failed: {e}.")
 
-        now = time.time()
+        # Return OFFLINE / disconnected if user hasn't explicitly enabled simulation
+        if not self._simulation_enabled:
+            return {
+                "asset_id": asset_id,
+                "f_out": 0.0,
+                "f_target": 0.0,
+                "v_dc": 0.0,
+                "v_out": 0.0,
+                "current": 0.0,
+                "rpm": 0.0,
+                "fault_code": 0,
+                "status": "OFFLINE",
+                "timestamp": now,
+                "source": "disconnected",
+                "is_simulated": False,
+                "mqtt_connected": mqtt_online,
+                "telemetry_connected": False,
+                "simulation_enabled": False,
+            }
+
+        # Fallback simulation ONLY when explicitly permitted by user
         f_out = round(40.0 + 0.3 * math.sin(now * 0.1), 2)
         v_dc = round(182.0 + 1.8 * math.cos(now * 0.08), 1)
         current = round(1.15 + 0.04 * math.sin(now * 0.15), 2)
@@ -346,15 +421,19 @@ class InfluxDBTelemetryTool:
         return {
             "asset_id": asset_id,
             "f_out": f_out,
+            "f_target": 40.0,
             "v_dc": v_dc,
+            "v_out": 220.0,
             "current": current,
             "rpm": rpm,
             "fault_code": fault_code,
             "status": "RUNNING",
             "timestamp": now,
-            "source": "fallback_simulation",
+            "source": "simulation",
             "is_simulated": True,
             "mqtt_connected": mqtt_online,
+            "telemetry_connected": True,
+            "simulation_enabled": True,
         }
 
     def get_statistical_summary(

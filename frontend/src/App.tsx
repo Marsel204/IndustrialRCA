@@ -26,6 +26,7 @@ import {
   fetchLatestIncident,
   subscribeTelemetryEvents,
   clearIncident,
+  toggleSimulationMode,
 } from './api';
 
 export function App() {
@@ -45,7 +46,8 @@ export function App() {
   // Status flags
   const [apiOnline, setApiOnline] = useState<boolean>(true);
   const [mqttConnected, setMqttConnected] = useState<boolean>(false);
-  const [isSimulated, setIsSimulated] = useState<boolean>(true);
+  const [telemetryConnected, setTelemetryConnected] = useState<boolean>(false);
+  const [isSimulated, setIsSimulated] = useState<boolean>(false);
   const [_isLoading, setIsLoading] = useState<boolean>(true);
   const [isPipelineRunning, setIsPipelineRunning] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -69,6 +71,7 @@ export function App() {
         const health = await fetchHealth();
         setApiOnline(true);
         if (health?.mqtt_connected !== undefined) setMqttConnected(Boolean(health.mqtt_connected));
+        if (health?.telemetry_connected !== undefined) setTelemetryConnected(Boolean(health.telemetry_connected));
         if (health?.is_simulated !== undefined) setIsSimulated(Boolean(health.is_simulated));
       } catch {
         setApiOnline(false);
@@ -305,6 +308,7 @@ export function App() {
         const health = await fetchHealth();
         setApiOnline(true);
         if (health?.mqtt_connected !== undefined) setMqttConnected(Boolean(health.mqtt_connected));
+        if (health?.telemetry_connected !== undefined) setTelemetryConnected(Boolean(health.telemetry_connected));
         if (health?.is_simulated !== undefined) setIsSimulated(Boolean(health.is_simulated));
       } catch {
         setApiOnline(false);
@@ -312,6 +316,21 @@ export function App() {
     }, 10000);
     return () => clearInterval(timer);
   }, []);
+
+  // User-Controlled Simulation Mode Toggle
+  const handleToggleSimulation = async (enabled: boolean) => {
+    try {
+      const res = await toggleSimulationMode(enabled);
+      setIsSimulated(res.simulation_enabled);
+      setTelemetryConnected(res.simulation_enabled || mqttConnected);
+      if (activeScenarioId === 'live_stream') {
+        const telData = await fetchTelemetry('live_stream').catch(() => null);
+        if (telData) setTelemetry(telData);
+      }
+    } catch (err) {
+      console.error('Failed to toggle simulation mode:', err);
+    }
+  };
 
   // Reset Pipeline & Return System to Nominal Live Monitoring
   const handleResetPipeline = async () => {
@@ -426,7 +445,9 @@ export function App() {
         onToggleModel={setDeepseekModel}
         isPipelineRunning={isPipelineRunning}
         mqttConnected={mqttConnected}
+        telemetryConnected={telemetryConnected}
         isSimulated={isSimulated}
+        onToggleSimulation={handleToggleSimulation}
       />
 
       {/* Error Alert Banner */}
@@ -472,6 +493,7 @@ export function App() {
             topology={topology}
             rcaState={rcaState}
             activeScenarioId={activeScenarioId}
+            onToggleSimulation={handleToggleSimulation}
           />
         </section>
       </main>

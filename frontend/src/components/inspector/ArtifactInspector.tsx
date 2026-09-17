@@ -14,6 +14,7 @@ interface ArtifactInspectorProps {
   topology: TopologyData | null;
   rcaState: RCAState | null;
   activeScenarioId: string;
+  onToggleSimulation?: (enabled: boolean) => void;
 }
 
 export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
@@ -24,6 +25,7 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
   topology,
   rcaState,
   activeScenarioId,
+  onToggleSimulation,
 }) => {
   const TABS = [
     { id: 'telemetry', label: 'Telemetry & FFT Spectrum', icon: Waves },
@@ -82,6 +84,7 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
             telemetry={telemetry}
             spectrum={spectrum}
             activeScenarioId={activeScenarioId}
+            onToggleSimulation={onToggleSimulation}
           />
         </div>
 

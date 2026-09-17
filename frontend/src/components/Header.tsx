@@ -17,7 +17,9 @@ interface HeaderProps {
   onToggleModel?: (model: string) => void;
   isPipelineRunning: boolean;
   mqttConnected?: boolean;
+  telemetryConnected?: boolean;
   isSimulated?: boolean;
+  onToggleSimulation?: (enabled: boolean) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -30,7 +32,9 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleModel,
   isPipelineRunning,
   mqttConnected = false,
-  isSimulated = true,
+  telemetryConnected = false,
+  isSimulated = false,
+  onToggleSimulation,
 }) => {
   const activeScenario = scenarios.find((s) => s.id === activeScenarioId);
   const incFaultNum = latestIncident?.incident_data?.fault_code || 6;
@@ -107,23 +111,50 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right: Streamlined Status & Controls */}
         <div className="flex items-center space-x-2 flex-shrink-0">
-          {/* Hardware Connection Indicator */}
+          {/* Telemetry Stream & Simulation Control Indicator */}
           <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200 px-2 py-1 rounded-md text-[11px] font-mono shadow-2xs">
-            <span className="relative flex h-2 w-2">
-              <span
-                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  mqttConnected && !isSimulated ? 'bg-emerald-400' : 'bg-amber-400'
-                }`}
-              />
-              <span
-                className={`relative inline-flex rounded-full h-2 w-2 ${
-                  mqttConnected && !isSimulated ? 'bg-emerald-500' : 'bg-amber-500'
-                }`}
-              />
-            </span>
-            <span className="text-slate-700 font-medium">
-              {mqttConnected && !isSimulated ? 'Live Rig · MQTT' : 'Simulated Telemetry'}
-            </span>
+            {isSimulated ? (
+              <>
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                </span>
+                <span className="text-amber-800 font-medium">🧪 Simulation Active</span>
+                {onToggleSimulation && (
+                  <button
+                    onClick={() => onToggleSimulation(false)}
+                    className="ml-1 px-1.5 py-0.5 text-[10px] bg-slate-200 hover:bg-slate-300 text-slate-700 rounded transition-colors"
+                    title="Disable simulation and listen for live MQTT hardware"
+                  >
+                    Stop Sim
+                  </button>
+                )}
+              </>
+            ) : telemetryConnected ? (
+              <>
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                </span>
+                <span className="text-emerald-800 font-medium">● Live Rig · MQTT</span>
+              </>
+            ) : (
+              <>
+                <span className="relative flex h-2 w-2">
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-400" />
+                </span>
+                <span className="text-rose-700 font-medium">○ Telemetry Offline</span>
+                {onToggleSimulation && (
+                  <button
+                    onClick={() => onToggleSimulation(true)}
+                    className="ml-1 px-1.5 py-0.5 text-[10px] bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded transition-colors font-semibold flex items-center space-x-0.5 cursor-pointer"
+                    title="Enable simulated telemetry for testing"
+                  >
+                    <span>🧪 Enable Simulation</span>
+                  </button>
+                )}
+              </>
+            )}
           </div>
 
           {/* Fault Alert Badge (shows only on active trip) */}

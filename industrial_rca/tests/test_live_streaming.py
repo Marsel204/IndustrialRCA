@@ -68,40 +68,46 @@ def test_influx_tool_csv_parser():
 
 
 def test_influx_tool_graceful_fallback():
-    """Verify that InfluxDBTelemetryTool falls back to simulation when InfluxDB is offline."""
+    """Verify that InfluxDBTelemetryTool defaults to OFFLINE and only simulates when explicitly enabled."""
     tool = InfluxDBTelemetryTool(url="http://127.0.0.1:9999")  # Non-existent port
 
-    # 1. Live telemetry dataframe
-    df = tool.get_live_telemetry(limit=50)
-    assert isinstance(df, pd.DataFrame)
-    assert len(df) == 50
-    assert "f_out" in df.columns
-    assert "v_dc" in df.columns
-    assert "current" in df.columns
-    assert "rpm" in df.columns
-    assert "PT-30101" in df.columns
-    assert "DPS-30101" in df.columns
-    assert "VI-301-R" in df.columns
+    # 1. Default: simulation is disabled, returns OFFLINE with 0.0 values
+    assert tool.is_simulation_enabled() is False
+    df_offline = tool.get_live_telemetry(limit=50)
+    assert isinstance(df_offline, pd.DataFrame)
+    assert len(df_offline) == 50
+    assert (df_offline["f_out"] == 0.0).all()
+    assert (df_offline["status"] == "OFFLINE").all()
 
-    # 2. Latest single reading
-    metric = tool.get_latest_metrics()
-    assert metric["status"] == "RUNNING"
-    assert 35.0 <= metric["f_out"] <= 45.0
-    assert 170.0 <= metric["v_dc"] <= 210.0
-    assert metric["fault_code"] == 0
-    assert "timestamp" in metric
+    metric_offline = tool.get_latest_metrics()
+    assert metric_offline["status"] == "OFFLINE"
+    assert metric_offline["telemetry_connected"] is False
+    assert metric_offline["is_simulated"] is False
+    assert metric_offline["f_out"] == 0.0
 
-    # 3. Statistical summary
-    summary = tool.get_statistical_summary()
-    assert summary["sample_count"] == 300
-    assert "f_out" in summary["statistics"]
-    assert "v_dc" in summary["statistics"]
+    # 2. When simulation mode is explicitly enabled by user
+    tool.set_simulation_mode(True)
+    assert tool.is_simulation_enabled() is True
 
-    # 4. Agent summary text
-    agent_text = tool.search_for_agent()
-    assert "InfluxDB Real-Time Telemetry" in agent_text
-    assert "Output Frequency (f_out)" in agent_text
-    assert "DC Bus Voltage (v_dc)" in agent_text
+    df_sim = tool.get_live_telemetry(limit=50)
+    assert isinstance(df_sim, pd.DataFrame)
+    assert len(df_sim) == 50
+    assert "f_out" in df_sim.columns
+    assert 35.0 <= df_sim["f_out"].mean() <= 45.0
+
+    metric_sim = tool.get_latest_metrics()
+    assert metric_sim["status"] == "RUNNING"
+    assert metric_sim["telemetry_connected"] is True
+    assert metric_sim["is_simulated"] is True
+    assert 35.0 <= metric_sim["f_out"] <= 45.0
+    assert 170.0 <= metric_sim["v_dc"] <= 210.0
+    assert metric_sim["fault_code"] == 0
+
+    # 3. Disable simulation again
+    tool.set_simulation_mode(False)
+    assert tool.is_simulation_enabled() is False
+    assert tool.get_latest_metrics()["status"] == "OFFLINE"
+
 
 
 def test_generate_vfd_dataset_scenarios():
@@ -158,7 +164,21 @@ def test_api_live_metrics_endpoint(client):
     assert "rpm" in data
     assert "status" in data
     assert "timestamp" in data
-    assert data["status"] in ("RUNNING", "TRIPPED")
+    assert data["status"] in ("OFFLINE", "RUNNING", "TRIPPED")
+
+    if data["status"] == "OFFLINE":
+        assert data["telemetry_connected"] is False
+        assert data["f_out"] == 0.0
+
+    # Test that enabling simulation flips status to RUNNING
+    from industrial_rca.api import influx_tool
+    influx_tool.set_simulation_mode(True)
+    resp_sim = client.get("/api/v1/telemetry/live/metrics")
+    data_sim = resp_sim.json()
+    assert data_sim["status"] == "RUNNING"
+    assert data_sim["telemetry_connected"] is True
+    assert data_sim["is_simulated"] is True
+    influx_tool.set_simulation_mode(False)
 
 
 def test_api_live_stream_telemetry_series(client):
@@ -244,12 +264,13 @@ def test_influx_tool_latest_metrics_unpivoted():
     """Verify get_latest_metrics consolidates fields across unpivoted InfluxDB records."""
     from unittest.mock import patch
     tool = InfluxDBTelemetryTool()
+    now = time.time()
     unpivoted_records = [
-        {"_field": "f_out", "_value": 42.5, "_time": 1726041000},
-        {"_field": "v_dc", "_value": 680.2, "_time": 1726041000},
-        {"_field": "current", "_value": 2.15, "_time": 1726041000},
-        {"_field": "rpm", "_value": 1230.0, "_time": 1726041000},
-        {"_field": "fault_code", "_value": 0, "_time": 1726041000},
+        {"_field": "f_out", "_value": 42.5, "_time": now},
+        {"_field": "v_dc", "_value": 680.2, "_time": now},
+        {"_field": "current", "_value": 2.15, "_time": now},
+        {"_field": "rpm", "_value": 1230.0, "_time": now},
+        {"_field": "fault_code", "_value": 0, "_time": now},
     ]
     with patch.object(tool, "query_flux", return_value=unpivoted_records):
         metrics = tool.get_latest_metrics()
@@ -259,6 +280,35 @@ def test_influx_tool_latest_metrics_unpivoted():
         assert metrics["rpm"] == 1230.0
         assert metrics["status"] == "RUNNING"
         assert metrics["source"] == "influxdb"
+
+
+def test_simulation_toggle_api():
+    """Verify GET and POST /api/v1/telemetry/simulation endpoints."""
+    from fastapi.testclient import TestClient
+    from industrial_rca.api import api_app
+
+    client = TestClient(api_app)
+
+    # Disable simulation
+    res = client.post("/api/v1/telemetry/simulation", json={"enabled": False})
+    assert res.status_code == 200
+    assert res.json()["simulation_enabled"] is False
+
+    res = client.get("/api/v1/telemetry/simulation")
+    assert res.status_code == 200
+    assert res.json()["simulation_enabled"] is False
+
+    # Enable simulation
+    res = client.post("/api/v1/telemetry/simulation", json={"enabled": True})
+    assert res.status_code == 200
+    assert res.json()["simulation_enabled"] is True
+
+    res = client.get("/api/v1/telemetry/simulation")
+    assert res.status_code == 200
+    assert res.json()["simulation_enabled"] is True
+
+    # Clean up: set back to False
+    client.post("/api/v1/telemetry/simulation", json={"enabled": False})
 
 
 def test_influx_tool_statistical_summary_source_tag():

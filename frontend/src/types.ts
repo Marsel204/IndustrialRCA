@@ -328,4 +328,6 @@ export interface LiveMetric {
   source?: string;
   mqtt_connected?: boolean;
   is_simulated?: boolean;
+  telemetry_connected?: boolean;
+  simulation_enabled?: boolean;
 }

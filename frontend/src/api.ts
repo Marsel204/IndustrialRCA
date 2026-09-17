@@ -223,4 +223,21 @@ export async function clearIncident(): Promise<{ status: string; message: string
   return res.json();
 }
 
+export async function toggleSimulationMode(enabled: boolean): Promise<{ simulation_enabled: boolean; status: string }> {
+  const res = await fetch(`${API_BASE}/telemetry/simulation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) throw new Error(`Failed to toggle simulation mode: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchSimulationStatus(): Promise<{ simulation_enabled: boolean }> {
+  const res = await fetch(`${API_BASE}/telemetry/simulation`);
+  if (!res.ok) throw new Error(`Failed to fetch simulation status: ${res.statusText}`);
+  return res.json();
+}
+
+
 
