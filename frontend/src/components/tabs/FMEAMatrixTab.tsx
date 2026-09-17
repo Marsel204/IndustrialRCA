@@ -11,6 +11,7 @@ import {
   GitCommit,
   Network,
   Wrench,
+  Zap,
 } from 'lucide-react';
 import { RCAState } from '../../types';
 
@@ -211,6 +212,177 @@ const DEFAULT_5_WHYS_ERR02 = [
   },
 ];
 
+const DEFAULT_HYPOTHESES_ERR03 = [
+  {
+    hypothesis_id: 'H_VFD_ERR03',
+    name: 'Deceleration Overcurrent (WECON VM Err03)',
+    status: 'CONFIRMED',
+    confidence: 0.98,
+    falsification_rationale:
+      'Linear deceleration ramp parameter F0.18 commanded too steep a deceleration slope under high load inertia without dynamic braking resistor on P+/PB, inducing a 2.75 A current surge that tripped the drive on Err03.',
+    evidence: [
+      { check: 'Deceleration Ramp Current (Reg 3002H)', observation: 'Current surged to 2.75 A during ramp-down (> 2.50 A trip threshold).', status: 'CONFIRMED' },
+      { check: 'Modbus Trip Code Register (Reg 700BH)', observation: 'VFD reported Err03 (Deceleration Overcurrent).', status: 'CONFIRMED' },
+    ],
+    proposed_actions: [
+      'Increase parameter F0.18 deceleration time to >= 5.0 seconds',
+      'Install dynamic braking resistor across terminals P+ and PB',
+      'Enable parameter F3.08 overcurrent stall suppression',
+    ],
+  },
+  {
+    hypothesis_id: 'H_VFD_ERR06',
+    name: 'Overfrequency Deceleration Overvoltage (WECON VM Err06)',
+    status: 'REFUTED',
+    confidence: 0.02,
+    falsification_rationale: 'Drive latched Err03 (not Err06 overvoltage). DC bus voltage remained within limit.',
+    evidence: [{ check: 'DC Bus Voltage', observation: 'V_dc remained below 195.0 V limit.', status: 'PASSED' }],
+    proposed_actions: [],
+  },
+  {
+    hypothesis_id: 'H_VFD_ERR02',
+    name: 'Forced Sudden Deceleration Overcurrent (WECON VM Err02)',
+    status: 'REFUTED',
+    confidence: 0.03,
+    falsification_rationale: 'Trip occurred during active ramp deceleration (Err03), not instantaneous PLC stop de-energization (Err02).',
+    evidence: [{ check: 'PLC Stop Trigger', observation: 'Stop command followed ramp, not instantaneous contact cut.', status: 'PASSED' }],
+    proposed_actions: [],
+  },
+  {
+    hypothesis_id: 'H_VFD_ERR11',
+    name: 'Motor Thermal Overload (WECON VM Err11)',
+    status: 'REFUTED',
+    confidence: 0.04,
+    falsification_rationale: 'Current surge was transient during deceleration; motor thermal I2t model remained below threshold.',
+    evidence: [{ check: 'Motor Thermal Current I2t', observation: 'I2t accumulator below trip threshold.', status: 'PASSED' }],
+    proposed_actions: [],
+  },
+];
+
+const DEFAULT_5_WHYS_ERR03 = [
+  {
+    level: 'Why 1',
+    question: 'Why did Wecon VM Series VFD (VFD_VM_01) trip with fault code Err03?',
+    answer: 'Stator output current surged past 2.50 A trip threshold during the active deceleration ramp phase (reached 2.75 A).',
+    evidence: 'Modbus current register Reg 3002H recorded 2.75 A peak during decel; drive latched Err03.',
+    asset_involved: 'VFD_VM_01',
+  },
+  {
+    level: 'Why 2',
+    question: 'Why did current surge during deceleration ramp down?',
+    answer: 'The commanded deceleration rate forced the motor rotor to slow faster than the coupled mechanical inertia would allow.',
+    evidence: 'Rotor slip inverted during decel, pushing the motor into a regenerative braking regime.',
+    asset_involved: 'IND_MOTOR_01',
+  },
+  {
+    level: 'Why 3',
+    question: 'Why was the deceleration rate excessively steep?',
+    answer: 'Parameter F0.18 deceleration time was configured below the minimum required for the mechanical load inertia without a braking resistor.',
+    evidence: 'VFD parameter audit confirms F0.18 is set too short for inertia without dynamic braking.',
+    asset_involved: 'VFD_VM_01',
+  },
+  {
+    level: 'Why 4',
+    question: 'Why couldn\'t the inverter absorb the kinetic deceleration surge?',
+    answer: 'Dynamic braking resistor across terminals P+ and PB is absent, causing regenerative energy to overload the inverter output stage.',
+    evidence: 'Physical inspection of terminals P+ and PB confirms open circuit.',
+    asset_involved: 'BRK_RESISTOR_01',
+  },
+  {
+    level: 'Why 5 (Root Cause)',
+    question: 'Why was deceleration programmed without dynamic braking compensation?',
+    answer: 'Drive commissioning profile lacked deceleration stall prevention parameter F3.08 configuration and dynamic braking resistor sizing.',
+    evidence: 'Parameter audit: F0.18 too short and F3.08 stall suppression disabled.',
+    asset_involved: 'PLC_LX_01',
+  },
+];
+
+const DEFAULT_HYPOTHESES_ERR11 = [
+  {
+    hypothesis_id: 'H_VFD_ERR11',
+    name: 'Motor Thermal Overload (WECON VM Err11)',
+    status: 'CONFIRMED',
+    confidence: 0.98,
+    falsification_rationale:
+      'Continuous motor load current was sustained at 2.45 A (213% of parameter F2.03 rated motor current 1.15 A) due to mechanical load resistance, causing inverter electronic thermal memory (I2t) to trip the drive on Err11.',
+    evidence: [
+      { check: 'Motor Continuous Current (Reg 3002H)', observation: 'Continuous load current 2.45 A exceeded parameter F2.03 setting (1.15 A).', status: 'CONFIRMED' },
+      { check: 'Inverter I2t Thermal Accumulator', observation: 'Electronic thermal memory reached 100% protection trip threshold.', status: 'CONFIRMED' },
+      { check: 'Modbus Trip Code Register (Reg 700BH)', observation: 'VFD reported Err11 (Motor Thermal Overload).', status: 'CONFIRMED' },
+    ],
+    proposed_actions: [
+      'Inspect motor shaft, bearings, and mechanical coupling for binding or misalignment',
+      'Verify VFD parameter F2.03 (Motor Rated Current) matches motor nameplate (1.15 A)',
+      'Inspect motor forced cooling fan and clear ventilation shroud obstructions',
+    ],
+  },
+  {
+    hypothesis_id: 'H_VFD_ERR06',
+    name: 'Overfrequency Deceleration Overvoltage (WECON VM Err06)',
+    status: 'REFUTED',
+    confidence: 0.02,
+    falsification_rationale: 'Drive latched Err11 (not Err06 overvoltage). DC bus voltage remained nominal.',
+    evidence: [{ check: 'DC Bus Voltage', observation: 'V_dc remained nominal (~182 V).', status: 'PASSED' }],
+    proposed_actions: [],
+  },
+  {
+    hypothesis_id: 'H_VFD_ERR02',
+    name: 'Forced Sudden Deceleration Overcurrent (WECON VM Err02)',
+    status: 'REFUTED',
+    confidence: 0.03,
+    falsification_rationale: 'Trip was caused by continuous thermal accumulation, not an abrupt stop surge.',
+    evidence: [{ check: 'PLC Stop Trigger', observation: 'No abrupt stop command was actuated.', status: 'PASSED' }],
+    proposed_actions: [],
+  },
+  {
+    hypothesis_id: 'H_VFD_ERR03',
+    name: 'Deceleration Overcurrent (WECON VM Err03)',
+    status: 'REFUTED',
+    confidence: 0.02,
+    falsification_rationale: 'Drive was operating at continuous speed when thermal trip occurred, not in deceleration ramp.',
+    evidence: [{ check: 'Operating State', observation: 'Drive was in steady-state run, not decelerating.', status: 'PASSED' }],
+    proposed_actions: [],
+  },
+];
+
+const DEFAULT_5_WHYS_ERR11 = [
+  {
+    level: 'Why 1',
+    question: 'Why did Wecon VM Series VFD (VFD_VM_01) trip with fault code Err11?',
+    answer: 'The inverter electronic thermal overload protection model (I2t) tripped to prevent stator winding burnout.',
+    evidence: 'Modbus fault code register Reg 700BH reported 11 (Err11); drive inhibited output.',
+    asset_involved: 'VFD_VM_01',
+  },
+  {
+    level: 'Why 2',
+    question: 'Why did the electronic thermal model reach the trip limit?',
+    answer: 'Continuous motor line current was sustained above rated FLA (2.45 A vs 1.15 A rated parameter F2.03).',
+    evidence: 'Embedded TSDB shows continuous current elevated at 2.45 A exceeding rated limit.',
+    asset_involved: 'IND_MOTOR_01',
+  },
+  {
+    level: 'Why 3',
+    question: 'Why was continuous operating current sustained above rated capacity?',
+    answer: 'Mechanical drag or excessive load torque imposed a heavy continuous resistive load on the induction motor.',
+    evidence: 'Motor current draw elevated even at nominal 40 Hz frequency.',
+    asset_involved: 'IND_MOTOR_01',
+  },
+  {
+    level: 'Why 4',
+    question: 'Why was the motor allowed to operate under continuous overload?',
+    answer: 'Motor thermal overload early pre-alarm warning was not configured in the supervisory PLC/HMI.',
+    evidence: 'PLC alarm table lacks pre-trip thermal accumulator threshold warning.',
+    asset_involved: 'PLC_LX_01',
+  },
+  {
+    level: 'Why 5 (Root Cause)',
+    question: 'What is the primary physical root cause of the Err11 trip?',
+    answer: 'Mechanical binding / load resistance caused prolonged continuous overcurrent exceeding parameter F2.03 rating, triggering inverter I2t thermal memory.',
+    evidence: 'Winding thermal accumulation confirmed by Reg 700BH Err11.',
+    asset_involved: 'IND_MOTOR_01',
+  },
+];
+
 const STANDBY_HYPOTHESES = [
   {
     hypothesis_id: 'H_VFD_ERR06',
@@ -275,9 +447,19 @@ const STANDBY_HYPOTHESES = [
 
 interface FMEAMatrixTabProps {
   rcaState: RCAState | null;
+  onSimulateScenario?: (scenario: string) => void;
+  simulationScenario?: string;
+  simulationPhase?: string;
+  simulationCountdown?: number;
 }
 
-export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
+export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({
+  rcaState,
+  onSimulateScenario,
+  simulationScenario,
+  simulationPhase,
+  simulationCountdown,
+}) => {
   const hasActiveIncident = Boolean(
     rcaState?.has_active_trip ||
     (rcaState?.fault_code && rcaState.fault_code > 0) ||
@@ -285,11 +467,23 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
     (rcaState?.hypothesis_results && rcaState.hypothesis_results.some((h) => h.status === 'CONFIRMED'))
   );
 
-  const isErr02 =
-    rcaState?.fault_code === 2 ||
-    rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR02';
-  const defaultHypos = isErr02 ? DEFAULT_HYPOTHESES_ERR02 : DEFAULT_HYPOTHESES;
-  const defaultWhys = isErr02 ? DEFAULT_5_WHYS_ERR02 : DEFAULT_5_WHYS;
+  const faultCode = rcaState?.fault_code ||
+    (rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR02' ? 2 :
+     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR06' ? 6 :
+     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR03' ? 3 :
+     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR11' ? 11 : 6);
+
+  const defaultHypos =
+    faultCode === 2 ? DEFAULT_HYPOTHESES_ERR02 :
+    faultCode === 3 ? DEFAULT_HYPOTHESES_ERR03 :
+    faultCode === 11 ? DEFAULT_HYPOTHESES_ERR11 :
+    DEFAULT_HYPOTHESES;
+
+  const defaultWhys =
+    faultCode === 2 ? DEFAULT_5_WHYS_ERR02 :
+    faultCode === 3 ? DEFAULT_5_WHYS_ERR03 :
+    faultCode === 11 ? DEFAULT_5_WHYS_ERR11 :
+    DEFAULT_5_WHYS;
 
   const rawHypotheses = rcaState?.hypothesis_results;
   const hypotheses = hasActiveIncident
@@ -306,7 +500,12 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
     : [];
 
   const [expandedHypId, setExpandedHypId] = useState<string>(
-    hasActiveIncident ? (winningHyp?.hypothesis_id || (isErr02 ? 'H_VFD_ERR02' : 'H_VFD_ERR06')) : ''
+    hasActiveIncident
+      ? (winningHyp?.hypothesis_id ||
+         (faultCode === 2 ? 'H_VFD_ERR02' :
+          faultCode === 3 ? 'H_VFD_ERR03' :
+          faultCode === 11 ? 'H_VFD_ERR11' : 'H_VFD_ERR06'))
+      : ''
   );
 
   React.useEffect(() => {
@@ -406,6 +605,16 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
             const isExpanded = expandedHypId === h.hypothesis_id;
             const isWinner = winningHyp?.hypothesis_id === h.hypothesis_id;
 
+            const isSimulatingThis = Boolean(
+              simulationScenario &&
+              (simulationScenario.toUpperCase().includes(h.hypothesis_id) ||
+               (h.hypothesis_id === 'H_VFD_ERR06' && simulationScenario.toLowerCase().includes('err06')) ||
+               (h.hypothesis_id === 'H_VFD_ERR02' && simulationScenario.toLowerCase().includes('err02')) ||
+               (h.hypothesis_id === 'H_VFD_ERR03' && simulationScenario.toLowerCase().includes('err03')) ||
+               (h.hypothesis_id === 'H_VFD_ERR11' && simulationScenario.toLowerCase().includes('err11'))) &&
+              simulationPhase === 'NORMAL'
+            );
+
             return (
               <div
                 key={`${h.hypothesis_id}-${idx}`}
@@ -431,7 +640,7 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
                     </span>
                   </div>
 
-                  <div className="flex items-center space-x-3">
+                  <div className="flex items-center space-x-2.5">
                     {/* Confidence Meter */}
                     {hasActiveIncident ? (
                       <div className="hidden sm:flex items-center space-x-2 font-mono text-xs text-slate-500">
@@ -455,6 +664,32 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({ rcaState }) => {
                         <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
                         <span>Untriggered (0%)</span>
                       </div>
+                    )}
+
+                    {/* Simulate Scenario Quick Trigger */}
+                    {onSimulateScenario && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSimulateScenario(h.hypothesis_id);
+                        }}
+                        disabled={isSimulatingThis}
+                        className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium transition-all flex items-center space-x-1 shadow-2xs cursor-pointer ${
+                          isSimulatingThis
+                            ? 'bg-amber-100 text-amber-900 border border-amber-300 animate-pulse'
+                            : 'bg-slate-100 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-300 text-slate-700 border border-slate-200'
+                        }`}
+                        title={`Simulate 5s normal baseline then inject ${h.hypothesis_id} trip`}
+                      >
+                        <Zap className="w-3 h-3 text-amber-600" />
+                        <span>
+                          {isSimulatingThis
+                            ? (simulationCountdown && simulationCountdown > 0
+                                ? `Tripping in ${simulationCountdown.toFixed(0)}s...`
+                                : 'Tripping...')
+                            : 'Simulate Fault (5s)'}
+                        </span>
+                      </button>
                     )}
 
                     {getStatusBadge(h.status)}

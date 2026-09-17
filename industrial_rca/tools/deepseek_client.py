@@ -241,6 +241,46 @@ class DeepSeekClient:
                 "4. Remedy: Decel ramp lengthening in F0.18."
             )
 
+        elif "err03" in latest_query:
+            content = (
+                "**Diagnostic Root Cause: Wecon VM Deceleration Overcurrent Trip (Err03)**\n\n"
+                "1. **Event Sequence & Symptom:**\n"
+                "   - During motor deceleration from 40.00 Hz, output current surged to **2.75 A**, exceeding the 2.50 A trip threshold.\n"
+                "   - Drive tripped and latched fault code Err03.\n\n"
+                "2. **Physical Mechanism:**\n"
+                "   - Deceleration ramp parameter `F0.18` commanded a rate faster than mechanical load inertia allows without dynamic braking.\n\n"
+                "3. **Remediation Actions:**\n"
+                "   - Increase parameter `F0.18` deceleration time to **>= 5.0 seconds**.\n"
+                "   - Install dynamic braking resistor (100Ω 200W) across terminals `P+` and `PB`.\n"
+                "   - Enable overcurrent stall suppression parameter `F3.08 = 1`."
+            )
+            reasoning = (
+                "DeepSeek Diagnostic Verification for Err03:\n"
+                "1. Detected deceleration phase overcurrent spike (2.75 A > 2.50 A).\n"
+                "2. Confirmed FMEA mode: Err03 (Deceleration Overcurrent).\n"
+                "3. Remedy: Parameter F0.18 decel extension and braking resistor installation."
+            )
+
+        elif "err11" in latest_query or "thermal" in latest_query or "overload" in latest_query:
+            content = (
+                "**Diagnostic Root Cause: Wecon VM Motor Thermal Overload Trip (Err11)**\n\n"
+                "1. **Event Sequence & Symptom:**\n"
+                "   - Motor continuous load current was sustained at **2.45 A** (exceeding parameter `F2.03` rated current 1.15 A).\n"
+                "   - Inverter electronic thermal memory (I2t) exceeded threshold, latching trip code Err11.\n\n"
+                "2. **Physical Mechanism:**\n"
+                "   - Prolonged excessive mechanical drag or binding on the motor coupling forced the drive to deliver 213% rated current continuously.\n\n"
+                "3. **Remediation Actions:**\n"
+                "   - Inspect motor shaft, bearings, and mechanical load for mechanical binding.\n"
+                "   - Verify parameter `F2.03` matches motor nameplate current rating (1.15 A).\n"
+                "   - Ensure motor cooling fan airflow is completely unobstructed."
+            )
+            reasoning = (
+                "DeepSeek Diagnostic Verification for Err11:\n"
+                "1. Inverter electronic thermal model I2t breached.\n"
+                "2. Confirmed FMEA mode: Err11 (Motor Thermal Overload).\n"
+                "3. Remedy: Mechanical bind inspection and parameter F2.03 verification."
+            )
+
         # ── 3. General "What caused the trip?" ──────────────────────────────
         elif (
             "trip" in latest_query

@@ -643,6 +643,96 @@ def causal_deep_dive_5_whys(state: RCAState) -> Dict[str, Any]:
             "overcurrent surge that tripped the drive on Err02."
         )
 
+    elif is_vfd and win_id == "H_VFD_ERR03":
+        # 5-Whys for Err03 (Deceleration Overcurrent)
+        five_whys = [
+            {
+                "level": "Why 1",
+                "question": f"Why did Wecon VM Series VFD ({asset_id}) trip with fault code Err03?",
+                "answer": "Stator output current surged past the 2.50 A threshold during the active deceleration ramp phase.",
+                "evidence": "Modbus current register Reg 3002H recorded a 2.75 A peak during the decel ramp; drive latched Err03.",
+                "asset_involved": asset_id,
+            },
+            {
+                "level": "Why 2",
+                "question": "Why did current surge during deceleration ramp down?",
+                "answer": "The commanded deceleration rate forced the motor rotor to slow faster than the coupled mechanical inertia would allow.",
+                "evidence": "Rotor slip inverted during decel, pushing the motor into a regenerative braking regime.",
+                "asset_involved": "IND_MOTOR_01",
+            },
+            {
+                "level": "Why 3",
+                "question": "Why was the deceleration rate excessively steep?",
+                "answer": "Parameter F0.18 deceleration time was configured below the minimum required for the mechanical load inertia without a braking resistor.",
+                "evidence": "VFD parameter audit confirms F0.18 is set too short for inertia without dynamic braking.",
+                "asset_involved": "VFD_VM_01",
+            },
+            {
+                "level": "Why 4",
+                "question": "Why couldn't the inverter absorb the kinetic deceleration surge?",
+                "answer": "Dynamic braking resistor across terminals P+ and PB is absent, causing regenerative energy to overload the inverter output stage.",
+                "evidence": "Physical inspection of terminals P+ and PB confirms open circuit.",
+                "asset_involved": "BRK_RESISTOR_01",
+            },
+            {
+                "level": "Why 5 (Root Cause)",
+                "question": "Why was deceleration programmed without dynamic braking compensation?",
+                "answer": "Drive commissioning profile lacked deceleration stall prevention parameter F3.08 configuration and dynamic braking resistor sizing.",
+                "evidence": "Parameter audit: F0.18 too short and F3.08 stall suppression disabled.",
+                "asset_involved": "PLC_LX_01",
+            },
+        ]
+        root_asset = "VFD_VM_01"
+        root_desc = (
+            "Deceleration ramp time parameter F0.18 was set too aggressively for motor load inertia without dynamic braking resistor on P+/PB, "
+            "causing excessive back-EMF current surge to 2.75 A during ramp-down that tripped the drive on Err03."
+        )
+
+    elif is_vfd and win_id == "H_VFD_ERR11":
+        # 5-Whys for Err11 (Motor Thermal Overload)
+        five_whys = [
+            {
+                "level": "Why 1",
+                "question": f"Why did Wecon VM Series VFD ({asset_id}) trip with fault code Err11?",
+                "answer": "The inverter electronic thermal overload protection model (I2t) tripped to prevent stator winding burnout.",
+                "evidence": "Modbus fault code register Reg 700BH reported 11 (Err11); drive inhibited output.",
+                "asset_involved": asset_id,
+            },
+            {
+                "level": "Why 2",
+                "question": "Why did the electronic thermal model reach the trip limit?",
+                "answer": "Continuous motor line current was sustained above rated FLA (2.45 A vs 1.15 A rated parameter F2.03).",
+                "evidence": "Embedded TSDB shows continuous current elevated at 2.45 A exceeding rated limit.",
+                "asset_involved": "IND_MOTOR_01",
+            },
+            {
+                "level": "Why 3",
+                "question": "Why was continuous operating current sustained above rated capacity?",
+                "answer": "Mechanical drag or excessive load torque imposed a heavy continuous resistive load on the induction motor.",
+                "evidence": "Motor current draw elevated even at nominal 40 Hz frequency.",
+                "asset_involved": "IND_MOTOR_01",
+            },
+            {
+                "level": "Why 4",
+                "question": "Why was the motor allowed to operate under continuous overload?",
+                "answer": "Motor thermal overload early pre-alarm warning was not configured in the supervisory PLC/HMI.",
+                "evidence": "PLC alarm table lacks pre-trip thermal accumulator threshold warning.",
+                "asset_involved": "PLC_LX_01",
+            },
+            {
+                "level": "Why 5 (Root Cause)",
+                "question": "What is the primary physical root cause of the Err11 trip?",
+                "answer": "Mechanical binding / load resistance caused prolonged continuous overcurrent exceeding parameter F2.03 rating, triggering inverter I2t thermal memory.",
+                "evidence": "Winding thermal accumulation confirmed by Reg 700BH Err11.",
+                "asset_involved": "IND_MOTOR_01",
+            },
+        ]
+        root_asset = "IND_MOTOR_01"
+        root_desc = (
+            "Prolonged continuous current elevation (2.45 A vs 1.15 A rating) due to mechanical load resistance exceeded inverter "
+            "thermal model capacity, latching motor thermal overload trip Err11."
+        )
+
     elif is_vfd:
         # 5-Whys for Experiment 2 (Overfrequency Excursion > 40 Hz, Vdc > 195 V)
         five_whys = [
@@ -868,6 +958,26 @@ def generate_maintenance_artifacts(state: RCAState) -> Dict[str, Any]:
                 "PCA-2: Increase VFD parameter F0.18 deceleration time to >= 3.0 seconds.",
                 "PCA-3: Perform 500V DC megger insulation resistance test on induction motor IND_MOTOR_01 (> 50 M-Ohm).",
                 "PCA-4: Update HMI On/Off button action script to prevent instantaneous stop transients.",
+            ]
+        elif "ERR03" in winning.get("hypothesis_id", ""):
+            fc = 3
+            fc_desc = "Deceleration Overcurrent (Err03)"
+            impact = "Deceleration ramp current surge reached 2.75 A, exceeding 2.50 A trip threshold during ramp-down."
+            pca = [
+                "PCA-1: Increase parameter F0.18 deceleration time to >= 5.0 seconds.",
+                "PCA-2: Install dynamic braking resistor (100-250 Ohm, 100W) across terminals P+ and PB.",
+                "PCA-3: Enable deceleration overcurrent stall suppression parameter F3.08 = 1.",
+                "PCA-4: Inspect load inertia and mechanical friction on driven coupling.",
+            ]
+        elif "ERR11" in winning.get("hypothesis_id", ""):
+            fc = 11
+            fc_desc = "Motor Thermal Overload (Err11)"
+            impact = "Continuous line current sustained at 2.45 A (213% of rated 1.15 A) triggered inverter I2t protection."
+            pca = [
+                "PCA-1: Inspect motor shaft, bearings, and mechanical coupling for binding or misalignment.",
+                "PCA-2: Verify VFD parameter F2.03 (Motor Rated Current) matches motor nameplate (1.15 A).",
+                "PCA-3: Inspect motor forced cooling fan and clear ventilation shroud obstructions.",
+                "PCA-4: Configure 85% thermal pre-alarm in PLC ladder logic to prevent unannounced line shutdown.",
             ]
         else:
             fc = 6

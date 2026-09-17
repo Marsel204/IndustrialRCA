@@ -57,14 +57,29 @@ class InfluxDBTelemetryTool:
         self.timeout_sec = timeout_sec
         self._latest_cache: Optional[Dict[str, Any]] = None
         self._simulation_enabled: bool = False
+        self._simulation_scenario: str = "nominal"
+        self._simulation_start_time: float = 0.0
+        self._simulation_normal_duration: float = 5.0
 
-    def set_simulation_mode(self, enabled: bool) -> None:
-        """Explicitly enables or disables fallback simulated telemetry."""
+    def set_simulation_mode(
+        self,
+        enabled: bool,
+        scenario: str = "nominal",
+        normal_duration: float = 5.0,
+    ) -> None:
+        """Explicitly enables or disables fallback simulated telemetry with chosen scenario."""
         self._simulation_enabled = bool(enabled)
+        self._simulation_scenario = scenario or "nominal"
+        self._simulation_start_time = time.time() if enabled else 0.0
+        self._simulation_normal_duration = float(normal_duration)
 
     def is_simulation_enabled(self) -> bool:
         """Returns whether simulated telemetry fallback is permitted by user."""
         return self._simulation_enabled
+
+    def get_simulation_scenario(self) -> str:
+        """Returns the active simulation scenario name."""
+        return getattr(self, "_simulation_scenario", "nominal")
 
     def update_latest(self, metric: Dict[str, Any]):
         """Sets the latest live telemetry metric received from MQTT or edge feed."""
@@ -413,27 +428,67 @@ class InfluxDBTelemetryTool:
             }
 
         # Fallback simulation ONLY when explicitly permitted by user
-        f_out = round(40.0 + 0.3 * math.sin(now * 0.1), 2)
-        v_dc = round(182.0 + 1.8 * math.cos(now * 0.08), 1)
-        current = round(1.15 + 0.04 * math.sin(now * 0.15), 2)
-        rpm = round(f_out * 29.0, 1)
-        fault_code = 0
+        elapsed = now - getattr(self, "_simulation_start_time", now)
+        norm_dur = getattr(self, "_simulation_normal_duration", 5.0)
+        scenario = getattr(self, "_simulation_scenario", "nominal")
+        is_normal_phase = (elapsed < norm_dur) or (scenario in ("nominal", "normal"))
+        countdown = max(0.0, round(norm_dur - elapsed, 1)) if scenario not in ("nominal", "normal") else 0.0
+
+        if is_normal_phase:
+            f_out = round(40.0 + 0.3 * math.sin(now * 0.1), 2)
+            v_dc = round(182.0 + 1.8 * math.cos(now * 0.08), 1)
+            current = round(1.15 + 0.04 * math.sin(now * 0.15), 2)
+            rpm = round(f_out * 29.0, 1)
+            fault_code = 0
+            status = "RUNNING"
+            phase = "NORMAL"
+        else:
+            # Tripped phase
+            sc_upper = scenario.upper()
+            if "ERR06" in sc_upper or scenario in ("6", "err06"):
+                fault_code = 6
+                v_dc = 206.5
+                current = 0.0
+            elif "ERR02" in sc_upper or scenario in ("2", "err02"):
+                fault_code = 2
+                v_dc = 184.0
+                current = 2.95
+            elif "ERR03" in sc_upper or scenario in ("3", "err03"):
+                fault_code = 3
+                v_dc = 185.0
+                current = 2.75
+            elif "ERR11" in sc_upper or scenario in ("11", "err11"):
+                fault_code = 11
+                v_dc = 181.5
+                current = 2.45
+            else:
+                fault_code = 6
+                v_dc = 202.5
+                current = 0.0
+            f_out = 0.0
+            rpm = 0.0
+            status = "TRIPPED"
+            phase = "TRIPPED"
+
         return {
             "asset_id": asset_id,
             "f_out": f_out,
-            "f_target": 40.0,
+            "f_target": 40.0 if is_normal_phase else 0.0,
             "v_dc": v_dc,
-            "v_out": 220.0,
+            "v_out": 220.0 if is_normal_phase else 0.0,
             "current": current,
             "rpm": rpm,
             "fault_code": fault_code,
-            "status": "RUNNING",
+            "status": status,
             "timestamp": now,
             "source": "simulation",
             "is_simulated": True,
             "mqtt_connected": mqtt_online,
             "telemetry_connected": True,
             "simulation_enabled": True,
+            "simulation_scenario": scenario,
+            "simulation_phase": phase,
+            "simulation_countdown": countdown,
         }
 
     def get_statistical_summary(

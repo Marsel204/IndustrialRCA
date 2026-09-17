@@ -11,7 +11,12 @@ interface TelemetryAnalyticsTabProps {
   telemetry: TelemetryData | null;
   spectrum: SpectrumData | null;
   activeScenarioId?: string;
-  onToggleSimulation?: (enabled: boolean) => void;
+  onToggleSimulation?: (enabled: boolean, scenario?: string, duration?: number) => void;
+  isSimulated?: boolean;
+  telemetryConnected?: boolean;
+  simulationScenario?: string;
+  simulationPhase?: string;
+  simulationCountdown?: number;
 }
 
 const EMPTY_TIMESTAMPS: number[] = [];
@@ -23,6 +28,11 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
   spectrum,
   activeScenarioId,
   onToggleSimulation,
+  isSimulated = false,
+  telemetryConnected = false,
+  simulationScenario = 'nominal',
+  simulationPhase = 'IDLE',
+  simulationCountdown = 0,
 }) => {
   const {
     isLiveStream,
@@ -852,6 +862,82 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
         latestDps={latestDps}
         latestPt={latestPt}
       />
+
+      {/* Simulation Scenario Quick Launcher Bar */}
+      <div className={`border rounded-xl p-3 shadow-xs transition-colors ${
+        isSimulated
+          ? 'bg-amber-50/70 border-amber-300'
+          : 'bg-white border-slate-200'
+      }`}>
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center space-x-2">
+            <span className="text-xs font-bold font-mono text-slate-800 flex items-center space-x-1.5">
+              <span>🧪</span>
+              <span>SIMULATE TELEMETRY SCENARIO:</span>
+            </span>
+            <span className="text-[11px] text-slate-500 font-mono hidden sm:inline">
+              (5s normal 40Hz baseline → automatic trip injection & RCA trigger)
+            </span>
+          </div>
+
+          {/* Active Simulation Phase / Countdown Pill */}
+          {isSimulated && (
+            <div className="flex items-center space-x-2 font-mono text-xs">
+              {simulationPhase === 'NORMAL' && simulationCountdown > 0 ? (
+                <span className="px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-900 rounded-md font-bold flex items-center space-x-1.5 animate-pulse shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  <span>Normal Phase: Tripping {simulationScenario} in {simulationCountdown.toFixed(0)}s...</span>
+                </span>
+              ) : simulationPhase === 'TRIPPED' ? (
+                <span className="px-2.5 py-1 bg-rose-100 border border-rose-300 text-rose-800 rounded-md font-bold flex items-center space-x-1.5 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-rose-600 animate-ping" />
+                  <span>Fault Injected: {simulationScenario} Active</span>
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 rounded-md font-semibold">
+                  Simulating: {simulationScenario}
+                </span>
+              )}
+
+              {onToggleSimulation && (
+                <button
+                  onClick={() => onToggleSimulation(false)}
+                  className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-xs transition-colors cursor-pointer"
+                  title="Stop simulation mode"
+                >
+                  Stop Sim
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Quick Scenario Buttons Grid */}
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5 font-mono text-xs">
+          {[
+            { id: 'H_VFD_ERR06', label: '⚡ Err06: Decel Overvoltage (195V)', activeColor: 'bg-amber-100 border-amber-300 text-amber-900' },
+            { id: 'H_VFD_ERR02', label: '💥 Err02: Sudden Decel Overcurrent (2.5A)', activeColor: 'bg-rose-100 border-rose-300 text-rose-900' },
+            { id: 'H_VFD_ERR03', label: '📉 Err03: Decel Ramp Overcurrent (2.5A)', activeColor: 'bg-orange-100 border-orange-300 text-orange-900' },
+            { id: 'H_VFD_ERR11', label: '🔥 Err11: Motor Thermal Overload (2.0A)', activeColor: 'bg-red-100 border-red-300 text-red-900' },
+            { id: 'nominal', label: '🟢 Nominal Baseline (40Hz, No Trip)', activeColor: 'bg-emerald-100 border-emerald-300 text-emerald-900' },
+          ].map((sc) => {
+            const isCurrent = isSimulated && simulationScenario.toLowerCase() === sc.id.toLowerCase();
+            return (
+              <button
+                key={sc.id}
+                onClick={() => onToggleSimulation?.(true, sc.id, 5)}
+                className={`px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer font-semibold ${
+                  isCurrent
+                    ? `${sc.activeColor} ring-1 ring-amber-400 shadow-2xs`
+                    : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
+                }`}
+              >
+                {sc.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Overview Banner */}
       <div className="bg-white border border-slate-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">

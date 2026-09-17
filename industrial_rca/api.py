@@ -14,6 +14,8 @@ Provides endpoints for:
 import os
 import time
 import json
+import math
+import random
 import socket
 import asyncio
 import threading
@@ -198,6 +200,328 @@ class CopilotChatRequest(BaseModel):
 
 class SimulationToggleRequest(BaseModel):
     enabled: bool = Field(default=False, description="Enable or disable simulated telemetry fallback")
+    scenario: str = Field(default="nominal", description="Scenario: H_VFD_ERR06, H_VFD_ERR02, H_VFD_ERR03, H_VFD_ERR11, or nominal")
+    normal_duration_sec: float = Field(default=5.0, description="Duration in seconds of normal baseline before injecting fault")
+
+
+_SIMULATION_TASK: Optional[asyncio.Task] = None
+_SIMULATION_STATE: Dict[str, Any] = {
+    "enabled": False,
+    "scenario": "nominal",
+    "phase": "IDLE",
+    "start_time": 0.0,
+    "normal_duration": 5.0,
+    "countdown": 0.0,
+    "fault_injected": False,
+}
+
+
+def _dispatch_simulated_incident(incident: IncidentPayload):
+    """
+    Formats simulated incident dataset, registers with TelemetryStore,
+    notifies SSE subscribers, and dispatches the LangGraph RCA Agent in the background.
+    """
+    inc_id = incident.incident_id or f"INC-SIM-{incident.fault_code}-{int(time.time())}"
+    fault_desc = incident.fault_description
+    if not fault_desc:
+        fault_info = get_vfd_fault_info(incident.fault_code)
+        fault_desc = fault_info.get("description", f"WECON VM VFD Trip Code {incident.fault_code}")
+
+    raw_points = incident.pre_fault_telemetry
+    if not raw_points:
+        now = time.time()
+        raw_points = [
+            {"timestamp": now - t, "f_out": 40.0, "f_target": 40.0, "current": 1.15, "v_out": 220.0, "v_dc": 182.0, "fault_code": 0}
+            for t in range(5, 0, -1)
+        ]
+        raw_points.append({
+            "timestamp": now,
+            "f_out": 0.0,
+            "f_target": 0.0,
+            "current": 2.95 if incident.fault_code in (2, 3) else (2.45 if incident.fault_code == 11 else 1.15),
+            "v_out": 0.0,
+            "v_dc": 206.5 if incident.fault_code == 6 else 182.0,
+            "fault_code": incident.fault_code,
+        })
+    else:
+        if len(raw_points) > 0:
+            for p in raw_points[:-1]:
+                p["fault_code"] = 0
+            raw_points[-1]["fault_code"] = incident.fault_code
+            if incident.fault_code in (2, 3) and float(raw_points[-1].get("current", 0) or 0) < 2.50:
+                raw_points[-1]["current"] = 2.95
+            elif incident.fault_code == 11 and float(raw_points[-1].get("current", 0) or 0) < 2.00:
+                raw_points[-1]["current"] = 2.45
+            elif incident.fault_code == 6 and float(raw_points[-1].get("v_dc", 0) or 0) < 195.0:
+                raw_points[-1]["v_dc"] = 206.5
+
+    df = pd.DataFrame(raw_points)
+    for col, default in [("f_out", 0.0), ("f_target", 0.0), ("current", 0.0), ("v_out", 0.0), ("v_dc", 182.0), ("fault_code", 0)]:
+        if col not in df.columns:
+            df[col] = default
+
+    if len(df) > 0:
+        df.loc[df.index[:-1], "fault_code"] = 0
+        df.loc[df.index[-1], "fault_code"] = incident.fault_code
+
+    if "PT-30101" not in df.columns:
+        df["PT-30101"] = np.where(df["fault_code"] > 0, 0.58, 2.40)
+    if "DPS-30101" not in df.columns:
+        df["DPS-30101"] = np.where(df["fault_code"] > 0, 1.85, 0.12)
+    if "VI-301-R" not in df.columns:
+        df["VI-301-R"] = np.where(df["fault_code"] > 0, 11.4, 1.80)
+    if "TI-301-DE" not in df.columns:
+        df["TI-301-DE"] = np.where(df["fault_code"] > 0, 92.3, 48.5)
+    if "IT-30101" not in df.columns:
+        df["IT-30101"] = df["current"] * 60.0
+
+    t_norm, sig_norm = generate_high_frequency_vibration(is_cavitating=False)
+    t_fault, sig_fault = generate_high_frequency_vibration(is_cavitating=True)
+
+    is_curr_fault = incident.fault_code in (2, 3, 11)
+    dataset = TelemetryDataset(
+        scenario_name=f"Simulated Incident: {fault_desc}",
+        df_1hz=df,
+        metadata={
+            "asset_id": incident.asset_id,
+            "condition": "HARDWARE_FAULT_TRIP",
+            "anomaly_expected": True,
+            "fault_code": incident.fault_code,
+            "fault_description": fault_desc,
+            "trip_timestamp_sec": len(df) - 1,
+            "trip_time_str": time.strftime("%H:%M:%S UTC"),
+            "primary_trip_sensor": "current" if is_curr_fault else "v_dc",
+            "trip_value": float(df["current"].max()) if is_curr_fault else float(df["v_dc"].max()),
+            "trip_setpoint": 2.00 if incident.fault_code == 11 else (2.50 if is_curr_fault else 195.0),
+        },
+        normal_waveform={"t": t_norm, "signal": sig_norm},
+        fault_waveform={"t": t_fault, "signal": sig_fault},
+    )
+    ds_id = TelemetryStore.register(dataset, f"ds_sim_{incident.fault_code}_{int(time.time())}")
+    SCENARIOS_REGISTRY["hil"] = ds_id
+    SCENARIOS_REGISTRY["live_stream"] = ds_id
+
+    thread_id = f"rca-sim-{inc_id}"
+    LATEST_HIL_INCIDENT["has_incident"] = True
+    LATEST_HIL_INCIDENT["incident_data"] = {
+        "incident_id": inc_id,
+        "asset_id": incident.asset_id,
+        "fault_code": incident.fault_code,
+        "fault_description": fault_desc,
+        "dataset_id": ds_id,
+        "thread_id": thread_id,
+        "point_count": len(df),
+        "received_at": time.strftime("%Y-%m-%d %H:%M:%S UTC"),
+    }
+    LATEST_HIL_INCIDENT["received_at"] = time.strftime("%Y-%m-%d %H:%M:%S UTC")
+    LATEST_HIL_INCIDENT["pipeline_status"] = "TRIGGERED"
+    LATEST_HIL_INCIDENT["version"] += 1
+
+    _notify_hil_subscribers({
+        "event": "hil_incident_detected",
+        "data": LATEST_HIL_INCIDENT["incident_data"],
+        "thread_id": thread_id,
+        "dataset_id": ds_id,
+        "timestamp": time.time(),
+    })
+    _broadcast_live_metric({
+        "event": "incident",
+        "incident_id": inc_id,
+        "asset_id": incident.asset_id,
+        "fault_code": incident.fault_code,
+        "fault_description": fault_desc,
+        "f_out": 0.0,
+        "v_dc": float(df["v_dc"].max()) if ("v_dc" in df.columns and len(df) > 0) else 0.0,
+        "current": float(df["current"].max()) if ("current" in df.columns and len(df) > 0) else 0.0,
+        "rpm": 0.0,
+        "status": "TRIPPED",
+        "timestamp": time.time(),
+        "is_simulated": True,
+        "simulation_enabled": True,
+        "simulation_scenario": fault_desc,
+        "simulation_phase": "TRIPPED",
+    })
+
+    def _run_graph():
+        try:
+            config = {"configurable": {"thread_id": thread_id}}
+            init_state = {
+                "dataset_id": ds_id,
+                "asset_id": incident.asset_id,
+                "has_active_trip": True,
+                "fault_code": incident.fault_code,
+                "use_deepseek": True,
+                "deepseek_model": "deepseek-flash",
+            }
+            for _ in GLOBAL_RCA_GRAPH.stream(init_state, config=config):
+                pass
+            snapshot = GLOBAL_RCA_GRAPH.get_state(config)
+            LATEST_HIL_INCIDENT["graph_result"] = snapshot.values if snapshot else None
+            LATEST_HIL_INCIDENT["pipeline_status"] = "ANALYSIS_COMPLETE"
+            _notify_hil_subscribers({
+                "event": "hil_pipeline_completed",
+                "incident_id": inc_id,
+                "thread_id": thread_id,
+                "dataset_id": ds_id,
+                "status": "ANALYSIS_COMPLETE",
+            })
+        except Exception as e:
+            logger.error(f"Simulated incident RCA error: {e}")
+            LATEST_HIL_INCIDENT["pipeline_status"] = f"ERROR: {e}"
+
+    threading.Thread(target=_run_graph, daemon=True).start()
+
+
+async def _run_telemetry_simulation(scenario: str, normal_duration_sec: float = 5.0):
+    """
+    Simulates real-time telemetry:
+    1. For `normal_duration_sec` seconds: streams steady nominal baseline readings (f_out: 40 Hz, v_dc: 182 V, current: 1.15 A)
+       into GLOBAL_TSDB, broadcasts to SSE clients with live countdown.
+    2. At t >= normal_duration_sec: injects selected envelope breach / trip code (Err06, Err02, Err03, Err11),
+       automatically triggering the LangGraph DeepSeek RCA Agent!
+    """
+    logger.info(f"Starting telemetry simulation task: scenario={scenario}, duration={normal_duration_sec}s")
+    start_time = time.time()
+    _SIMULATION_STATE["start_time"] = start_time
+    _SIMULATION_STATE["scenario"] = scenario
+    _SIMULATION_STATE["normal_duration"] = normal_duration_sec
+    _SIMULATION_STATE["phase"] = "NORMAL"
+    _SIMULATION_STATE["fault_injected"] = False
+
+    fault_code_map = {
+        "H_VFD_ERR06": 6, "ERR06": 6, "6": 6,
+        "H_VFD_ERR02": 2, "ERR02": 2, "2": 2,
+        "H_VFD_ERR03": 3, "ERR03": 3, "3": 3,
+        "H_VFD_ERR11": 11, "ERR11": 11, "11": 11,
+    }
+    target_fc = fault_code_map.get(scenario.upper(), 0) if scenario.lower() not in ("nominal", "normal") else 0
+
+    try:
+        while influx_tool.is_simulation_enabled():
+            now = time.time()
+            elapsed = now - start_time
+            countdown = max(0.0, round(normal_duration_sec - elapsed, 1))
+            _SIMULATION_STATE["countdown"] = countdown
+
+            if elapsed < normal_duration_sec or target_fc == 0:
+                _SIMULATION_STATE["phase"] = "NORMAL"
+                f_out = round(40.0 + 0.25 * math.sin(now * 0.5) + random.uniform(-0.05, 0.05), 2)
+                v_dc = round(182.0 + 1.2 * math.cos(now * 0.3) + random.uniform(-0.3, 0.3), 1)
+                current = round(1.15 + 0.03 * math.sin(now * 0.7) + random.uniform(-0.02, 0.02), 2)
+                rpm = round(f_out * 29.0 + random.uniform(-1.0, 1.0), 1)
+                metric = {
+                    "asset_id": "VFD_VM_01",
+                    "f_out": f_out,
+                    "f_target": 40.0,
+                    "v_dc": v_dc,
+                    "v_out": 220.0,
+                    "current": current,
+                    "rpm": rpm,
+                    "fault_code": 0,
+                    "status": "RUNNING",
+                    "timestamp": now,
+                    "source": "simulation",
+                    "is_simulated": True,
+                    "telemetry_connected": True,
+                    "simulation_enabled": True,
+                    "simulation_scenario": scenario,
+                    "simulation_phase": "NORMAL",
+                    "simulation_countdown": countdown,
+                }
+                GLOBAL_TSDB.insert(metric)
+                influx_tool.update_latest(metric)
+                _broadcast_live_metric(metric)
+                await asyncio.sleep(1.0)
+            else:
+                if not _SIMULATION_STATE.get("fault_injected", False):
+                    _SIMULATION_STATE["fault_injected"] = True
+                    _SIMULATION_STATE["phase"] = "TRIPPED"
+                    _SIMULATION_STATE["countdown"] = 0.0
+                    logger.info(f"Injecting simulated fault {target_fc} ({scenario}) at t={elapsed:.2f}s!")
+
+                    if target_fc == 6:
+                        v_dc = 206.5
+                        current = 1.32
+                    elif target_fc == 2:
+                        v_dc = 184.0
+                        current = 2.95
+                    elif target_fc == 3:
+                        v_dc = 185.0
+                        current = 2.75
+                    elif target_fc == 11:
+                        v_dc = 181.5
+                        current = 2.45
+                    else:
+                        v_dc = 202.5
+                        current = 1.20
+
+                    trip_metric = {
+                        "asset_id": "VFD_VM_01",
+                        "f_out": 0.0,
+                        "f_target": 0.0,
+                        "v_dc": v_dc,
+                        "v_out": 0.0,
+                        "current": current,
+                        "rpm": 0.0,
+                        "fault_code": target_fc,
+                        "status": "TRIPPED",
+                        "timestamp": now,
+                        "source": "simulation",
+                        "is_simulated": True,
+                        "telemetry_connected": True,
+                        "simulation_enabled": True,
+                        "simulation_scenario": scenario,
+                        "simulation_phase": "TRIPPED",
+                        "simulation_countdown": 0.0,
+                    }
+                    GLOBAL_TSDB.insert(trip_metric)
+                    influx_tool.update_latest(trip_metric)
+                    _broadcast_live_metric(trip_metric)
+
+                    try:
+                        df_pre = GLOBAL_TSDB.get_window(seconds=60, asset_id="VFD_VM_01")
+                        pre_points = df_pre.to_dict("records")
+                        fault_info = get_vfd_fault_info(target_fc)
+                        inc_desc = fault_info.get("description", f"WECON VM VFD Trip Code {target_fc}")
+                        inc = IncidentPayload(
+                            asset_id="VFD_VM_01",
+                            fault_code=target_fc,
+                            fault_description=inc_desc,
+                            incident_id=f"INC-SIM-{target_fc}-{int(now)}",
+                            pre_fault_telemetry=pre_points,
+                        )
+                        _dispatch_simulated_incident(inc)
+                    except Exception as ex:
+                        logger.error(f"Auto-dispatch error in simulation loop: {ex}")
+
+                    await asyncio.sleep(1.0)
+                else:
+                    hold_metric = {
+                        "asset_id": "VFD_VM_01",
+                        "f_out": 0.0,
+                        "f_target": 0.0,
+                        "v_dc": 182.0,
+                        "v_out": 0.0,
+                        "current": 0.0,
+                        "rpm": 0.0,
+                        "fault_code": target_fc,
+                        "status": "TRIPPED",
+                        "timestamp": now,
+                        "source": "simulation",
+                        "is_simulated": True,
+                        "telemetry_connected": True,
+                        "simulation_enabled": True,
+                        "simulation_scenario": scenario,
+                        "simulation_phase": "TRIPPED",
+                        "simulation_countdown": 0.0,
+                    }
+                    influx_tool.update_latest(hold_metric)
+                    _broadcast_live_metric(hold_metric)
+                    await asyncio.sleep(1.0)
+    except asyncio.CancelledError:
+        logger.info(f"Simulation task cancelled: scenario={scenario}")
+    except Exception as e:
+        logger.error(f"Exception in simulation task: {e}")
 
 
 # ── Health & Diagnostics ──────────────────────────────────────────────
@@ -225,24 +549,68 @@ def get_health():
         "telemetry_connected": telemetry_connected,
         "is_simulated": sim_enabled,
         "simulation_enabled": sim_enabled,
+        "simulation_scenario": influx_tool.get_simulation_scenario() if sim_enabled else None,
+        "simulation_phase": _SIMULATION_STATE.get("phase", "IDLE") if sim_enabled else None,
         "telemetry_source": "hardware" if is_real else ("simulation" if sim_enabled else "disconnected"),
     }
 
 
 @api_app.get("/api/v1/telemetry/simulation")
 def get_telemetry_simulation_mode():
-    """Returns whether simulated telemetry fallback is currently enabled by user."""
-    return {"simulation_enabled": influx_tool.is_simulation_enabled()}
+    """Returns whether simulated telemetry is currently enabled by user, plus scenario and phase."""
+    return {
+        "simulation_enabled": influx_tool.is_simulation_enabled(),
+        "is_simulated": influx_tool.is_simulation_enabled(),
+        "scenario": influx_tool.get_simulation_scenario(),
+        "phase": _SIMULATION_STATE.get("phase", "IDLE"),
+        "countdown": _SIMULATION_STATE.get("countdown", 0.0),
+    }
 
 
 @api_app.post("/api/v1/telemetry/simulation")
-def set_telemetry_simulation_mode(request: SimulationToggleRequest):
-    """Explicitly enables or disables fallback simulated telemetry upon hardware disconnection."""
-    influx_tool.set_simulation_mode(request.enabled)
-    logger.info(f"Telemetry simulation mode updated: enabled={request.enabled}")
+async def set_telemetry_simulation_mode(request: SimulationToggleRequest):
+    """
+    Explicitly enables or disables fallback simulated telemetry.
+    When enabling with an error scenario, executes a 5-second normal baseline before injecting fault.
+    """
+    global _SIMULATION_TASK
+    if _SIMULATION_TASK and not _SIMULATION_TASK.done():
+        _SIMULATION_TASK.cancel()
+        try:
+            await asyncio.sleep(0.02)
+        except Exception:
+            pass
+
+    influx_tool.set_simulation_mode(
+        request.enabled,
+        scenario=request.scenario,
+        normal_duration=request.normal_duration_sec,
+    )
+
+    if request.enabled:
+        _SIMULATION_STATE["enabled"] = True
+        _SIMULATION_STATE["scenario"] = request.scenario
+        _SIMULATION_STATE["phase"] = "NORMAL"
+        _SIMULATION_STATE["countdown"] = request.normal_duration_sec
+        _SIMULATION_STATE["fault_injected"] = False
+        _SIMULATION_TASK = asyncio.create_task(
+            _run_telemetry_simulation(request.scenario, request.normal_duration_sec)
+        )
+        status_str = f"SIMULATION_STARTED_{request.scenario.upper()}"
+    else:
+        _SIMULATION_STATE["enabled"] = False
+        _SIMULATION_STATE["phase"] = "STOPPED"
+        _SIMULATION_STATE["countdown"] = 0.0
+        status_str = "SIMULATION_DISABLED"
+
+    logger.info(f"Telemetry simulation mode updated: enabled={request.enabled}, scenario={request.scenario}")
     return {
         "simulation_enabled": influx_tool.is_simulation_enabled(),
-        "status": "SIMULATION_ENABLED" if request.enabled else "SIMULATION_DISABLED",
+        "is_simulated": influx_tool.is_simulation_enabled(),
+        "scenario": request.scenario,
+        "phase": _SIMULATION_STATE.get("phase", "IDLE"),
+        "countdown": _SIMULATION_STATE.get("countdown", 0.0),
+        "status": status_str,
     }
 
 
@@ -308,6 +676,8 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
             raw_points[-1]["fault_code"] = incident.fault_code
             if incident.fault_code in (2, 3) and float(raw_points[-1].get("current", 0) or 0) < 2.50:
                 raw_points[-1]["current"] = 3.50
+            elif incident.fault_code == 11 and float(raw_points[-1].get("current", 0) or 0) < 2.00:
+                raw_points[-1]["current"] = 2.45
             elif incident.fault_code == 6 and float(raw_points[-1].get("v_dc", 0) or 0) < 195.0:
                 raw_points[-1]["v_dc"] = 202.5
 
@@ -334,7 +704,7 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
     t_norm, sig_norm = generate_high_frequency_vibration(is_cavitating=False)
     t_fault, sig_fault = generate_high_frequency_vibration(is_cavitating=True)
 
-    is_curr_fault = incident.fault_code in (2, 3)
+    is_curr_fault = incident.fault_code in (2, 3, 11)
     dataset = TelemetryDataset(
         scenario_name=f"HIL Incident: {fault_desc}",
         df_1hz=df,
@@ -348,7 +718,7 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
             "trip_time_str": time.strftime("%H:%M:%S UTC"),
             "primary_trip_sensor": "current" if is_curr_fault else "v_dc",
             "trip_value": float(df["current"].max()) if is_curr_fault else float(df["v_dc"].max()),
-            "trip_setpoint": 2.50 if is_curr_fault else 195.0,
+            "trip_setpoint": 2.00 if incident.fault_code == 11 else (2.50 if is_curr_fault else 195.0),
         },
         normal_waveform={"t": t_norm, "signal": sig_norm},
         fault_waveform={"t": t_fault, "signal": sig_fault},
@@ -453,6 +823,10 @@ def clear_incident():
 
     GLOBAL_TSDB.clear()
 
+    if influx_tool.is_simulation_enabled():
+        _SIMULATION_STATE["fault_injected"] = False
+        _SIMULATION_STATE["phase"] = "NORMAL"
+
     _notify_hil_subscribers({
         "event": "hil_incident_cleared",
         "status": "READY",
@@ -509,10 +883,21 @@ async def stream_telemetry_events():
 
 # ── Live VFD Telemetry Metrics & SSE Stream ───────────────────────────
 
+def _enrich_metric_with_simulation_state(m: dict) -> dict:
+    if influx_tool.is_simulation_enabled():
+        m["simulation_scenario"] = _SIMULATION_STATE.get("scenario", influx_tool.get_simulation_scenario())
+        m["simulation_phase"] = _SIMULATION_STATE.get("phase", "IDLE")
+        m["simulation_countdown"] = _SIMULATION_STATE.get("countdown", 0.0)
+        m["simulation_enabled"] = True
+        m["is_simulated"] = True
+    return m
+
+
 @api_app.get("/api/v1/telemetry/live/metrics")
 def get_live_telemetry_metrics():
     """Returns the latest single live telemetry metric for the Wecon VFD."""
-    return influx_tool.get_latest_metrics(asset_id="VFD_VM_01")
+    m = influx_tool.get_latest_metrics(asset_id="VFD_VM_01")
+    return _enrich_metric_with_simulation_state(m)
 
 
 @api_app.get("/api/v1/telemetry/live/stream")
@@ -528,18 +913,18 @@ async def stream_live_telemetry():
     async def sse_generator():
         try:
             init_metric = await asyncio.to_thread(influx_tool.get_latest_metrics, "VFD_VM_01")
-            yield f"data: {json.dumps(init_metric)}\n\n"
+            yield f"data: {json.dumps(_enrich_metric_with_simulation_state(init_metric))}\n\n"
 
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=1.0)
-                    yield f"data: {json.dumps(event)}\n\n"
+                    yield f"data: {json.dumps(_enrich_metric_with_simulation_state(event))}\n\n"
                     continue
                 except asyncio.TimeoutError:
                     pass
 
                 metric = await asyncio.to_thread(influx_tool.get_latest_metrics, "VFD_VM_01")
-                yield f"data: {json.dumps(metric)}\n\n"
+                yield f"data: {json.dumps(_enrich_metric_with_simulation_state(metric))}\n\n"
         except (asyncio.CancelledError, GeneratorExit):
             pass
         except Exception as e:
@@ -1331,6 +1716,12 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
         "   - Overcurrent Trip (Err02): Triggered when instantaneous current exceeds 2.50 A (217% FLA).",
         "     Typically caused by abrupt stop command from PLC de-energizing the Run coil instantaneously without a deceleration ramp.",
         "     Countermeasures: enforce ramp-down routine in PLC ladder logic instead of hard contact cut, tune parameter F0.18 >= 3.0s, Megger test motor (>50 M-Ohm).",
+        "   - Deceleration Overcurrent (Err03): Triggered when current exceeds 2.50 A during deceleration ramp.",
+        "     Typically caused by deceleration time F0.18 set too steep for high rotor inertia without dynamic braking.",
+        "     Countermeasures: increase deceleration time F0.18 to >= 5.0s, install dynamic braking resistor (100 Ohm 200W), enable F3.08 stall suppression.",
+        "   - Motor Thermal Overload (Err11): Triggered by inverter electronic thermal model I2t when continuous current exceeds parameter F2.03 rating.",
+        "     Typically caused by mechanical binding, driven equipment friction, or prolonged low-speed overload with insufficient cooling fan airflow.",
+        "     Countermeasures: inspect motor shaft mechanical binding, verify parameter F2.03 rating (1.15 A), clear cooling airflow obstructions.",
         "",
         "=== INSTRUCTIONS FOR YOUR RESPONSES ===",
         "- You are the engineer's copilot for THIS specific test bench (VFD_VM_01).",
