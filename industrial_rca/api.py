@@ -1154,13 +1154,24 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
     hardware status, active incident details, RCA diagnosis, and OEM domain context
     to the DeepSeek AI Copilot.
     """
-    latest_tel = GLOBAL_TSDB.get_latest("VFD_VM_01") or {}
     now = time.time()
-    pkt_time = latest_tel.get("timestamp", 0)
-    has_fresh_packet = bool(latest_tel and (now - pkt_time < 30))
     is_sim = influx_tool.is_simulation_enabled()
     mqtt_active = influx_tool.is_mqtt_active()
-    is_telemetry_live = has_fresh_packet or is_sim
+
+    latest_tsdb = GLOBAL_TSDB.get_latest("VFD_VM_01") or {}
+    pkt_time = latest_tsdb.get("timestamp", 0)
+    has_fresh_packet = bool(latest_tsdb and (now - pkt_time < 30))
+
+    if is_sim:
+        # Simulation mode active: obtain dynamic simulated telemetry metrics
+        latest_tel = influx_tool.get_latest_metrics("VFD_VM_01")
+        is_telemetry_live = True
+    elif has_fresh_packet:
+        latest_tel = latest_tsdb
+        is_telemetry_live = True
+    else:
+        latest_tel = {}
+        is_telemetry_live = False
 
     def _val(k: str, default: float = 0.0) -> float:
         v = latest_tel.get(k)
@@ -1179,7 +1190,7 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
     current = _val("current", 0.0)
     rpm = _val("rpm", 0.0)
     raw_fc = int(_val("fault_code", 0.0))
-    status = str(latest_tel.get("status", "TRIPPED" if raw_fc > 0 else "READY"))
+    status = str(latest_tel.get("status", "TRIPPED" if raw_fc > 0 else ("RUNNING" if is_sim else "READY")))
 
     # Check active HIL incident
     has_inc = bool(LATEST_HIL_INCIDENT.get("has_incident"))
@@ -1238,17 +1249,23 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
         ])
     elif is_sim:
         prompt_lines.extend([
-            "=== 🧪 TELEMETRY CONNECTION STATUS: SIMULATION ACTIVE 🧪 ===",
-            "- Connection State: SYNTHETIC SIMULATION (Explicitly enabled by user)",
-            "- Operating Status: RUNNING (Simulated)",
-            f"- Output Frequency: {f_out:.2f} Hz (Simulated)",
-            f"- Frequency Target: {f_target:.2f} Hz",
-            f"- DC Bus Voltage: {v_dc:.1f} V (Simulated)",
-            f"- Motor Output Current: {current:.2f} A (Simulated)",
-            f"- Rotor Speed: {rpm:.1f} RPM (Simulated)",
+            "=== 🧪 TELEMETRY CONNECTION STATUS: SIMULATION MODE ACTIVE 🧪 ===",
+            "- Connection State: SIMULATION ACTIVE (User explicitly enabled simulation)",
+            f"- Operating Status: {status}",
+            f"- Active Trip Code: {fault_str}",
+            f"- Output Frequency: {f_out:.2f} Hz",
+            f"- Frequency Target / Setpoint: {f_target:.2f} Hz",
+            f"- DC Bus Voltage: {v_dc:.1f} V (Calibrated intermediate DC link)",
+            f"- Motor Output Current: {current:.2f} A",
+            f"- Rotor Speed: {rpm:.1f} RPM (Synchronous: 1450 RPM)",
             "",
-            "*** NOTE FOR COPILOT ***",
-            "- Telemetry is currently in SIMULATION MODE (user-requested synthetic data feed). Remind the user when discussing readings that these values are synthetic test data, not physical hardware telemetry.",
+            "*** MANDATORY DIRECTIVES FOR SIMULATION MODE ***",
+            "1. BEHAVE LIKE NORMAL: You have full access to the active simulated telemetry above. Treat these readings as the active operating data of the Wecon VFD bench.",
+            "2. When the user asks 'what is the device at?', 'what is the motor speed?', 'what is the frequency?', 'what's the voltage/current?', 'how is it running?', etc.:",
+            "   - ANSWER DIRECTLY with the telemetry numbers above (e.g. output frequency is " + f"{f_out:.2f} Hz, rotor speed is {rpm:.0f} RPM, motor current is {current:.2f} A, DC bus voltage is {v_dc:.1f} V, status is {status}).",
+            "   - You know and may transparently mention that the bench is currently running in simulation mode, but YOU MUST ANSWER NORMALLY AND PROVIDE THE VALUES.",
+            "   - DO NOT refuse to answer, DO NOT say telemetry is unknown or unmeasurable, and DO NOT claim you cannot measure the device when simulation mode is active.",
+            "3. Evaluate device health and operational envelopes normally based on this data.",
             "",
         ])
     else:
@@ -1317,9 +1334,10 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
         "",
         "=== INSTRUCTIONS FOR YOUR RESPONSES ===",
         "- You are the engineer's copilot for THIS specific test bench (VFD_VM_01).",
-        "- When the user asks general, status, or greeting questions ('is everything okay?', 'does the device run well?', 'status?', 'what happened?'):",
-        "  * If telemetry is DISCONNECTED: Immediately state that telemetry is offline and no live packets are arriving from MQTT/Modbus.",
-        "  * If telemetry is CONNECTED or SIMULATED: Reference the actual equipment (Wecon VM Series VFD_VM_01) and quote its telemetry values (frequency, DC bus voltage, current, fault code).",
+        "- When the user asks general, status, or greeting questions ('is everything okay?', 'does the device run well?', 'status?', 'what happened?', 'what is the device at?', 'what is the motor speed?'):",
+        "  * If telemetry is DISCONNECTED: State clearly that live telemetry is offline (no signal on port 1883) and guide them to connect the Modbus bridge or click [Enable Simulation].",
+        "  * If telemetry is in SIMULATION MODE: BEHAVE LIKE NORMAL! Answer directly using the active simulation telemetry data (frequency, DC bus voltage, current, rotor speed). You can transparently note that it is running in simulation mode, but provide the values and discuss the device state normally without refusal.",
+        "  * If telemetry is LIVE HARDWARE: Reference the actual equipment (Wecon VM Series VFD_VM_01) and quote its real-time telemetry values.",
         "- NEVER say 'I don't have access to your hardware or sensors', 'what device are you using?', or treat this as a generic chat. You have direct system integration with the telemetry pipeline above.",
         "- Maintain a helpful, technical, concise, and professional engineering tone.",
     ])
