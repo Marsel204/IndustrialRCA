@@ -139,7 +139,7 @@ def run_fault_investigation(
     thread_id: str = DEFAULT_THREAD_ID,
     auto_decision: Optional[str] = None,
     use_deepseek: bool = False,
-    deepseek_model: str = "deepseek-chat",
+    deepseek_model: str = "deepseek-flash",
 ):
     """
     Executes Scenario 2: Strainer Clogging Induced Cavitation Trip.
@@ -437,7 +437,7 @@ def main():
     parser.add_argument("--override", action="store_true", help="Non-interactive override simulation")
     parser.add_argument("--reject", action="store_true", help="Non-interactive rejection simulation")
     parser.add_argument("--use-deepseek", action="store_true", help="Enable DeepSeek AI diagnostic reasoning")
-    parser.add_argument("--deepseek-model", type=str, default="deepseek-chat", choices=["deepseek-chat", "deepseek-reasoner"], help="DeepSeek model to use (default: deepseek-chat)")
+    parser.add_argument("--deepseek-model", type=str, default="deepseek-flash", choices=["deepseek-flash", "deepseek-chat", "deepseek-reasoner"], help="DeepSeek model to use (default: deepseek-flash)")
     parser.add_argument("--test-deepseek", action="store_true", help="Test DeepSeek API connectivity and exit")
     parser.add_argument("--server", action="store_true", help="Start standalone FastAPI REST/SSE backend on port 8000")
     parser.add_argument("--port", type=int, default=8000, help="Port for FastAPI server (default: 8000)")

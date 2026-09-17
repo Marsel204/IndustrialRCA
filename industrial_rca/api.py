@@ -179,7 +179,7 @@ class RCARunRequest(BaseModel):
     asset_id: str = Field(default=EQUIPMENT_ID, description="Target asset ID")
     thread_id: Optional[str] = Field(default=None, description="Session thread ID for LangGraph checkpointer")
     use_deepseek: bool = Field(default=True, description="Enable DeepSeek AI evaluation")
-    deepseek_model: str = Field(default="deepseek-chat", description="Model: deepseek-chat or deepseek-reasoner")
+    deepseek_model: str = Field(default="deepseek-flash", description="Model: deepseek-flash (V4.1 Flash)")
 
 
 class HumanReviewRequest(BaseModel):
@@ -193,7 +193,7 @@ class HumanReviewRequest(BaseModel):
 class CopilotChatRequest(BaseModel):
     messages: List[Dict[str, str]] = Field(description="Chat history messages")
     thread_id: Optional[str] = Field(default=None, description="Associated RCA thread ID for contextual grounding")
-    model: Optional[str] = Field(default="deepseek-chat", description="Model to use")
+    model: Optional[str] = Field(default="deepseek-flash", description="Model to use")
 
 
 # ── Health & Diagnostics ──────────────────────────────────────────────
@@ -377,7 +377,7 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
                 "has_active_trip": True,
                 "fault_code": incident.fault_code,
                 "use_deepseek": True,
-                "deepseek_model": "deepseek-reasoner",
+                "deepseek_model": "deepseek-flash",
             }
             for _ in GLOBAL_RCA_GRAPH.stream(init_state, config=config):
                 pass
@@ -1261,7 +1261,7 @@ def stream_copilot_chat(request: CopilotChatRequest):
     Streams token deltas for both content and reasoning_content chunk by chunk.
     Automatically injects grounded real-time telemetry, asset topology, and RCA state context.
     """
-    model = request.model or "deepseek-chat"
+    model = request.model or "deepseek-flash"
     raw_messages = request.messages
 
     # Inject rich real-time context as system prompt

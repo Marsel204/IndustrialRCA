@@ -1,6 +1,6 @@
 """
 DeepSeek API Client for Industrial Root Cause Analysis.
-Supports both deepseek-chat (DeepSeek-V3) and deepseek-reasoner (DeepSeek-R1 with CoT reasoning_content).
+Supports deepseek-flash (DeepSeek-V4.1-Flash with MoE CoT reasoning), deepseek-chat, and deepseek-reasoner.
 Loads configuration from .env using python-dotenv.
 Provides automatic fallback to high-fidelity deterministic simulation if API key is not present.
 """
@@ -34,7 +34,7 @@ class DeepSeekClient:
     ):
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
         self.base_url = base_url or os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-        self.default_model = default_model or os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+        self.default_model = default_model or os.environ.get("DEEPSEEK_MODEL", "deepseek-flash")
 
         self.is_live = bool(
             self.api_key and self.api_key.strip() not in ("mock", "test", "dummy", "")

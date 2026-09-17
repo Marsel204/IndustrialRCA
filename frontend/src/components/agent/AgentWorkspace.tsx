@@ -667,8 +667,8 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
               <span className="text-xs font-mono font-bold text-slate-800 truncate">
                 Industrial RCA Agent
               </span>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200/70 text-slate-600 border border-slate-300/60 font-medium">
-                {deepseekModel}
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 font-bold">
+                V4.1 Flash
               </span>
             </div>
             <div className="text-[11px] text-slate-500 font-mono truncate">

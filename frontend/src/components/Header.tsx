@@ -13,8 +13,8 @@ interface HeaderProps {
   apiOnline: boolean;
   latestIncident: LatestIncident | null;
   onResetPipeline: () => void;
-  deepseekModel: string;
-  onToggleModel: (model: string) => void;
+  deepseekModel?: string;
+  onToggleModel?: (model: string) => void;
   isPipelineRunning: boolean;
   mqttConnected?: boolean;
   isSimulated?: boolean;
@@ -156,19 +156,12 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right: AI Engine Toggle, Status & Actions */}
         <div className="flex items-center space-x-2.5">
-          {/* DeepSeek Model Selector */}
-          <div className="hidden lg:flex items-center space-x-1.5 bg-slate-50 border border-slate-200 px-2 py-1 rounded-md">
+          {/* DeepSeek Unified Model Badge */}
+          <div className="hidden lg:flex items-center space-x-1.5 bg-purple-50/80 border border-purple-200/90 px-2.5 py-1 rounded-md text-xs shadow-2xs">
             <Bot className="w-3.5 h-3.5 text-purple-600" />
-            <span className="text-[11px] font-mono text-slate-500">AI:</span>
-            <button
-              onClick={() =>
-                onToggleModel(deepseekModel === 'deepseek-chat' ? 'deepseek-reasoner' : 'deepseek-chat')
-              }
-              className="text-[11px] font-mono font-medium text-purple-700 hover:text-purple-900 underline decoration-dotted cursor-pointer"
-              title="Click to toggle between DeepSeek-V3 and DeepSeek-R1 Reasoner"
-            >
-              {deepseekModel === 'deepseek-reasoner' ? 'R1 (Reasoner CoT)' : 'V3 (Chat Fast)'}
-            </button>
+            <span className="text-[11px] font-mono text-purple-800 font-bold">
+              DeepSeek V4.1 Flash
+            </span>
           </div>
 
           {/* API Health Pill */}

@@ -748,7 +748,7 @@ def causal_deep_dive_5_whys(state: RCAState) -> Dict[str, Any]:
 
     # If DeepSeek AI is enabled, enrich analysis with live DeepSeek LLM reasoning
     if state.get("use_deepseek"):
-        model_name = state.get("deepseek_model") or "deepseek-chat"
+        model_name = state.get("deepseek_model") or "deepseek-flash"
         prompt = (
             f"You are an industrial automation and power electronics reliability expert. Review this trip:\n"
             f"- Asset: {asset_id} ({EQUIPMENT_NAME})\n"

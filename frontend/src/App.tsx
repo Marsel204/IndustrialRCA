@@ -31,7 +31,7 @@ import {
 export function App() {
   const [inspectorTab, setInspectorTab] = useState<string>('telemetry');
   const [activeScenarioId, setActiveScenarioId] = useState<string>('live_stream');
-  const [deepseekModel, setDeepseekModel] = useState<string>('deepseek-chat');
+  const [deepseekModel, setDeepseekModel] = useState<string>('deepseek-flash');
   const [isReviewModalOpen, setIsReviewModalOpen] = useState<boolean>(false);
 
   // Application Data States
