@@ -6,6 +6,9 @@ import {
   RCAState,
   LatestIncident,
   LiveMetric,
+  ApiKeyStatus,
+  ApiKeySaveResponse,
+  ApiKeyTestResponse,
 } from './types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || '/api/v1';
@@ -252,6 +255,58 @@ export async function toggleSimulationMode(
 export async function fetchSimulationStatus(): Promise<SimulationStatusResponse> {
   const res = await fetch(`${API_BASE}/telemetry/simulation`);
   if (!res.ok) throw new Error(`Failed to fetch simulation status: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchApiKeyStatus(): Promise<ApiKeyStatus> {
+  const res = await fetch(`${API_BASE}/settings/api-key`);
+  if (!res.ok) throw new Error(`Failed to fetch API key status: ${res.statusText}`);
+  return res.json();
+}
+
+export async function saveApiKey(params: {
+  api_key: string;
+  base_url?: string;
+  model?: string;
+}): Promise<ApiKeySaveResponse> {
+  const res = await fetch(`${API_BASE}/settings/api-key`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to save API key: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function testApiKeyConnection(params?: {
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+}): Promise<ApiKeyTestResponse> {
+  const res = await fetch(`${API_BASE}/settings/api-key/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params || {}),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to test API key: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function deleteApiKey(): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`${API_BASE}/settings/api-key`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to delete API key: ${res.statusText}`);
+  }
   return res.json();
 }
 

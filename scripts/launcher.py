@@ -43,10 +43,14 @@ FRONTEND_DIR = ROOT_DIR / "frontend"
 
 
 def is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
-    """Checks if a TCP port is currently open and listening."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(0.5)
-        return s.connect_ex((host, port)) == 0
+    """Checks if a TCP port is currently open and listening on 127.0.0.1 or localhost."""
+    for h in (host, "127.0.0.1", "localhost"):
+        try:
+            with socket.create_connection((h, port), timeout=0.5):
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def kill_pid_tree(pid: int):
@@ -68,12 +72,14 @@ def kill_pid_tree(pid: int):
                 pass
 
 
-def wait_for_service(url: str, name: str, timeout_sec: int = 15) -> bool:
-    """Polls an HTTP endpoint until it returns a successful status code."""
+def wait_for_service(url: str, name: str, timeout_sec: int = 15, port: int = None) -> bool:
+    """Polls an HTTP endpoint or TCP port until service is active."""
     start = time.time()
     while time.time() - start < timeout_sec:
+        if port and is_port_in_use(port):
+            return True
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "RCA-Launcher"})
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=1.5) as resp:
                 if resp.status in (200, 304):
                     return True
@@ -170,7 +176,7 @@ def main():
                 stderr=subprocess.DEVNULL,
             )
             processes.append(("FastAPI Backend", api_proc))
-            if wait_for_service("http://127.0.0.1:8000/api/v1/health", "FastAPI"):
+            if wait_for_service("http://127.0.0.1:8000/api/v1/health", "FastAPI", port=8000):
                 print(f"\r {C_GREEN}✓{C_RESET} FastAPI Backend : {C_GREEN}Healthy on http://localhost:8000{C_RESET}")
             else:
                 print(f"\r {C_YELLOW}!{C_RESET} FastAPI Backend : Starting up on http://localhost:8000")
@@ -190,18 +196,19 @@ def main():
             # Find vite executable or use npm run dev
             vite_cmd = FRONTEND_DIR / "node_modules" / ".bin" / ("vite.cmd" if os.name == "nt" else "vite")
             if vite_cmd.exists():
-                fe_args = [str(vite_cmd), "--host", "0.0.0.0", "--port", "5173"]
+                fe_args = f'"{vite_cmd}" --host 0.0.0.0 --port 5173' if os.name == "nt" else [str(vite_cmd), "--host", "0.0.0.0", "--port", "5173"]
             else:
-                fe_args = [npm_cmd, "run", "dev"]
+                fe_args = f"{npm_cmd} run dev" if os.name == "nt" else [npm_cmd, "run", "dev"]
 
             fe_proc = subprocess.Popen(
                 fe_args,
                 cwd=str(FRONTEND_DIR),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                shell=(os.name == "nt"),
             )
             processes.append(("React Frontend", fe_proc))
-            if wait_for_service("http://127.0.0.1:5173", "Frontend"):
+            if wait_for_service("http://127.0.0.1:5173", "Frontend", port=5173):
                 print(f"\r {C_GREEN}✓{C_RESET} React Frontend  : {C_GREEN}Ready on http://localhost:5173{C_RESET}")
             else:
                 print(f"\r {C_YELLOW}!{C_RESET} React Frontend  : Launching on http://localhost:5173")

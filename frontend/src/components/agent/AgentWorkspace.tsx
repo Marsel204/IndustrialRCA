@@ -13,8 +13,9 @@ import {
   Bot,
   RotateCcw,
   Activity,
+  Key,
 } from 'lucide-react';
-import { RCAState, ChatMessage, ToolExecutionItem, LatestIncident, LiveMetric } from '../../types';
+import { RCAState, ChatMessage, ToolExecutionItem, LatestIncident, LiveMetric, ApiKeyStatus } from '../../types';
 import { streamCopilotChat, fetchLiveMetrics, subscribeLiveTelemetryStream } from '../../api';
 import { PipelineStepper } from '../PipelineStepper';
 import ReactMarkdown from 'react-markdown';
@@ -111,6 +112,8 @@ interface AgentWorkspaceProps {
   onOpenReviewModal: () => void;
   activeScenarioName?: string;
   isPipelineRunning?: boolean;
+  apiKeyStatus?: ApiKeyStatus | null;
+  onOpenApiKeyModal?: () => void;
 }
 
 export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
@@ -122,6 +125,8 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
   onOpenReviewModal,
   activeScenarioName: _activeScenarioName = 'Emergency Trip (Strainer Clog)',
   isPipelineRunning = false,
+  apiKeyStatus,
+  onOpenApiKeyModal,
 }) => {
   // Collapsible States for RCA Mission (Turn 1)
   const [isCoTExpanded, setIsCoTExpanded] = useState<boolean>(false);
@@ -1314,6 +1319,30 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
             <span>Send</span>
           </button>
         </form>
+
+        {/* DeepSeek API Key Status Bar */}
+        <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 mt-2 px-0.5">
+          <div className="flex items-center space-x-1.5">
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                apiKeyStatus?.has_key ? 'bg-emerald-500' : 'bg-amber-500'
+              }`}
+            />
+            <span>
+              Engine: {apiKeyStatus?.has_key ? 'Live DeepSeek API' : 'Deterministic Simulation Mode'}
+            </span>
+          </div>
+          {onOpenApiKeyModal && (
+            <button
+              type="button"
+              onClick={onOpenApiKeyModal}
+              className="text-purple-600 hover:text-purple-700 hover:underline flex items-center space-x-1 cursor-pointer transition-colors"
+            >
+              <Key className="w-2.5 h-2.5" />
+              <span>{apiKeyStatus?.has_key ? 'Manage Key (.env)' : 'Set API Key (.env)'}</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

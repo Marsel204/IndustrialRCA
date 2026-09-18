@@ -6,6 +6,7 @@ import {
   Bot,
   ChevronDown,
   Zap,
+  Key,
 } from 'lucide-react';
 import { Scenario, LatestIncident } from '../types';
 
@@ -25,6 +26,8 @@ interface HeaderProps {
   simulationPhase?: string;
   simulationCountdown?: number;
   onToggleSimulation?: (enabled: boolean, scenario?: string, duration?: number) => void;
+  apiKeyConfigured?: boolean;
+  onOpenApiKeyModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -43,6 +46,8 @@ export const Header: React.FC<HeaderProps> = ({
   simulationPhase = 'IDLE',
   simulationCountdown = 0,
   onToggleSimulation,
+  apiKeyConfigured = false,
+  onOpenApiKeyModal,
 }) => {
   const activeScenario = scenarios.find((s) => s.id === activeScenarioId);
   const incFaultNum = latestIncident?.incident_data?.fault_code || 6;
@@ -250,12 +255,49 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           {/* DeepSeek Unified Model Badge */}
-          <div className="flex items-center space-x-1.5 bg-purple-50/70 border border-purple-200/80 px-2 py-1 rounded-md text-[11px] font-mono shadow-2xs">
+          <button
+            type="button"
+            onClick={onOpenApiKeyModal}
+            className="flex items-center space-x-1.5 bg-purple-50/80 hover:bg-purple-100/90 border border-purple-200/80 px-2 py-1 rounded-md text-[11px] font-mono shadow-2xs transition-colors cursor-pointer"
+            title="Configure DeepSeek API Key & Model"
+          >
             <Bot className="w-3 h-3 text-purple-600" />
             <span className="text-purple-800 font-bold">
-              V4.1 Flash
+              {deepseekModel === 'deepseek-reasoner'
+                ? 'R1 Reasoner'
+                : deepseekModel === 'deepseek-chat'
+                ? 'V3 Chat'
+                : 'V4.1 Flash'}
             </span>
-          </div>
+          </button>
+
+          {/* API Key Status / Modal Trigger */}
+          {onOpenApiKeyModal && (
+            <button
+              type="button"
+              onClick={onOpenApiKeyModal}
+              className={`flex items-center space-x-1.5 px-2 py-1 rounded-md text-[11px] font-mono border transition-all cursor-pointer shadow-2xs ${
+                apiKeyConfigured
+                  ? 'bg-emerald-50/80 hover:bg-emerald-100/90 border-emerald-300/80 text-emerald-800'
+                  : 'bg-amber-50/80 hover:bg-amber-100/90 border-amber-300/80 text-amber-900'
+              }`}
+              title={
+                apiKeyConfigured
+                  ? 'DeepSeek API Key Active (.env saved) · Click to manage'
+                  : 'API Key Not Set · Click to paste key and auto-save into .env'
+              }
+            >
+              <Key className={`w-3 h-3 ${apiKeyConfigured ? 'text-emerald-600' : 'text-amber-600'}`} />
+              <span className="font-semibold">
+                {apiKeyConfigured ? 'API Key' : 'Set Key'}
+              </span>
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  apiKeyConfigured ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'
+                }`}
+              />
+            </button>
+          )}
 
           {/* API Health Pill */}
           <div

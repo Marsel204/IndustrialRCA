@@ -8,6 +8,8 @@ from typing import Dict, Any
 
 # Base Directories
 BASE_DIR = Path(__file__).resolve().parent
+ROOT_DIR = BASE_DIR.parent
+ENV_FILE = ROOT_DIR / ".env"
 DATA_DIR = BASE_DIR / "data"
 TOPOLOGY_FILE = DATA_DIR / "asset_topology.json"
 

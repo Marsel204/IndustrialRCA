@@ -334,3 +334,30 @@ export interface LiveMetric {
   simulation_phase?: 'NORMAL' | 'TRIPPED' | string;
   simulation_countdown?: number;
 }
+
+export interface ApiKeyStatus {
+  has_key: boolean;
+  masked_key: string;
+  provider: string;
+  base_url: string;
+  model: string;
+  is_live: boolean;
+  status: 'ONLINE' | 'SIMULATION' | string;
+  env_path?: string;
+  env_exists?: boolean;
+}
+
+export interface ApiKeySaveResponse extends ApiKeyStatus {
+  success: boolean;
+  message: string;
+}
+
+export interface ApiKeyTestResponse {
+  success: boolean;
+  status: 'ONLINE' | 'FAILED' | string;
+  is_live: boolean;
+  model?: string;
+  response?: string;
+  message: string;
+  usage?: Record<string, any>;
+}

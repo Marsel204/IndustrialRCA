@@ -4,6 +4,7 @@ import { Header } from './components/Header';
 import { AgentWorkspace } from './components/agent/AgentWorkspace';
 import { ArtifactInspector } from './components/inspector/ArtifactInspector';
 import { ReviewSignOffModal } from './components/agent/ReviewSignOffModal';
+import { ApiKeyModal } from './components/settings/ApiKeyModal';
 
 import {
   Scenario,
@@ -12,6 +13,7 @@ import {
   TopologyData,
   RCAState,
   LatestIncident,
+  ApiKeyStatus,
 } from './types';
 
 import {
@@ -28,6 +30,7 @@ import {
   subscribeLiveTelemetryStream,
   clearIncident,
   toggleSimulationMode,
+  fetchApiKeyStatus,
 } from './api';
 
 export function App() {
@@ -35,6 +38,8 @@ export function App() {
   const [activeScenarioId, setActiveScenarioId] = useState<string>('live_stream');
   const [deepseekModel, setDeepseekModel] = useState<string>('deepseek-flash');
   const [isReviewModalOpen, setIsReviewModalOpen] = useState<boolean>(false);
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
+  const [apiKeyStatus, setApiKeyStatus] = useState<ApiKeyStatus | null>(null);
 
   // Application Data States
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
@@ -112,6 +117,17 @@ export function App() {
       // 4. Fetch Topology
       const topo = await fetchTopology('VFD_VM_01');
       setTopology(topo);
+
+      // 5. Fetch API Key & Engine Status
+      try {
+        const keyStatus = await fetchApiKeyStatus();
+        setApiKeyStatus(keyStatus);
+        if (keyStatus?.model) {
+          setDeepseekModel(keyStatus.model);
+        }
+      } catch (e) {
+        console.warn('Failed to fetch API key status:', e);
+      }
     } catch (err: any) {
       console.error('Initialization error:', err);
       setErrorMessage(err.message || 'Failed to connect to Industrial RCA backend.');
@@ -479,6 +495,8 @@ export function App() {
         simulationPhase={simulationPhase}
         simulationCountdown={simulationCountdown}
         onToggleSimulation={handleToggleSimulation}
+        apiKeyConfigured={Boolean(apiKeyStatus?.has_key)}
+        onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
       />
 
       {/* Error Alert Banner */}
@@ -511,6 +529,8 @@ export function App() {
             onOpenReviewModal={() => setIsReviewModalOpen(true)}
             activeScenarioName={activeScenario?.name}
             isPipelineRunning={isPipelineRunning}
+            apiKeyStatus={apiKeyStatus}
+            onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
           />
         </section>
 
@@ -541,6 +561,19 @@ export function App() {
         onClose={() => setIsReviewModalOpen(false)}
         rcaState={rcaState}
         onSubmitReview={handleSubmitReview}
+      />
+
+      {/* DeepSeek API Key & .env Configuration Modal */}
+      <ApiKeyModal
+        isOpen={isApiKeyModalOpen}
+        onClose={() => setIsApiKeyModalOpen(false)}
+        apiKeyStatus={apiKeyStatus}
+        onApiKeyUpdated={(newStatus) => {
+          setApiKeyStatus(newStatus);
+          if (newStatus?.model) {
+            setDeepseekModel(newStatus.model);
+          }
+        }}
       />
 
       {/* Minimal Footer */}

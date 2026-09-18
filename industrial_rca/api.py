@@ -68,6 +68,12 @@ from industrial_rca.data.embedded_tsdb import GLOBAL_TSDB
 from industrial_rca.graph.workflow import create_rca_graph
 from industrial_rca.utils.middleware import CorrelationIdMiddleware
 from industrial_rca.utils.logging import get_logger
+from industrial_rca.utils.env_manager import (
+    get_api_key_status,
+    save_api_key,
+    delete_api_key,
+    test_api_credentials,
+)
 
 logger = get_logger("industrial_rca.api")
 
@@ -196,6 +202,18 @@ class CopilotChatRequest(BaseModel):
     messages: List[Dict[str, str]] = Field(description="Chat history messages")
     thread_id: Optional[str] = Field(default=None, description="Associated RCA thread ID for contextual grounding")
     model: Optional[str] = Field(default="deepseek-flash", description="Model to use")
+
+
+class ApiKeySaveRequest(BaseModel):
+    api_key: str = Field(description="DeepSeek API Key (e.g. sk-...)")
+    base_url: Optional[str] = Field(default=None, description="Optional custom base URL")
+    model: Optional[str] = Field(default=None, description="Optional default model name")
+
+
+class ApiKeyTestRequest(BaseModel):
+    api_key: Optional[str] = Field(default=None, description="Optional API key to test without saving")
+    base_url: Optional[str] = Field(default=None, description="Optional base URL")
+    model: Optional[str] = Field(default=None, description="Optional model name")
 
 
 class SimulationToggleRequest(BaseModel):
@@ -1782,6 +1800,70 @@ def stream_copilot_chat(request: CopilotChatRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ── DeepSeek API Key & .env Management Endpoints ──────────────────────────────
+
+@api_app.get("/api/v1/settings/api-key")
+def get_api_key_settings():
+    """
+    Returns current API key configuration and status.
+    Masks the secret key to prevent plaintext exposure.
+    """
+    return get_api_key_status()
+
+
+@api_app.post("/api/v1/settings/api-key")
+def save_api_key_settings(req: ApiKeySaveRequest):
+    """
+    Saves API key to the root .env file, updates os.environ,
+    and dynamically reconfigures active DeepSeek client instances.
+    """
+    try:
+        status = save_api_key(
+            api_key=req.api_key,
+            base_url=req.base_url,
+            model=req.model,
+        )
+        return status
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to save API key to .env: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save API key to .env: {str(e)}")
+
+
+@api_app.post("/api/v1/settings/api-key/test")
+def test_api_key_settings(req: ApiKeyTestRequest):
+    """
+    Tests API connectivity with provided credentials or the currently configured API key.
+    """
+    try:
+        return test_api_credentials(
+            api_key=req.api_key,
+            base_url=req.base_url,
+            model=req.model,
+        )
+    except Exception as e:
+        return {
+            "success": False,
+            "status": "FAILED",
+            "is_live": False,
+            "message": f"Connection test failed: {str(e)}",
+        }
+
+
+@api_app.delete("/api/v1/settings/api-key")
+def delete_api_key_settings():
+    """
+    Removes DEEPSEEK_API_KEY from .env, removes from os.environ,
+    and resets clients to deterministic simulation mode.
+    """
+    try:
+        return delete_api_key()
+    except Exception as e:
+        logger.error(f"Failed to delete API key: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete API key: {str(e)}")
 
 
 # ── Daemon Startup Helper ─────────────────────────────────────────────

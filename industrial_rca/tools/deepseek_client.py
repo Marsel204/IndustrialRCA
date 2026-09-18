@@ -19,6 +19,23 @@ load_dotenv(dotenv_path=env_path)
 
 logger = logging.getLogger(__name__)
 
+_ACTIVE_CLIENTS: List["DeepSeekClient"] = []
+
+
+def get_active_deepseek_clients() -> List["DeepSeekClient"]:
+    """Returns list of active DeepSeek client instances."""
+    return list(_ACTIVE_CLIENTS)
+
+
+def reconfigure_all_deepseek_clients(
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    default_model: Optional[str] = None,
+) -> None:
+    """Reconfigures all active DeepSeekClient instances with updated credentials/settings."""
+    for client in list(_ACTIVE_CLIENTS):
+        client.reconfigure(api_key=api_key, base_url=base_url, default_model=default_model)
+
 
 class DeepSeekClient:
     """
@@ -35,7 +52,12 @@ class DeepSeekClient:
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
         self.base_url = base_url or os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
         self.default_model = default_model or os.environ.get("DEEPSEEK_MODEL", "deepseek-flash")
+        self._init_client()
+        if self not in _ACTIVE_CLIENTS:
+            _ACTIVE_CLIENTS.append(self)
 
+    def _init_client(self) -> None:
+        """Initializes or resets internal OpenAI client."""
         self.is_live = bool(
             self.api_key and self.api_key.strip() not in ("mock", "test", "dummy", "")
         )
@@ -54,6 +76,25 @@ class DeepSeekClient:
         else:
             self.client = None
             logger.info("DeepSeek client running in deterministic test/simulation mode.")
+
+    def reconfigure(
+        self,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        default_model: Optional[str] = None,
+    ) -> None:
+        """Dynamically reconfigures credentials and parameters at runtime without process restart."""
+        if api_key is not None:
+            self.api_key = api_key
+        else:
+            self.api_key = os.environ.get("DEEPSEEK_API_KEY")
+
+        if base_url is not None:
+            self.base_url = base_url
+        if default_model is not None:
+            self.default_model = default_model
+
+        self._init_client()
 
     def chat_completion(
         self,
