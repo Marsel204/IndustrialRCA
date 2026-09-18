@@ -83,6 +83,40 @@ def wait_for_service(url: str, name: str, timeout_sec: int = 15) -> bool:
     return False
 
 
+def open_browser(url: str) -> bool:
+    """
+    Robust browser launcher for Windows and Linux/macOS.
+    Bypasses silent Windows ShellExecute failures by directly checking and
+    launching Chrome, Edge, or Brave before falling back to webbrowser.open.
+    """
+    if os.name == "nt":
+        candidates = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ]
+        for exe in candidates:
+            if os.path.exists(exe):
+                try:
+                    subprocess.Popen([exe, url])
+                    return True
+                except Exception:
+                    pass
+        try:
+            os.system(f'start "" "{url}"')
+            return True
+        except Exception:
+            pass
+
+    try:
+        return webbrowser.open(url)
+    except Exception:
+        return False
+
+
+
 def print_banner():
     print(
         f"\n{C_CYAN}{C_BOLD}"
@@ -145,6 +179,13 @@ def main():
         if is_port_in_use(5173):
             print(f" {C_GREEN}●{C_RESET} React Frontend  : {C_DIM}Port 5173 already active (reusing existing server){C_RESET}")
         else:
+            # Verify required frontend packages exist
+            markdown_pkg = FRONTEND_DIR / "node_modules" / "react-markdown"
+            if not markdown_pkg.exists():
+                print(f" {C_YELLOW}▶{C_RESET} Installing frontend packages (npm install)...", end="", flush=True)
+                subprocess.run([npm_cmd, "install"], cwd=str(FRONTEND_DIR), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print(f"\r {C_GREEN}✓{C_RESET} Frontend packages installed.               ")
+
             print(f" {C_YELLOW}▶{C_RESET} Starting React Frontend (Port 5173)...", end="", flush=True)
             # Find vite executable or use npm run dev
             vite_cmd = FRONTEND_DIR / "node_modules" / ".bin" / ("vite.cmd" if os.name == "nt" else "vite")
@@ -168,7 +209,11 @@ def main():
         # 4. Open Default Web Browser
         print(f"\n {C_CYAN}▶ Opening web browser to http://localhost:5173...{C_RESET}")
         time.sleep(1)
-        webbrowser.open("http://localhost:5173")
+        opened = open_browser("http://localhost:5173")
+        if opened:
+            print(f" {C_GREEN}✓{C_RESET} Browser launched successfully.")
+        else:
+            print(f" {C_YELLOW}!{C_RESET} Browser auto-open was intercepted by Windows.")
 
         # Summary box
         print(
@@ -177,11 +222,12 @@ def main():
             "   ✓ ALL SERVICES ARE RUNNING AND FULLY OPERATIONAL!                 \n"
             f"======================================================================{C_RESET}"
         )
-        print(f"  • {C_BOLD}Main Dashboard :{C_RESET} {C_CYAN}http://localhost:5173{C_RESET}")
+        print(f"  • {C_BOLD}Main Dashboard :{C_RESET} {C_CYAN}{C_BOLD}http://localhost:5173{C_RESET}  ◄── {C_YELLOW}OPEN THIS IN YOUR BROWSER{C_RESET}")
         print(f"  • {C_BOLD}FastAPI Swagger:{C_RESET} {C_CYAN}http://localhost:8000/docs{C_RESET}")
         print(f"  • {C_BOLD}Edge MQTT Broker:{C_RESET} {C_CYAN}tcp://localhost:1883{C_RESET}")
         print(f"  • {C_BOLD}AI Model       :{C_RESET} {C_MAGENTA}DeepSeek V4.1 Flash{C_RESET}")
-        print(f"\n{C_DIM}Press Ctrl+C (or close this window) to terminate all services.{C_RESET}\n")
+        print(f"\n{C_YELLOW}{C_BOLD}NOTE:{C_RESET} This terminal window must stay open while using the app.")
+        print(f"{C_DIM}Press Ctrl+C (or close this window) to terminate all services.{C_RESET}\n")
 
         # Keep alive until user terminates
         while True:
