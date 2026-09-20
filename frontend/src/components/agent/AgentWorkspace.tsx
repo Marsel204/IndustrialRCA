@@ -576,7 +576,18 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
       });
     }
 
-    if (chatTools.length === 0) {
+    // Greetings, pleasantries, and casual conversational remarks do not require diagnostic tool calls
+    const cleanedText = lower.replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const isGreetingOrCasual =
+      /^(hi|hello|hey|heya|howdy|hola|yo|greetings|good\s+(morning|afternoon|evening|day|night))(\s+(copilot|there|team|bot|assistant|rca|friend))?$/i.test(
+        cleanedText
+      ) ||
+      /^(thanks|thank\s+you|thx|cheers|bye|goodbye|cya|see\s+you)$/i.test(cleanedText) ||
+      /^(who\s+are\s+you|what\s+can\s+you\s+do|what\s+are\s+you|help|how\s+are\s+you|how\s+are\s+you\s+doing|hows\s+it\s+going|whats\s+up|sup)$/i.test(
+        cleanedText
+      );
+
+    if (chatTools.length === 0 && !isGreetingOrCasual && cleanedText.length > 0) {
       chatTools.push({
         id: `chat-tool-${Date.now()}-def`,
         name: 'SearchDiagnosticKB',
