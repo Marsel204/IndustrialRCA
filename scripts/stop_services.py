@@ -38,6 +38,18 @@ def main():
         except Exception:
             pass
 
+    # Terminate any active Cloudflare Tunnel processes
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                "taskkill /F /IM cloudflared.exe",
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+
     if not killed:
         print(" No active services found running on ports 8000, 5173, 1883.")
     else:

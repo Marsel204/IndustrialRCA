@@ -16,13 +16,16 @@ import signal
 import subprocess
 import webbrowser
 import urllib.request
+import re
+import threading
+import shutil
 from pathlib import Path
 
 # Ensure UTF-8 output on Windows consoles
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
 # Enable ANSI escape sequences on Windows console
 if os.name == "nt":
@@ -70,6 +73,23 @@ def kill_pid_tree(pid: int):
                 os.kill(pid, signal.SIGKILL)
             except Exception:
                 pass
+
+
+def find_cloudflared():
+    """Locates cloudflared executable in PATH or common Windows install paths."""
+    cmd = shutil.which("cloudflared")
+    if cmd:
+        return cmd
+    win_paths = [
+        r"C:\Program Files (x86)\cloudflared\cloudflared.exe",
+        r"C:\Program Files\cloudflared\cloudflared.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\cloudflared\cloudflared.exe"),
+        os.path.expandvars(r"%USERPROFILE%\cloudflared.exe"),
+    ]
+    for p in win_paths:
+        if os.path.exists(p):
+            return p
+    return None
 
 
 def wait_for_service(url: str, name: str, timeout_sec: int = 15, port: int = None) -> bool:
@@ -213,7 +233,46 @@ def main():
             else:
                 print(f"\r {C_YELLOW}!{C_RESET} React Frontend  : Launching on http://localhost:5173")
 
-        # 4. Open Default Web Browser
+        # 4. Start Cloudflare Tunnel for Remote / Public Access (if installed)
+        public_url = None
+        cf_exe = find_cloudflared()
+        if cf_exe:
+            print(f" {C_YELLOW}▶{C_RESET} Starting Cloudflare Public Tunnel...", end="", flush=True)
+            cf_log = ROOT_DIR / "scripts" / "cloudflared.log"
+            if cf_log.exists():
+                try:
+                    cf_log.unlink()
+                except Exception:
+                    pass
+
+            cf_proc = subprocess.Popen(
+                [cf_exe, "tunnel", "--url", "http://localhost:5173", "--http-host-header", "localhost", "--logfile", str(cf_log)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            processes.append(("Cloudflare Tunnel", cf_proc))
+
+            # Wait up to 10s for tunnel URL in logfile
+            wait_start = time.time()
+            url_pattern = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
+            while time.time() - wait_start < 10:
+                if cf_log.exists():
+                    try:
+                        content = cf_log.read_text(encoding="utf-8", errors="ignore")
+                        match = url_pattern.search(content)
+                        if match:
+                            public_url = match.group(0)
+                            break
+                    except Exception:
+                        pass
+                time.sleep(0.4)
+
+            if public_url:
+                print(f"\r {C_GREEN}✓{C_RESET} Public Tunnel   : {C_GREEN}{public_url}{C_RESET}")
+            else:
+                print(f"\r {C_YELLOW}!{C_RESET} Public Tunnel   : Active in background")
+
+        # 5. Open Default Web Browser
         print(f"\n {C_CYAN}▶ Opening web browser to http://localhost:5173...{C_RESET}")
         time.sleep(1)
         opened = open_browser("http://localhost:5173")
@@ -229,10 +288,12 @@ def main():
             "   ✓ ALL SERVICES ARE RUNNING AND FULLY OPERATIONAL!                 \n"
             f"======================================================================{C_RESET}"
         )
-        print(f"  • {C_BOLD}Main Dashboard :{C_RESET} {C_CYAN}{C_BOLD}http://localhost:5173{C_RESET}  ◄── {C_YELLOW}OPEN THIS IN YOUR BROWSER{C_RESET}")
-        print(f"  • {C_BOLD}FastAPI Swagger:{C_RESET} {C_CYAN}http://localhost:8000/docs{C_RESET}")
+        print(f"  • {C_BOLD}Local Dashboard :{C_RESET} {C_CYAN}{C_BOLD}http://localhost:5173{C_RESET}")
+        if public_url:
+            print(f"  • {C_BOLD}Public Web Link :{C_RESET} {C_GREEN}{C_BOLD}{public_url}{C_RESET}  ◄── {C_YELLOW}SHARE WITH OPERATORS{C_RESET}")
+        print(f"  • {C_BOLD}FastAPI Swagger :{C_RESET} {C_CYAN}http://localhost:8000/docs{C_RESET}")
         print(f"  • {C_BOLD}Edge MQTT Broker:{C_RESET} {C_CYAN}tcp://localhost:1883{C_RESET}")
-        print(f"  • {C_BOLD}AI Model       :{C_RESET} {C_MAGENTA}DeepSeek V4.1 Flash{C_RESET}")
+        print(f"  • {C_BOLD}AI Model        :{C_RESET} {C_MAGENTA}DeepSeek V4.1 Flash{C_RESET}")
         print(f"\n{C_YELLOW}{C_BOLD}NOTE:{C_RESET} This terminal window must stay open while using the app.")
         print(f"{C_DIM}Press Ctrl+C (or close this window) to terminate all services.{C_RESET}\n")
 
