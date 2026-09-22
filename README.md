@@ -1,5 +1,7 @@
 # Industrial Root Cause Analysis (RCA) System Prototype
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Production-grade industrial RCA system built with **Python 3.11+**, **LangGraph**, and **DeepSeek AI**. Grounded in **ISA-95** asset hierarchies, **ISO 14224 / FMEA** failure taxonomies, and **ISO 10816 Class III** vibration standards.
 
 ---
@@ -225,3 +227,10 @@ When a trip is detected (`fault_code > 0`), the Edge Gateway / ingestion bridge 
 2. On the HMI screen, set target frequency to **`50.00 Hz`** and tap **START**.
 3. With the motor drawing ~1.0A–1.5A, the VFD's internal thermal accumulator ($I^2t$) charges rapidly.
 4. After ~20–60 seconds, the VFD trips on **`Err11`** (`fault_code = 11`).
+
+---
+
+## 📄 License
+
+This project is open-source software licensed under the **[MIT License](LICENSE)**.
+Copyright (c) 2026 Marsel (Marsel204) and IndustrialRCA contributors.
