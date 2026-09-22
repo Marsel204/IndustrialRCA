@@ -6,6 +6,63 @@ Production-grade industrial RCA system built with **Python 3.11+**, **LangGraph*
 
 ---
 
+## 📸 Visual Showcase & System Tour
+
+Experience the system from continuous plant monitoring down to mobile remediation in the field.
+
+### 1. Real-Time SCADA Telemetry & Autonomous Agent Monitoring
+![Real-Time SCADA Telemetry & Baseline Ingestion](docs/assets/images/01_dashboard_overview.png)
+> **The Operator Cockpit:** 
+> - **Live High-Frequency Streaming:** 1 Hz continuous telemetry streamed via Modbus RTU / SSE, rendered at 60 FPS on ECharts canvas with calibrated ISO 10816 / ISA-95 alarm envelopes (red dashed trip thresholds).
+> - **LangGraph 7-Step Diagnostic Stepper:** The AI agent actively tracks the baseline operational envelope (Ingest ➔ Anomaly ➔ Hypotheses ➔ Falsify ➔ 5-Whys ➔ HITL Gate ➔ Deliverables).
+> - **Embedded DeepSeek AI Copilot:** Natural language prompt assistant directly grounded in real-time sensor metrics and physical equipment models.
+
+---
+
+### 2. Edge Hardware Trip Ingestion & Multi-Agent Root Cause Deduction
+![Hardware Trip Ingestion & Multi-Agent Diagnosis](docs/assets/images/02_hitl_active_incident.png)
+> **Incident Response in Action:**
+> - **Instantaneous Hardware Alert:** When a field VFD trips (e.g. `Err06` Deceleration Overvoltage), the edge gateway immediately captures pre-fault and fault waveforms. The dashboard triggers an alert banner with live diagnostics.
+> - **Autonomous Multi-Agent Investigation:** LangGraph orchestrates specialized diagnostic tools:
+>   - `ChangePointDetector`: Isolates the transient DC bus surge ($182\text{ V} \to 202.5\text{ V}$).
+>   - `TopologyTracer`: Resolves electrical and control relationships (`PLC_LX_01` ➔ `VFD_VM_01`).
+>   - `FMEAEngine`: Evaluates failure mode hypotheses against OEM specifications.
+>   - `CMMSConnector`: Prepares formal SAP PM01 work order and Global 8D deliverables.
+> - **98% Confidence Root Cause Synthesis:** Pinpoints the exact causal chain—unclamped frequency setpoint ramp and lack of dynamic braking resistor on terminals `P+`/`PB`.
+
+---
+
+### 3. Human-in-the-Loop (HITL) Safety Authorization Gate
+![Human-in-the-Loop Review & Authorize Modal](docs/assets/images/03_review_signoff_modal.png)
+> **Engineering Accountability:**
+> - **Strict Safety Gate:** In compliance with industrial safety protocols, no automated corrective actions or ERP work orders are finalized without human sign-off.
+> - **Digital Signature & Professional Stamp:** The Lead Reliability Engineer inspects the diagnosed root cause, validates engineering notes, and inputs digital sign-off (`J. Reynolds, PE #84920`).
+> - **One-Click Dispatch:** Engineers can `[✓ Approve]`, `[⚠️ Override]`, or `[❌ Reject]` directly from the workstation or remotely via Telegram.
+
+---
+
+### 4. Automated Enterprise Deliverables: Global 8D Incident Report & SAP PM01 Work Order
+![Completed Global 8D Report](docs/assets/images/04_completed_8d_report.png)
+> **Standardized Industrial Documentation:**
+> - **Full Global 8D Disciplines:** Formally documents D1 (Team), D2 (Problem Description), D3 (Interim Containment Actions), D4 (Root Cause Analysis with ISO 14224 failure mechanisms), D5 (Permanent Corrective Actions), D6 (Validation Protocol), D7 (Systemic Prevention), and D8 (Sign-Off).
+> - **SAP S/4HANA PM01 Maintenance Integration:** Generates production-ready PM01 work orders with detailed operation lines, safety lockout/tagout procedures, and required replacement parts.
+
+---
+
+### 5. Plant Floor Mobile Operations via Two-Way Telegram Bot
+The system extends full SCADA oversight and incident remediation to mobile devices via an interactive Telegram Bot. Technicians can respond to plant emergencies anywhere in the facility without a desktop workstation.
+
+| Push Trip Alert with Waveform Plot | Remote One-Tap HITL Authorization | Conversational AI Copilot in Field |
+| :---: | :---: | :---: |
+| ![Telegram Trip Alert](docs/assets/images/telegram/01_telegram_trip_alert.png) | ![Telegram HITL Buttons](docs/assets/images/telegram/02_telegram_hitl_buttons.png) | ![Telegram AI Copilot](docs/assets/images/telegram/03_telegram_ai_copilot.png) |
+| **Instant Incident Dispatch:** In-memory dual-axis Matplotlib waveforms generated and pushed directly to Telegram with trip severity. | **Mobile HITL Gate:** Technicians review root cause findings and approve/reject remediation directly with inline buttons. | **Conversational Copilot:** Ask questions in plain English (*"is the system okay?"*, *"why did the motor trip?"*) grounded in live telemetry. |
+
+#### In-App Telegram Bot Configuration
+![Telegram Settings Modal](docs/assets/images/05_telegram_settings_modal.png)
+> **Zero-Friction Setup:** Connect any Telegram bot in seconds using the in-app configuration modal. Manage bot API tokens, monitor active channel subscribers, send instant test alerts, and view command references (`/status`, `/rca`, `/chart`, `/alarms`).
+
+---
+
 ## ⚡ Quickstart
 
 ### 🚀 One-Click Launch (Windows)
