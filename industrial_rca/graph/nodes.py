@@ -5,6 +5,7 @@ Implements ingestion, deterministic anomaly detection, parallel hypothesis testi
 """
 
 from typing import Dict, Any, List, Optional
+import time
 import numpy as np
 from langgraph.types import interrupt
 
@@ -907,7 +908,7 @@ def human_review(state: RCAState) -> Dict[str, Any]:
     user_decision = interrupt(review_payload)
 
     # Process received decision
-    action = user_decision.get("action", "approve").lower()
+    action = user_decision.get("action", "approve").lower().strip()
     reviewer = user_decision.get("reviewer", "Lead Reliability Engineer")
     notes = user_decision.get("notes", "No additional notes provided.")
     override_text = user_decision.get("override_root_cause")
@@ -929,7 +930,7 @@ def human_review(state: RCAState) -> Dict[str, Any]:
             "override_text": override_text,
         },
         "root_cause_description": updated_root_desc,
-        "pipeline_status": "APPROVED" if action in ("approve", "override") else "REJECTED",
+        "pipeline_status": "APPROVED" if action in ("approve", "approved", "override") else "REJECTED",
         "execution_logs": [log_entry],
     }
 
@@ -1038,7 +1039,7 @@ def generate_maintenance_artifacts(state: RCAState) -> Dict[str, Any]:
                 "reliability_manager_approval": "Approved",
                 "reviewed_by": decision.get("reviewer", "Lead Reliability Engineer"),
                 "review_notes": decision.get("notes", "Root cause verified by multi-sensor Modbus telemetry and PLC state correlation."),
-                "date": "2026-09-15",
+                "date": decision.get("date") or time.strftime("%Y-%m-%d %H:%M:%S UTC"),
             },
         }
     else:
@@ -1090,7 +1091,7 @@ def generate_maintenance_artifacts(state: RCAState) -> Dict[str, Any]:
                 "reliability_manager_approval": "Approved",
                 "reviewed_by": decision.get("reviewer", "Chief Plant Reliability Engineer"),
                 "review_notes": decision.get("notes", "Root cause verified."),
-                "date": "2026-09-04",
+                "date": decision.get("date") or time.strftime("%Y-%m-%d %H:%M:%S UTC"),
             },
         }
 

@@ -11,4 +11,6 @@ frontend/node_modules/
 frontend/dist/
 *.log
 scripts/*.log
+industrial_rca/data/telegram_subscribers.json
+scratch*
 

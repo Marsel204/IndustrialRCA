@@ -5,6 +5,7 @@ import { AgentWorkspace } from './components/agent/AgentWorkspace';
 import { ArtifactInspector } from './components/inspector/ArtifactInspector';
 import { ReviewSignOffModal } from './components/agent/ReviewSignOffModal';
 import { ApiKeyModal } from './components/settings/ApiKeyModal';
+import { TelegramBotModal } from './components/settings/TelegramBotModal';
 
 import {
   Scenario,
@@ -14,6 +15,7 @@ import {
   RCAState,
   LatestIncident,
   ApiKeyStatus,
+  TelegramBotStatus,
 } from './types';
 
 import {
@@ -31,6 +33,7 @@ import {
   clearIncident,
   toggleSimulationMode,
   fetchApiKeyStatus,
+  fetchBotStatus,
 } from './api';
 
 export function App() {
@@ -40,6 +43,8 @@ export function App() {
   const [isReviewModalOpen, setIsReviewModalOpen] = useState<boolean>(false);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState<boolean>(false);
   const [apiKeyStatus, setApiKeyStatus] = useState<ApiKeyStatus | null>(null);
+  const [isTelegramModalOpen, setIsTelegramModalOpen] = useState<boolean>(false);
+  const [telegramStatus, setTelegramStatus] = useState<TelegramBotStatus | null>(null);
 
   // Application Data States
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
@@ -127,6 +132,14 @@ export function App() {
         }
       } catch (e) {
         console.warn('Failed to fetch API key status:', e);
+      }
+
+      // 6. Fetch Telegram Bot Status
+      try {
+        const bStatus = await fetchBotStatus();
+        setTelegramStatus(bStatus);
+      } catch (e) {
+        console.warn('Failed to fetch bot status:', e);
       }
     } catch (err: any) {
       console.error('Initialization error:', err);
@@ -301,6 +314,20 @@ export function App() {
             }
           } catch (e) {
             console.error('Failed to load completed RCA state:', e);
+          }
+        } else if (eventData.event === 'hil_human_review_submitted') {
+          const thId = eventData.thread_id || latestIncidentRef.current?.incident_data?.thread_id || activeThreadIdRef.current;
+          setIsPipelineRunning(false);
+          setLatestIncident((prev) =>
+            prev ? { ...prev, pipeline_status: eventData.status || 'COMPLETED' } : null
+          );
+          try {
+            const state = await fetchRCAState(thId);
+            const activeFc = latestIncidentRef.current?.incident_data?.fault_code || state?.fault_code || 2;
+            setRcaState(state ? { ...state, fault_code: activeFc } : null);
+            setInspectorTab('deliverables');
+          } catch (e) {
+            console.error('Failed to load approved RCA state from SSE:', e);
           }
         } else if (eventData.event === 'hil_incident_cleared') {
           userSelectedTabRef.current = false;
@@ -497,6 +524,9 @@ export function App() {
         onToggleSimulation={handleToggleSimulation}
         apiKeyConfigured={Boolean(apiKeyStatus?.has_key)}
         onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
+        botConfigured={Boolean(telegramStatus?.is_configured)}
+        botOnline={telegramStatus?.status === 'ONLINE' || Boolean(telegramStatus?.is_polling)}
+        onOpenBotModal={() => setIsTelegramModalOpen(true)}
       />
 
       {/* Error Alert Banner */}
@@ -573,6 +603,16 @@ export function App() {
           if (newStatus?.model) {
             setDeepseekModel(newStatus.model);
           }
+        }}
+      />
+
+      {/* Telegram Bot & Mobile Alerts Modal */}
+      <TelegramBotModal
+        isOpen={isTelegramModalOpen}
+        onClose={() => setIsTelegramModalOpen(false)}
+        botStatus={telegramStatus}
+        onBotStatusUpdated={(newStatus) => {
+          setTelegramStatus(newStatus);
         }}
       />
 

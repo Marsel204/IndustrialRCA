@@ -329,23 +329,6 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
     const data = series['IT-30101'] || [];
     return {
       ...baseChartTheme,
-      grid: { top: 35, right: 20, bottom: 45, left: 55 },
-      dataZoom: [
-        { type: 'inside', start: 0, end: 100, xAxisIndex: 0 },
-        {
-          type: 'slider',
-          start: 0,
-          end: 100,
-          xAxisIndex: 0,
-          height: 16,
-          bottom: 4,
-          borderColor: '#E2E8F0',
-          fillerColor: 'rgba(13, 148, 136, 0.12)',
-          handleStyle: { color: '#0D9488', borderColor: '#CBD5E1' },
-          textStyle: { color: '#334155', fontSize: 10 },
-          moveHandleStyle: { color: '#94A3B8' },
-        },
-      ],
       title: {
         text: 'IT-30101 · Induction Motor Line Current (Amperes)',
         textStyle: { color: '#0F172A', fontSize: 12, fontWeight: 'bold' },
@@ -707,23 +690,6 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
     const data = series['rpm'] || [];
     return {
       ...baseChartTheme,
-      grid: { top: 35, right: 20, bottom: 45, left: 55 },
-      dataZoom: [
-        { type: 'inside', start: 0, end: 100, xAxisIndex: 0 },
-        {
-          type: 'slider',
-          start: 0,
-          end: 100,
-          xAxisIndex: 0,
-          height: 16,
-          bottom: 4,
-          borderColor: '#E2E8F0',
-          fillerColor: 'rgba(124, 58, 237, 0.12)',
-          handleStyle: { color: '#7C3AED', borderColor: '#CBD5E1' },
-          textStyle: { color: '#334155', fontSize: 10 },
-          moveHandleStyle: { color: '#94A3B8' },
-        },
-      ],
       title: {
         text: 'RPM · Induction Motor Speed (RPM)',
         textStyle: { color: '#0F172A', fontSize: 12, fontWeight: 'bold' },

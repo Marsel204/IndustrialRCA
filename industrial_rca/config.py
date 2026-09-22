@@ -3,6 +3,7 @@ Configuration and constants for the Industrial Root Cause Analysis (RCA) System.
 Complies with ISA-95 Asset Modeling, ISO 14224 Equipment Taxonomy, and ISO 10816 Vibration Standards.
 """
 
+import os
 from pathlib import Path
 from typing import Dict, Any
 
@@ -12,6 +13,14 @@ ROOT_DIR = BASE_DIR.parent
 ENV_FILE = ROOT_DIR / ".env"
 DATA_DIR = BASE_DIR / "data"
 TOPOLOGY_FILE = DATA_DIR / "asset_topology.json"
+
+# Automatically load environment variables from root .env
+try:
+    import dotenv
+    if ENV_FILE.exists():
+        dotenv.load_dotenv(ENV_FILE, override=False)
+except ImportError:
+    pass
 
 # Simulation / Telemetry Parameters
 SAMPLING_RATE_HZ = 1.0  # 1 Hz macro time-series
@@ -99,4 +108,10 @@ INFLUXDB_MEASUREMENT = "vfd_telemetry"
 # Hardware-in-the-Loop VFD Specifications & Operational Limits Alias
 VFD_EQUIPMENT_ID = EQUIPMENT_ID
 VFD_OPERATIONAL_LIMITS = OPERATIONAL_LIMITS
+
+# Telegram Bot & Alert Configuration
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+TELEGRAM_POLLING_INTERVAL = float(os.getenv("TELEGRAM_POLLING_INTERVAL", "1.0"))
+DASHBOARD_URL = os.getenv("DASHBOARD_URL", "http://localhost:5173")
 

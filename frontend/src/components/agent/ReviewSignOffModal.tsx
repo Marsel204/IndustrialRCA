@@ -97,7 +97,7 @@ export const ReviewSignOffModal: React.FC<ReviewSignOffModalProps> = ({
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2 text-xs font-mono">
             <div className="flex justify-between items-center text-slate-600">
               <span>Target Asset:</span>
-              <strong className="text-slate-900">P-301A (HP Boiler Feed Pump)</strong>
+              <strong className="text-slate-900">{rcaState?.root_cause_asset ? `${rcaState.root_cause_asset} (Wecon VM Inverter)` : 'VFD_VM_01 (Wecon VM Series Inverter)'}</strong>
             </div>
             <div className="flex justify-between items-center text-slate-600">
               <span>Diagnosed Root Cause:</span>

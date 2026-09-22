@@ -12,6 +12,7 @@ Provides endpoints for:
 """
 
 import os
+import sys
 import time
 import json
 import math
@@ -74,6 +75,7 @@ from industrial_rca.utils.env_manager import (
     delete_api_key,
     test_api_credentials,
 )
+from industrial_rca.bot import get_telegram_service, TelegramBotService
 
 logger = get_logger("industrial_rca.api")
 
@@ -101,6 +103,23 @@ topology_tracer = AssetTopologyTracer()
 cmms_tool = CMMSConnector()
 deepseek_client = DeepSeekClient()
 influx_tool = InfluxDBTelemetryTool()
+telegram_bot_service = get_telegram_service()
+telegram_bot_service.set_api_context(sys.modules[__name__])
+
+
+def _safe_async_run(coro):
+    """Executes an async coroutine safely from synchronous or asynchronous contexts."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(coro)
+    except RuntimeError:
+        def _runner():
+            asyncio.run(coro)
+        t = threading.Thread(target=_runner, daemon=True)
+        t.start()
+    except Exception as e:
+        logger.warning(f"Async dispatch warning: {e}")
+
 
 # Stateful shared checkpointer and graph
 GLOBAL_CHECKPOINTER = MemorySaver()
@@ -161,6 +180,28 @@ def _notify_hil_subscribers(event_data: Dict[str, Any]):
             except Exception:
                 pass
 
+    # Forward alerts to Telegram Bot
+    if telegram_bot_service and telegram_bot_service.subscribers:
+        try:
+            ev = event_data.get("event")
+            if ev == "hil_incident_detected":
+                inc_data = event_data.get("data") or {}
+                ds_id = event_data.get("dataset_id")
+                ds = TelemetryStore.get(ds_id) if ds_id else None
+                _safe_async_run(telegram_bot_service.notify_trip_alert(inc_data, telemetry_dataset=ds))
+            elif ev == "hil_pipeline_completed":
+                inc_id = event_data.get("incident_id")
+                th_id = event_data.get("thread_id")
+                ds_id = event_data.get("dataset_id")
+                _safe_async_run(telegram_bot_service.notify_rca_complete(
+                    incident_id=inc_id,
+                    thread_id=th_id,
+                    dataset_id=ds_id,
+                    graph_values=LATEST_HIL_INCIDENT.get("graph_result"),
+                ))
+        except Exception as e:
+            logger.warning(f"Telegram notification dispatch error: {e}")
+
 
 def _broadcast_live_metric(metric_data: Dict[str, Any]):
     with _LIVE_STREAM_LOCK:
@@ -220,6 +261,17 @@ class SimulationToggleRequest(BaseModel):
     enabled: bool = Field(default=False, description="Enable or disable simulated telemetry fallback")
     scenario: str = Field(default="nominal", description="Scenario: H_VFD_ERR06, H_VFD_ERR02, H_VFD_ERR03, H_VFD_ERR11, or nominal")
     normal_duration_sec: float = Field(default=5.0, description="Duration in seconds of normal baseline before injecting fault")
+
+
+class BotSettingsRequest(BaseModel):
+    bot_token: Optional[str] = Field(default=None, description="Telegram Bot API Token")
+    default_chat_id: Optional[str] = Field(default=None, description="Default Chat/Channel ID for alerts")
+    dashboard_url: Optional[str] = Field(default=None, description="Base URL of Web Dashboard")
+
+
+class BotTestAlertRequest(BaseModel):
+    chat_id: Optional[str] = Field(default=None, description="Specific Chat ID (defaults to all subscribers)")
+    message: Optional[str] = Field(default=None, description="Custom test alert text")
 
 
 _SIMULATION_TASK: Optional[asyncio.Task] = None
@@ -1521,8 +1573,9 @@ def submit_human_review(request: HumanReviewRequest):
     if not state_snapshot:
         raise HTTPException(status_code=404, detail=f"Thread '{request.thread_id}' not found.")
 
+    action = request.action.lower().strip()
     decision_payload = {
-        "action": request.action.lower(),
+        "action": action,
         "reviewer": request.reviewer,
         "notes": request.notes,
         "override_root_cause": request.override_root_cause,
@@ -1533,11 +1586,26 @@ def submit_human_review(request: HumanReviewRequest):
 
     final_snapshot = GLOBAL_RCA_GRAPH.get_state(config)
     vals = final_snapshot.values if final_snapshot else {}
+    pipeline_status = vals.get("pipeline_status", "COMPLETED")
+
+    # If this matches the active HIL incident, synchronize state and broadcast SSE
+    active_inc_thread = (LATEST_HIL_INCIDENT.get("incident_data") or {}).get("thread_id")
+    if active_inc_thread == request.thread_id or LATEST_HIL_INCIDENT.get("has_incident"):
+        LATEST_HIL_INCIDENT["graph_result"] = vals
+        LATEST_HIL_INCIDENT["pipeline_status"] = pipeline_status
+        _notify_hil_subscribers({
+            "event": "hil_human_review_submitted",
+            "thread_id": request.thread_id,
+            "action": action,
+            "reviewer": request.reviewer,
+            "status": pipeline_status,
+            "timestamp": time.time(),
+        })
 
     return {
         "status": "RESUMED",
         "thread_id": request.thread_id,
-        "pipeline_status": vals.get("pipeline_status", "COMPLETED"),
+        "pipeline_status": pipeline_status,
         "current_step": 7,
         "decision": decision_payload,
         "incident_report_8d": vals.get("incident_report_8d"),
@@ -1863,7 +1931,166 @@ def delete_api_key_settings():
         return delete_api_key()
     except Exception as e:
         logger.error(f"Failed to delete API key: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete API key: {str(e)}")
+
+# ── Telegram Bot Lifecycle & Management Endpoints ──────────────────────
+
+@api_app.on_event("startup")
+async def on_startup():
+    """Starts Telegram Bot polling loop if token is configured."""
+    telegram_bot_service.set_api_context(sys.modules[__name__])
+    if telegram_bot_service.token:
+        telegram_bot_service.start_background_polling()
+        logger.info("Telegram Bot service background polling initialized.")
+
+
+@api_app.on_event("shutdown")
+async def on_shutdown():
+    """Cleanly stops background Telegram polling loop."""
+    await telegram_bot_service.stop()
+
+
+@api_app.get("/api/v1/bot/status")
+def get_bot_status():
+    """Returns Telegram Bot connection status, subscriber count, and configuration."""
+    token_configured = bool(telegram_bot_service.token)
+    masked_token = (
+        f"{telegram_bot_service.token[:6]}...{telegram_bot_service.token[-4:]}"
+        if token_configured and len(telegram_bot_service.token) > 10
+        else ("CONFIGURED" if token_configured else "NOT_CONFIGURED")
+    )
+    return {
+        "status": "ONLINE" if telegram_bot_service.is_running else ("READY" if token_configured else "UNCONFIGURED"),
+        "is_configured": token_configured,
+        "is_polling": telegram_bot_service.is_running,
+        "token_masked": masked_token,
+        "default_chat_id": telegram_bot_service.default_chat_id,
+        "subscribers_count": len(telegram_bot_service.subscribers),
+        "subscribers": list(telegram_bot_service.subscribers),
+        "dashboard_url": telegram_bot_service.dashboard_url,
+    }
+
+
+@api_app.post("/api/v1/bot/test-alert")
+async def send_bot_test_alert(req: Optional[BotTestAlertRequest] = None):
+    """Sends a verification test alert with sample waveform to subscribers or specific chat ID."""
+    if not telegram_bot_service.client:
+        raise HTTPException(
+            status_code=400,
+            detail="Telegram Bot is not configured. Please set TELEGRAM_BOT_TOKEN in .env or via /api/v1/bot/settings",
+        )
+
+    targets = [req.chat_id] if (req and req.chat_id) else list(telegram_bot_service.subscribers)
+    if not targets:
+        raise HTTPException(
+            status_code=400,
+            detail="No subscribers registered. Please send /start to your bot in Telegram or provide a chat_id.",
+        )
+
+    msg_text = (req and req.message) or (
+        "🧪 <b>TEST ALERT — Industrial RCA Bot</b>\n\n"
+        "• <b>Status:</b> Two-way communication verified\n"
+        "• <b>Platform:</b> Industrial Root Cause Analysis Engine\n"
+        "• <b>Sync:</b> React Web App + FastAPI Backend active"
+    )
+
+    from industrial_rca.bot.chart_generator import generate_trip_waveform
+    sample_waveform = generate_trip_waveform(pd.DataFrame(), fault_code=6, title_suffix="Test Verification")
+
+    keyboard = telegram_bot_service.client.build_inline_keyboard([
+        [
+            {"text": "📊 View Status", "callback_data": "refresh_telemetry"},
+            {"text": "🔗 Web App", "url": telegram_bot_service.dashboard_url},
+        ]
+    ])
+
+    sent_count = 0
+    errors = []
+    for cid in targets:
+        try:
+            await telegram_bot_service.client.send_photo(
+                chat_id=cid,
+                photo_bytes=sample_waveform,
+                caption=msg_text,
+                reply_markup=keyboard,
+            )
+            sent_count += 1
+        except Exception as e:
+            errors.append(f"Chat {cid}: {str(e)}")
+
+    return {
+        "status": "SUCCESS" if sent_count > 0 else "FAILED",
+        "recipients_reached": sent_count,
+        "recipients_total": len(targets),
+        "errors": errors,
+    }
+
+
+@api_app.post("/api/v1/bot/settings")
+async def update_bot_settings(req: BotSettingsRequest):
+    """Updates Telegram bot token and target chat ID dynamically."""
+    if req.bot_token is not None:
+        telegram_bot_service.token = req.bot_token
+        from industrial_rca.bot.telegram_client import TelegramClient
+        telegram_bot_service.client = TelegramClient(req.bot_token) if req.bot_token else None
+
+    if req.default_chat_id is not None:
+        telegram_bot_service.default_chat_id = req.default_chat_id
+        if req.default_chat_id:
+            telegram_bot_service.add_subscriber(req.default_chat_id)
+
+    if req.dashboard_url is not None:
+        telegram_bot_service.dashboard_url = req.dashboard_url
+
+    # Persist credentials into .env file
+    try:
+        from industrial_rca.utils.env_manager import save_telegram_credentials
+        save_telegram_credentials(
+            bot_token=req.bot_token,
+            default_chat_id=req.default_chat_id,
+            dashboard_url=req.dashboard_url,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to persist Telegram credentials to .env: {e}")
+
+    # Restart polling loop if token changed and is valid
+    if telegram_bot_service.token and not telegram_bot_service.is_running:
+        telegram_bot_service.start_background_polling()
+
+    return get_bot_status()
+
+
+class BotCallbackSimulateRequest(BaseModel):
+    thread_id: str
+    action: str = "approved"
+    reviewer: str = "@chief_engineer (Telegram)"
+
+
+@api_app.post("/api/v1/bot/simulate-callback")
+async def simulate_bot_callback(req: BotCallbackSimulateRequest):
+    """Simulates a Telegram user clicking [✅ Approve Remediation] or [❌ Reject Remediation]."""
+    if telegram_bot_service:
+        await telegram_bot_service._execute_hitl_action(
+            action=req.action,
+            thread_id=req.thread_id,
+            reviewer=req.reviewer,
+            chat_id=telegram_bot_service.default_chat_id or "simulated_chat",
+            message_id=None,
+            orig_text="[Telegram Card: Active Trip Alert]",
+        )
+        final_snapshot = GLOBAL_RCA_GRAPH.get_state({"configurable": {"thread_id": req.thread_id}})
+        vals = final_snapshot.values if final_snapshot else {}
+        return {
+            "status": "SUCCESS",
+            "thread_id": req.thread_id,
+            "action": req.action,
+            "reviewer": req.reviewer,
+            "pipeline_status": vals.get("pipeline_status", "COMPLETED"),
+            "current_step": 7,
+            "incident_report_8d": vals.get("incident_report_8d"),
+            "sap_work_order": vals.get("sap_work_order"),
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Telegram bot service not initialized")
 
 
 # ── Daemon Startup Helper ─────────────────────────────────────────────

@@ -150,6 +150,11 @@ class DeepSeekClient:
         else:
             return self._generate_simulated_response(messages, target_model)
 
+    def chat(self, messages: List[Dict[str, str]], model: Optional[str] = None) -> str:
+        """Convenience method returning plain text response string."""
+        res = self.chat_completion(messages, model=model)
+        return res.get("content", "") if isinstance(res, dict) else str(res)
+
     def chat_completion_stream(
         self,
         messages: List[Dict[str, str]],

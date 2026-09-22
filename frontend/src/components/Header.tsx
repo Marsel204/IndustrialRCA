@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Zap,
   Key,
+  Send,
 } from 'lucide-react';
 import { Scenario, LatestIncident } from '../types';
 
@@ -28,6 +29,9 @@ interface HeaderProps {
   onToggleSimulation?: (enabled: boolean, scenario?: string, duration?: number) => void;
   apiKeyConfigured?: boolean;
   onOpenApiKeyModal?: () => void;
+  botConfigured?: boolean;
+  botOnline?: boolean;
+  onOpenBotModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -48,6 +52,9 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleSimulation,
   apiKeyConfigured = false,
   onOpenApiKeyModal,
+  botConfigured = false,
+  botOnline = false,
+  onOpenBotModal,
 }) => {
   const activeScenario = scenarios.find((s) => s.id === activeScenarioId);
   const incFaultNum = latestIncident?.incident_data?.fault_code || 6;
@@ -298,6 +305,39 @@ export const Header: React.FC<HeaderProps> = ({
               />
             </button>
           )}
+
+          {/* Telegram Bot Status / Modal Trigger */}
+          {onOpenBotModal && (
+            <button
+              type="button"
+              onClick={onOpenBotModal}
+              className={`flex items-center space-x-1.5 px-2 py-1 rounded-md text-[11px] font-mono border transition-all cursor-pointer shadow-2xs ${
+                botConfigured
+                  ? 'bg-sky-50/80 hover:bg-sky-100/90 border-sky-300/80 text-sky-800'
+                  : 'bg-slate-100 hover:bg-slate-200/80 border-slate-300 text-slate-600'
+              }`}
+              title={
+                botConfigured
+                  ? `Telegram Bot Active (${botOnline ? 'ONLINE' : 'CONFIGURED'}) · Click to manage`
+                  : 'Telegram Bot Not Set · Click to configure bot token and mobile alerts'
+              }
+            >
+              <Send className={`w-3 h-3 ${botConfigured ? 'text-sky-600' : 'text-slate-400'}`} />
+              <span className="font-semibold">
+                {botConfigured ? 'Telegram' : 'Set Bot'}
+              </span>
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  botOnline
+                    ? 'bg-emerald-500 animate-pulse'
+                    : botConfigured
+                    ? 'bg-sky-500'
+                    : 'bg-slate-400'
+                }`}
+              />
+            </button>
+          )}
+
 
           {/* API Health Pill */}
           <div

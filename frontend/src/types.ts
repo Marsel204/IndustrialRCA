@@ -361,3 +361,27 @@ export interface ApiKeyTestResponse {
   message: string;
   usage?: Record<string, any>;
 }
+
+export interface TelegramBotStatus {
+  status: 'ONLINE' | 'READY' | 'UNCONFIGURED' | string;
+  is_configured: boolean;
+  is_polling: boolean;
+  token_masked: string;
+  default_chat_id: string;
+  subscribers_count: number;
+  subscribers: string[];
+  dashboard_url: string;
+}
+
+export interface TelegramBotSaveParams {
+  bot_token?: string;
+  default_chat_id?: string;
+  dashboard_url?: string;
+}
+
+export interface TelegramBotTestAlertResponse {
+  status: string;
+  recipients_reached: number;
+  recipients_total: number;
+  errors: string[];
+}

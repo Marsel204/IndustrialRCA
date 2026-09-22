@@ -213,12 +213,19 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
                 Global 8D Standard Root Cause Corrective Action (RCCA)
               </span>
               <div className="flex items-center space-x-2 text-xs font-mono text-slate-500">
-                <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px] shadow-xs">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  <span>CLOSED & APPROVED</span>
-                </span>
+                {report8D?.d8_sign_off ? (
+                  <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px] shadow-xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span>CLOSED & APPROVED</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-semibold text-[11px] shadow-xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    <span>AWAITING HITL SIGN-OFF</span>
+                  </span>
+                )}
                 <span>·</span>
-                <span>Date: 2026-09-15</span>
+                <span>Date: {report8D?.d8_sign_off?.date || 'Pending Authorization'}</span>
               </div>
             </div>
 
@@ -362,15 +369,24 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
                 </ul>
               </div>
 
-              <div className="p-3.5 rounded-lg bg-emerald-50/40 border border-emerald-200 space-y-1">
-                <div className="font-mono text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center space-x-1.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              <div className={`p-3.5 rounded-lg space-y-1 ${
+                report8D?.d8_sign_off
+                  ? 'bg-emerald-50/40 border border-emerald-200'
+                  : 'bg-amber-50/40 border border-amber-200'
+              }`}>
+                <div className={`font-mono text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5 ${
+                  report8D?.d8_sign_off ? 'text-emerald-800' : 'text-amber-800'
+                }`}>
+                  <ShieldCheck className={`w-4 h-4 ${report8D?.d8_sign_off ? 'text-emerald-600' : 'text-amber-600'}`} />
                   <span>D8: Engineer Authorization</span>
                 </div>
                 <div className="text-xs font-mono text-slate-700 space-y-0.5">
-                  <p>Reviewed by: <strong className="text-slate-900">{report8D?.d8_sign_off?.reviewed_by || 'M. Al-Hassan (Lead Automation Specialist)'}</strong></p>
-                  <p>Status: <span className="text-emerald-700 font-bold">APPROVED & RELEASED</span></p>
-                  <p className="text-slate-500 text-[11px]">Notes: {report8D?.d8_sign_off?.review_notes || 'Root cause verified by multi-sensor Modbus telemetry and PLC state correlation.'}</p>
+                  <p>Reviewed by: <strong className="text-slate-900">{report8D?.d8_sign_off?.reviewed_by || 'Pending Digital Sign-Off'}</strong></p>
+                  <p>Status: <span className={`font-bold ${report8D?.d8_sign_off ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {report8D?.d8_sign_off ? 'APPROVED & RELEASED' : 'AWAITING HITL SIGN-OFF'}
+                  </span></p>
+                  <p className="text-slate-500 text-[11px]">Notes: {report8D?.d8_sign_off?.review_notes || 'Awaiting engineer review & authorization via Agent Workspace or Telegram.'}</p>
+                  {report8D?.d8_sign_off?.date && <p className="text-slate-500 text-[11px]">Timestamp: {report8D.d8_sign_off.date}</p>}
                 </div>
               </div>
             </div>
@@ -393,7 +409,9 @@ export const DeliverablesTab: React.FC<DeliverablesTabProps> = ({ rcaState }) =>
                   <span>{sapOrder?.priority || '1 - Emergency / Immediate Outage'}</span>
                 </span>
                 <span className="text-slate-400">·</span>
-                <span className="text-slate-500 text-[11px]">CRTD REL PMCO</span>
+                <span className={`text-[11px] font-mono font-semibold ${sapOrder ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {sapOrder ? 'CRTD REL PMCO' : 'DRAFT · PENDING RELEASE'}
+                </span>
               </div>
             </div>
 

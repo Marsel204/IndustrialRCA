@@ -59,8 +59,8 @@ def fan_out_hypotheses(state: RCAState) -> List[Send]:
 def route_after_review(state: RCAState) -> str:
     """Routes to artifact emission if approved or overridden; otherwise handles rejection."""
     decision = state.get("human_review_decision", {})
-    action = decision.get("action", "approve").lower()
-    if action in ("approve", "override"):
+    action = decision.get("action", "approve").lower().strip()
+    if action in ("approve", "approved", "override"):
         return "generate_maintenance_artifacts"
     return "handle_rejection"
 

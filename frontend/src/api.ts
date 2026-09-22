@@ -9,6 +9,9 @@ import {
   ApiKeyStatus,
   ApiKeySaveResponse,
   ApiKeyTestResponse,
+  TelegramBotStatus,
+  TelegramBotSaveParams,
+  TelegramBotTestAlertResponse,
 } from './types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || '/api/v1';
@@ -306,6 +309,38 @@ export async function deleteApiKey(): Promise<{ success: boolean; message: strin
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.detail || `Failed to delete API key: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function fetchBotStatus(): Promise<TelegramBotStatus> {
+  const res = await fetch(`${API_BASE}/bot/status`);
+  if (!res.ok) throw new Error(`Failed to fetch bot status: ${res.statusText}`);
+  return res.json();
+}
+
+export async function saveBotSettings(params: TelegramBotSaveParams): Promise<TelegramBotStatus> {
+  const res = await fetch(`${API_BASE}/bot/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to save bot settings: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function sendBotTestAlert(chatId?: string, message?: string): Promise<TelegramBotTestAlertResponse> {
+  const res = await fetch(`${API_BASE}/bot/test-alert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId || undefined, message: message || undefined }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to send test alert: ${res.statusText}`);
   }
   return res.json();
 }

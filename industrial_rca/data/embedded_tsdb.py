@@ -169,6 +169,16 @@ class EmbeddedTSDB:
                     return dict(p)
         return None
 
+    def get_history(self, asset_id: str = VFD_EQUIPMENT_ID, limit: int = 60) -> List[Dict[str, Any]]:
+        """
+        Retrieves the last N records as a list of dicts.
+        Ensures compatibility with bot chart and telemetry consumers.
+        """
+        df = self.get_window(seconds=limit, asset_id=asset_id)
+        if df.empty:
+            return []
+        return df.to_dict("records")
+
     def get_stats(self, seconds: int = 300) -> Dict[str, Any]:
         """Calculates rolling statistical summary for live metrics."""
         now = time.time()

@@ -139,6 +139,33 @@ def delete_api_key() -> Dict[str, Any]:
     return status
 
 
+def save_telegram_credentials(
+    bot_token: Optional[str] = None,
+    default_chat_id: Optional[str] = None,
+    dashboard_url: Optional[str] = None,
+) -> None:
+    """Persists Telegram bot settings to .env and updates os.environ."""
+    env_path = get_env_path()
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    if not env_path.exists():
+        env_path.touch()
+
+    if bot_token is not None:
+        clean_token = bot_token.strip()
+        dotenv.set_key(str(env_path), "TELEGRAM_BOT_TOKEN", clean_token, quote_mode="never")
+        os.environ["TELEGRAM_BOT_TOKEN"] = clean_token
+
+    if default_chat_id is not None:
+        clean_chat = str(default_chat_id).strip()
+        dotenv.set_key(str(env_path), "TELEGRAM_CHAT_ID", clean_chat, quote_mode="never")
+        os.environ["TELEGRAM_CHAT_ID"] = clean_chat
+
+    if dashboard_url is not None:
+        clean_url = dashboard_url.strip()
+        dotenv.set_key(str(env_path), "DASHBOARD_URL", clean_url, quote_mode="never")
+        os.environ["DASHBOARD_URL"] = clean_url
+
+
 def test_api_credentials(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
