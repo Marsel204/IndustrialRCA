@@ -69,14 +69,14 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
               </span>
               <span
                 className={`px-1.5 py-0.5 text-[10px] font-mono rounded font-semibold ${
-                  voltageVdc >= 210.0
+                  voltageVdc >= 220.0
                     ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                    : voltageVdc >= 205.0
+                    : voltageVdc >= 215.0
                     ? 'bg-amber-50 text-amber-700 border border-amber-200'
                     : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                 }`}
               >
-                {voltageVdc >= 210.0 ? 'OVERVOLT TRIP' : voltageVdc >= 205.0 ? 'WARNING' : 'NOMINAL'}
+                {voltageVdc >= 220.0 ? 'OVERVOLT TRIP' : voltageVdc >= 215.0 ? 'WARNING' : 'NOMINAL'}
               </span>
             </div>
             <div className="text-2xl font-mono font-bold text-slate-900">
@@ -84,7 +84,7 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
               <span className="text-xs font-normal text-slate-500">V</span>
             </div>
             <div className="text-[10px] font-mono text-slate-500 mt-1">
-              Nominal: 204.0 V · Trip: 210.0 V
+              Nominal: 210.0 V · Trip: 220.0 V
             </div>
           </div>
 

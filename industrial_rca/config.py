@@ -52,10 +52,10 @@ OPERATIONAL_LIMITS: Dict[str, Dict[str, Any]] = {
         "description": "DC Bus Voltage",
         "unit": "V",
         "normal_min": 170.0,
-        "normal_max": 205.0,
-        "nominal_40hz": 204.0,
-        "alarm_high": 205.0,
-        "trip_high": float(os.getenv("VFD_TRIP_V_DC", "210.0")),  # Hardware trip threshold (>210V trips Err06)
+        "normal_max": 214.0,
+        "nominal_40hz": 210.0,
+        "alarm_high": float(os.getenv("VFD_ALARM_V_DC", "215.0")),
+        "trip_high": float(os.getenv("VFD_TRIP_V_DC", "220.0")),  # Hardware trip threshold (>220V trips Err06)
     },
     "current": {
         "description": "Motor Line / Output Current",

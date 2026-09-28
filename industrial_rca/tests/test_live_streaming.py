@@ -44,7 +44,7 @@ def test_vfd_config_constants():
     assert "f_out" in VFD_OPERATIONAL_LIMITS
     assert "v_dc" in VFD_OPERATIONAL_LIMITS
     assert "current" in VFD_OPERATIONAL_LIMITS
-    assert VFD_OPERATIONAL_LIMITS["v_dc"]["trip_high"] == 210.0
+    assert VFD_OPERATIONAL_LIMITS["v_dc"]["trip_high"] == 220.0
     assert VFD_OPERATIONAL_LIMITS["current"]["trip_high"] == 2.50
 
 

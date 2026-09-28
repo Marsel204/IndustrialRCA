@@ -37,8 +37,8 @@ WECON_VM_VFD_SPEC_DATA = EquipmentSpec(
     rated_power_kw=0.75,
     rated_voltage_v=220.0,
     rated_current_a=2.50,
-    dc_bus_nominal_v=204.0,
-    dc_bus_trip_v=210.0,
+    dc_bus_nominal_v=210.0,
+    dc_bus_trip_v=220.0,
     max_operating_freq_hz=40.0,
 )
 
@@ -223,8 +223,8 @@ WECON_VM_VFD_SPEC: Dict[str, Any] = {
         11: "Motor Thermal Overload (Err11)",
         16: "Output Phase Loss (Err16)",
     },
-    "dc_bus_nominal_v": 204.0,
-    "dc_bus_overvoltage_threshold_v": 210.0,
+    "dc_bus_nominal_v": 210.0,
+    "dc_bus_overvoltage_threshold_v": 220.0,
 }
 
 

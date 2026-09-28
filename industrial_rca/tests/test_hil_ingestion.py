@@ -30,7 +30,7 @@ def test_vfd_oem_spec():
     assert "700BH" in spec["registers"]
     assert spec["registers"]["3004H"]["name"] == "DC Bus Voltage"
     assert spec["registers"]["700BH"]["dec"] == 28683
-    assert spec["dc_bus_overvoltage_threshold_v"] == 210.0
+    assert spec["dc_bus_overvoltage_threshold_v"] == 220.0
 
 
 def test_vfd_fault_taxonomy():

@@ -91,25 +91,25 @@ def test_embedded_tsdb_stats(tmp_path):
     assert stats["v_dc_avg"] == 200.0
 
 
-def test_embedded_tsdb_nominal_204v_no_trip(tmp_path):
-    """Verify that live bench reading of 204V DC does not trigger a trip, while >210V triggers Err06."""
+def test_embedded_tsdb_nominal_210v_no_trip(tmp_path):
+    """Verify that live bench reading of 209-210V DC does not trigger a trip, while >220V triggers Err06."""
     db_file = tmp_path / "test_tsdb.db"
     tsdb = EmbeddedTSDB(db_path=str(db_file), memory_capacity=100)
 
-    # 1. Steady-state 204.0 V with 1.50 A current (nominal bench) -> Must NOT trip
+    # 1. Steady-state 210.0 V with 1.50 A current (nominal bench) -> Must NOT trip
     nominal_metric = {
         "fault_code": 0,
-        "v_dc": 204.0,
+        "v_dc": 210.0,
         "current": 1.50,
         "f_out": 40.0,
         "rpm": 1196.0,
     }
     assert tsdb.check_trip_trigger(nominal_metric) is None
 
-    # 2. Overvoltage condition (e.g. 212.0 V) -> Must trigger Err06
+    # 2. Overvoltage condition (e.g. 222.0 V) -> Must trigger Err06
     trip_metric = {
         "fault_code": 0,
-        "v_dc": 212.0,
+        "v_dc": 222.0,
         "current": 1.50,
         "f_out": 48.0,
         "rpm": 1400.0,
