@@ -64,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
   const simMenuRef = useRef<HTMLDivElement>(null);
 
   const SIMULATION_SCENARIOS = [
-    { id: 'H_VFD_ERR06', name: 'Err06 · Decel Overvoltage (195V)', icon: '⚡', color: 'text-amber-700' },
+    { id: 'H_VFD_ERR06', name: 'Err06 · Decel Overvoltage (210V)', icon: '⚡', color: 'text-amber-700' },
     { id: 'H_VFD_ERR02', name: 'Err02 · Sudden Stop Overcurrent (2.5A)', icon: '💥', color: 'text-rose-700' },
     { id: 'H_VFD_ERR03', name: 'Err03 · Decel Ramp Overcurrent (2.5A)', icon: '📉', color: 'text-orange-700' },
     { id: 'H_VFD_ERR11', name: 'Err11 · Motor Thermal Overload (2.0A)', icon: '🔥', color: 'text-red-700' },

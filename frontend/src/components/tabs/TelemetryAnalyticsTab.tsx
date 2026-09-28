@@ -607,11 +607,11 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
             symbol: 'none',
             data: [
               {
-                yAxis: 195.0,
+                yAxis: 210.0,
                 name: 'Err06 Trip Threshold',
                 lineStyle: { color: '#DC2626', type: 'dashed', width: 2 },
                 label: {
-                  formatter: '195.0 V',
+                  formatter: '210.0 V',
                   position: 'insideEndTop',
                   color: '#DC2626',
                   fontSize: 10,

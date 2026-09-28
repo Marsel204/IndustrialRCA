@@ -218,12 +218,13 @@ class EmbeddedTSDB:
         fault_code = int(metric.get("fault_code", 0) or 0)
         v_dc = float(metric.get("v_dc", 0.0) or 0.0)
         current = float(metric.get("current", 0.0) or 0.0)
-        f_out = float(metric.get("f_out", 0.0) or 0.0)
+        v_dc_trip = float(VFD_OPERATIONAL_LIMITS.get("v_dc", {}).get("trip_high", 210.0))
+        current_trip = float(VFD_OPERATIONAL_LIMITS.get("current", {}).get("trip_high", 2.50))
 
         if fault_code == 0:
-            if v_dc >= 195.0:
+            if v_dc >= v_dc_trip:
                 fault_code = 6  # Err06 Overfrequency / Deceleration Overvoltage trip
-            elif current >= 2.50:
+            elif current >= current_trip:
                 fault_code = 2  # Err02 Forced Sudden Deceleration Overcurrent trip
 
         last_code = getattr(self, "_last_fault_code", 0)

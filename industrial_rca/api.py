@@ -1118,7 +1118,12 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
         v_dc = round(raw_v_dc, 1)
 
     raw_current = _unpack(metric.get("current", 0.0))
-    current = round(raw_current / 100.0 if raw_current > 100.0 else raw_current, 2)
+    if raw_current > 100.0:
+        current = round(raw_current / 100.0, 2)
+    elif raw_current > 5.0:
+        current = round(raw_current / 10.0, 2)
+    else:
+        current = round(raw_current, 2)
 
     # Check for trip code across common industrial keys (fault_code, error, err, trip, code, d_trigger, D-registers)
     raw_fault = None

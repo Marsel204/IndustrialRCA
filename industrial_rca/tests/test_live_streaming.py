@@ -44,7 +44,7 @@ def test_vfd_config_constants():
     assert "f_out" in VFD_OPERATIONAL_LIMITS
     assert "v_dc" in VFD_OPERATIONAL_LIMITS
     assert "current" in VFD_OPERATIONAL_LIMITS
-    assert VFD_OPERATIONAL_LIMITS["v_dc"]["trip_high"] == 195.0
+    assert VFD_OPERATIONAL_LIMITS["v_dc"]["trip_high"] == 210.0
     assert VFD_OPERATIONAL_LIMITS["current"]["trip_high"] == 2.50
 
 
@@ -319,7 +319,7 @@ def test_influx_tool_statistical_summary_source_tag():
         {"_time": "2026-09-15T03:14:00Z", "f_out": 40.0, "v_dc": 312.0, "current": 1.35, "rpm": 1160.0, "fault_code": 0},
         {"_time": "2026-09-15T03:14:01Z", "f_out": 40.2, "v_dc": 313.0, "current": 1.38, "rpm": 1165.0, "fault_code": 0},
     ]
-    with patch.object(tool, "query_flux", return_value=records):
+    with patch("industrial_rca.tools.influx_tool.GLOBAL_TSDB.get_latest", return_value=None), patch.object(tool, "query_flux", return_value=records):
         summary = tool.get_statistical_summary()
         assert summary["source"] == "influxdb"
         assert summary["sample_count"] == 2
