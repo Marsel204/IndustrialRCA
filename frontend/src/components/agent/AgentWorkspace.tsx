@@ -181,6 +181,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
      rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR06' || rcaState?.winning_hypothesis?.name?.includes('Err06') ? 6 :
      rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR03' || rcaState?.winning_hypothesis?.name?.includes('Err03') ? 3 :
      rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR11' || rcaState?.winning_hypothesis?.name?.includes('Err11') ? 11 :
+     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR13' || rcaState?.winning_hypothesis?.name?.includes('Err13') ? 13 :
      (rcaState?.has_active_trip ? (latestIncident?.incident_data?.fault_code || 2) : 0));
   const isIncidentActive = Boolean(
     latestIncident?.has_incident ||
@@ -355,15 +356,15 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
       {
         id: 'tool-fmea',
         name: 'FMEAEngine',
-        command: `FMEAEngine --evaluate [Err02,Err06,Err03,Err11] --dataset ${rcaState?.thread_id || 'active'}`,
+        command: `FMEAEngine --evaluate [Err02,Err06,Err03,Err11,Err13] --dataset ${rcaState?.thread_id || 'active'}`,
         args: {
           fault_observed: faultStr,
-          candidate_hypotheses: ['H_VFD_ERR06', 'H_VFD_ERR02', 'H_VFD_ERR03', 'H_VFD_ERR11'],
+          candidate_hypotheses: ['H_VFD_ERR06', 'H_VFD_ERR02', 'H_VFD_ERR03', 'H_VFD_ERR11', 'H_VFD_ERR13'],
           methodology: 'Deterministic Multi-Hypothesis Falsification (MIL-STD-1629A)',
         },
         status: isPipelineRunning ? 'running' : 'completed',
         duration_ms: 512,
-        summary: `evaluating VFD failure modes (Err02, Err06, Err03, Err11)`,
+        summary: `evaluating VFD failure modes (Err02, Err06, Err03, Err11, Err13)`,
         output_details: {
           winning_hypothesis:
             winningHypo?.name ||
@@ -373,6 +374,8 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
               ? 'Deceleration Ramp Overcurrent (WECON VM Err03)'
               : faultCode === 11
               ? 'Motor Thermal Overload (WECON VM Err11)'
+              : faultCode === 13
+              ? 'Output Phase Loss (WECON VM Err13)'
               : 'Overfrequency Deceleration Overvoltage (WECON VM Err06)'),
           confidence: winningHypo?.confidence
             ? `${(winningHypo.confidence * 100).toFixed(0)}%`
@@ -396,6 +399,12 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                   'H_VFD_ERR02: Sudden Decel Stop (Refuted: no abrupt deceleration command)',
                   'H_VFD_ERR03: Decel Ramp OC (Refuted: trip was thermal accumulation, not ramp surge)',
                 ]
+              : faultCode === 13
+              ? [
+                  'H_VFD_ERR06: Decel Overvoltage (Refuted: trip was Err13 output phase loss)',
+                  'H_VFD_ERR02: Sudden Decel Stop (Refuted: phase current collapsed to 0A)',
+                  'H_VFD_ERR11: Motor Overheat (Refuted: no continuous thermal overload)',
+                ]
               : [
                   'H_VFD_ERR02: Sudden Decel Overcurrent (Refuted: peak current below threshold)',
                   'H_VFD_ERR03: Decel Ramp OC (Refuted: DC bus voltage exceeded 195V ceiling)',
@@ -408,6 +417,8 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
               ? 'Deceleration ramp time F0.18 too short for high load inertia, causing excessive regenerative energy and overcurrent'
               : faultCode === 11
               ? 'Continuous mechanical overload exceeding rated motor full-load current (2.0A), triggering electronic thermal relay'
+              : faultCode === 13
+              ? 'Open circuit, loose screw, or broken stator lead on output terminals U, V, or W interrupting 3-phase current continuity'
               : 'Regenerative kinetic energy dump into DC bus capacitors without dynamic dissipation',
         },
         logs: [
@@ -418,6 +429,8 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
             ? '[FMEAEngine] Testing H_VFD_ERR03: Decel ramp current surge > 2.50A -> CONFIRMED (p=0.98).'
             : faultCode === 11
             ? '[FMEAEngine] Testing H_VFD_ERR11: Sustained current > 2.00A thermal threshold -> CONFIRMED (p=0.98).'
+            : faultCode === 13
+            ? '[FMEAEngine] Testing H_VFD_ERR13: Phase current collapse to 0.00A and shaft stall -> CONFIRMED (p=0.98).'
             : '[FMEAEngine] Testing H_VFD_ERR06: DC bus > 195V during rapid decel / 50Hz ramp -> CONFIRMED (p=0.98).',
           '[FMEAEngine] FMEA matrix convergence achieved.',
         ],
@@ -718,6 +731,12 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           "3. Trip setpoint evaluated: Motor stator current exceeded 2.00 A continuous thermal rating (drawing 2.45 A sustained).\n" +
           "4. Evaluated failure hypotheses: H_VFD_ERR11 (Motor Thermal Overload) CONFIRMED; transient faults REFUTED.\n" +
           "5. OEM corrective action: Inspect mechanical load for binding, ensure cooling airflow, and verify F1.07 setpoint."
+        : faultCode === 13
+        ? "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
+          "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
+          "3. Trip setpoint evaluated: Motor line current collapsed to 0.00 A and rotor speed stalled to 0 RPM.\n" +
+          "4. Evaluated failure hypotheses: H_VFD_ERR13 (Output Phase Loss) CONFIRMED; transient faults REFUTED.\n" +
+          "5. OEM corrective action: Inspect terminals U, V, W, re-torque screws to 1.8 N-m, and test stator winding balance."
         : "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
           "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
           "3. Trip setpoint evaluated: DC bus limit at 195.0 V DC (reaches ~207V at 50 Hz), current limit at 2.50 A.\n" +

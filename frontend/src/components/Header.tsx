@@ -68,6 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'H_VFD_ERR02', name: 'Err02 · Sudden Stop Overcurrent (2.5A)', icon: '💥', color: 'text-rose-700' },
     { id: 'H_VFD_ERR03', name: 'Err03 · Decel Ramp Overcurrent (2.5A)', icon: '📉', color: 'text-orange-700' },
     { id: 'H_VFD_ERR11', name: 'Err11 · Motor Thermal Overload (2.0A)', icon: '🔥', color: 'text-red-700' },
+    { id: 'H_VFD_ERR13', name: 'Err13 · Output Phase Loss (U/V/W Broken)', icon: '🔌', color: 'text-purple-700' },
     { id: 'nominal', name: 'Nominal 40Hz Baseline (Zero Faults)', icon: '🟢', color: 'text-emerald-700' },
   ];
 

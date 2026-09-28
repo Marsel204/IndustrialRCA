@@ -148,6 +148,11 @@ def _ensure_default_scenarios():
         SCENARIOS_REGISTRY["exp_err06"] = ds_id_err06
         SCENARIOS_REGISTRY["fault"] = ds_id_err06
 
+    if "exp_err13" not in SCENARIOS_REGISTRY:
+        ds_err13 = generate_vfd_dataset(scenario="exp_err13")
+        ds_id_err13 = TelemetryStore.register(ds_err13, "ds_exp_err13")
+        SCENARIOS_REGISTRY["exp_err13"] = ds_id_err13
+
     if "exp_nominal" not in SCENARIOS_REGISTRY:
         ds_nom = generate_vfd_dataset(scenario="exp_nominal")
         ds_id_nom = TelemetryStore.register(ds_nom, "ds_exp_nominal")
@@ -464,6 +469,7 @@ async def _run_telemetry_simulation(scenario: str, normal_duration_sec: float = 
         "H_VFD_ERR02": 2, "ERR02": 2, "2": 2,
         "H_VFD_ERR03": 3, "ERR03": 3, "3": 3,
         "H_VFD_ERR11": 11, "ERR11": 11, "11": 11,
+        "H_VFD_ERR13": 13, "ERR13": 13, "13": 13, "EXP_ERR13": 13,
     }
     target_fc = fault_code_map.get(scenario.upper(), 0) if scenario.lower() not in ("nominal", "normal") else 0
 
@@ -522,6 +528,9 @@ async def _run_telemetry_simulation(scenario: str, normal_duration_sec: float = 
                     elif target_fc == 11:
                         v_dc = 181.5
                         current = 2.45
+                    elif target_fc == 13:
+                        v_dc = 182.0
+                        current = 0.00
                     else:
                         v_dc = 202.5
                         current = 1.20
@@ -1138,7 +1147,7 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
             if k.upper().startswith("D") or "PLC" in k.upper():
                 try:
                     val = int(_unpack(v, 0))
-                    if val in (2, 3, 6, 11) or val > 0:
+                    if val in (2, 3, 6, 11, 13) or val > 0:
                         raw_fault = val
                         break
                 except (ValueError, TypeError):
@@ -1149,6 +1158,10 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
             raw_fault = 2
         elif "err06" in topic_name or "error06" in topic_name:
             raw_fault = 6
+        elif "err11" in topic_name or "error11" in topic_name:
+            raw_fault = 11
+        elif "err13" in topic_name or "error13" in topic_name:
+            raw_fault = 13
 
     fault_code = int(_unpack(raw_fault, 0) if raw_fault is not None else 0)
     status = "TRIPPED" if fault_code > 0 else "RUNNING"
@@ -1276,6 +1289,12 @@ def _resolve_ds(dataset_id: str) -> TelemetryDataset:
         ds = generate_vfd_dataset(scenario="exp_err06")
         TelemetryStore.register(ds, "ds_exp_err06")
         SCENARIOS_REGISTRY["exp_err06"] = "ds_exp_err06"
+        return ds
+
+    if "exp_err13" in dataset_id or dataset_id in ("exp_err13", "ds_exp_err13"):
+        ds = generate_vfd_dataset(scenario="exp_err13")
+        TelemetryStore.register(ds, "ds_exp_err13")
+        SCENARIOS_REGISTRY["exp_err13"] = "ds_exp_err13"
         return ds
 
     if dataset_id in ("exp_nominal", "ds_exp_nominal", "normal", "ds_normal"):
@@ -1814,6 +1833,8 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
         "   - Motor Thermal Overload (Err11): Triggered by inverter electronic thermal model I2t when continuous current exceeds parameter F2.03 rating.",
         "     Typically caused by mechanical binding, driven equipment friction, or prolonged low-speed overload with insufficient cooling fan airflow.",
         "     Countermeasures: inspect motor shaft mechanical binding, verify parameter F2.03 rating (1.15 A), clear cooling airflow obstructions.",
+        "   - Output Phase Loss (Err13): Triggered when output current collapses on motor terminals U, V, or W (broken wire, loose screw terminal, or open stator winding).",
+        "     Countermeasures: inspect terminals U, V, W on VFD and motor junction box (re-torque to 1.8 N-m), test 3-phase winding resistance balance (within 2%), Megger insulation test (>50 M-Ohm).",
         "",
         "=== INSTRUCTIONS FOR YOUR RESPONSES ===",
         "- You are the engineer's copilot for THIS specific test bench (VFD_VM_01).",

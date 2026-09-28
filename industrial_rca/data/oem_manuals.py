@@ -77,6 +77,12 @@ ISO_14224_TAXONOMY: Dict[str, Dict[str, Any]] = {
         "detection_method": "Output phase current imbalance and VFD Trip Code 16 (Err16)",
         "iso_code": "ISO-14224-DR-ELC-PHS",
     },
+    "VFD_OUTPUT_PHASE_LOSS": {
+        "failure_mode": "PHS (Output phase loss / disconnection on U, V, W)",
+        "failure_mechanism": "Motor terminal loose connection, open stator winding, or severed cable",
+        "detection_method": "Output current collapse/imbalance and VFD Trip Code 13 (Err13)",
+        "iso_code": "ISO-14224-DR-ELC-PHS",
+    },
 }
 
 
@@ -162,6 +168,28 @@ FMEA_KNOWLEDGE_BASE: List[Dict[str, Any]] = [
             "Inspect motor shaft free rotation and load mechanical binding",
         ],
     },
+    {
+        "hypothesis_id": "H_VFD_ERR13",
+        "name": "Output Phase Loss (WECON VM Err13)",
+        "failure_mode": "Loss of phase connection on output terminals U, V, or W",
+        "potential_causes": [
+            "Motor stator winding failure or open-circuit phase",
+            "Abnormal cabling or loose wiring between VFD output terminals (U, V, W) and motor",
+            "Severe three-phase output current unbalance during operation",
+            "Failure of inverter IGBT or gate drive board",
+        ],
+        "effects": "Drive trip Err13, output inhibition, motor deceleration stall",
+        "severity": 8,
+        "occurrence": 3,
+        "detection": 1,
+        "rpn": 24,
+        "falsification_checks": [
+            "Verify Modbus fault code Reg 700BH reported 13 (Err13)",
+            "Verify output current Reg 3002H collapsed to 0.0A or became unbalanced during commanded run",
+            "Inspect physical terminals U, V, W for loose connections, open phase, or broken cores",
+            "Measure three-phase stator winding resistance with ohmmeter",
+        ],
+    },
 ]
 
 
@@ -221,6 +249,7 @@ WECON_VM_VFD_SPEC: Dict[str, Any] = {
         3: "Deceleration Overcurrent (Err03)",
         6: "Overfrequency Overvoltage (Err06)",
         11: "Motor Thermal Overload (Err11)",
+        13: "Output Phase Loss (Err13)",
         16: "Output Phase Loss (Err16)",
     },
     "dc_bus_nominal_v": 210.0,
@@ -243,15 +272,19 @@ def get_vfd_spec() -> Dict[str, Any]:
 def get_vfd_fault_info(fault_code: int) -> Dict[str, Any]:
     """Retrieve description and failure taxonomy for a VFD fault code."""
     desc = WECON_VM_VFD_SPEC["fault_codes"].get(fault_code, f"Unknown Fault (Code {fault_code})")
+    code_str = f"Err{fault_code:02d}" if fault_code < 10 else f"Err{fault_code}"
     iso_map = {
         2: ISO_14224_TAXONOMY.get("VFD_ACCEL_OVERCURRENT", {}),
         3: ISO_14224_TAXONOMY.get("VFD_DECEL_OVERCURRENT", {}),
         6: ISO_14224_TAXONOMY.get("VFD_DECEL_OVERVOLTAGE", {}),
         11: ISO_14224_TAXONOMY.get("VFD_MOTOR_OVERLOAD", {}),
+        13: ISO_14224_TAXONOMY.get("VFD_OUTPUT_PHASE_LOSS", {}),
         16: ISO_14224_TAXONOMY.get("VFD_PHASE_LOSS", {}),
     }
     return {
         "fault_code": fault_code,
+        "code": code_str,
+        "name": desc,
         "description": desc,
         "iso_info": iso_map.get(fault_code, {}),
     }

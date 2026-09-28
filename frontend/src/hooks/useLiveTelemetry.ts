@@ -22,6 +22,7 @@ export function useLiveTelemetry(
     activeScenarioId === 'live_stream' ||
     activeScenarioId === 'exp_err02' ||
     activeScenarioId === 'exp_err06' ||
+    activeScenarioId === 'exp_err13' ||
     activeScenarioId === 'exp_nominal' ||
     activeScenarioId === 'hil' ||
     Boolean(activeScenarioId?.startsWith('ds_hil')) ||

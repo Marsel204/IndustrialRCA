@@ -277,9 +277,10 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
 
     # VFD telemetry metrics
     fc_max = analytics_tool.profile_tag(ds_id, "fault_code", 0, 3600).get("max", 0) if "fault_code" in available_cols else 0
-    vdc_profile = analytics_tool.profile_tag(ds_id, "v_dc", 0, 3600) if "v_dc" in available_cols else {"max": 0, "mean": 0}
-    curr_profile = analytics_tool.profile_tag(ds_id, "current", 0, 3600) if "current" in available_cols else {"max": 0, "mean": 0}
-    fout_profile = analytics_tool.profile_tag(ds_id, "f_out", 0, 3600) if "f_out" in available_cols else {"max": 0, "mean": 0}
+    vdc_profile = analytics_tool.profile_tag(ds_id, "v_dc", 0, 3600) if "v_dc" in available_cols else {"max": 0, "mean": 0, "min": 0}
+    curr_profile = analytics_tool.profile_tag(ds_id, "current", 0, 3600) if "current" in available_cols else {"max": 0, "mean": 0, "min": 0}
+    fout_profile = analytics_tool.profile_tag(ds_id, "f_out", 0, 3600) if "f_out" in available_cols else {"max": 0, "mean": 0, "min": 0}
+    rpm_profile = analytics_tool.profile_tag(ds_id, "rpm", 0, 3600) if "rpm" in available_cols else {"max": 0, "mean": 0, "min": 0}
 
     trip_meta_code = int(worker_input.get("trip_metadata", {}).get("fault_code", 0) or 0)
     if trip_meta_code > 0:
@@ -440,6 +441,52 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
             falsification_rationale = "REFUTED. Motor continuous current remained below thermal overload threshold."
             proposed_actions = []
 
+    elif hyp_id == "H_VFD_ERR13":
+        # Output Phase Loss (WECON VM Err13)
+        metrics["fault_code"] = active_fc
+        curr_min = curr_profile.get("min", 0.0)
+        rpm_min = rpm_profile.get("min", 0.0)
+        fout_max = fout_profile.get("max", 0.0)
+        is_confirmed = (active_fc == 13) or (active_fc == 0 and fout_max > 10.0 and curr_min == 0.0 and rpm_min == 0.0)
+        if is_confirmed:
+            status = "CONFIRMED"
+            confidence = 0.98
+            evidence.append({
+                "check": "Modbus Trip Code Register (Reg 700BH)",
+                "observation": f"VFD reported Err13 (Output Phase Loss). Active fault code: {active_fc}.",
+                "status": "FAULT_LATCHED",
+            })
+            evidence.append({
+                "check": "Motor Line Current (Reg 1005H / 3002H)",
+                "observation": f"Output current collapsed to {curr_min:.2f} A during commanded operation.",
+                "status": "PHASE_COLLAPSE",
+            })
+            evidence.append({
+                "check": "Rotor Speed (Reg 100FH)",
+                "observation": f"Motor stalled to {rpm_min:.1f} RPM due to loss of rotating magnetic field.",
+                "status": "MOTOR_STALLED",
+            })
+            falsification_rationale = (
+                "CONFIRMED. VFD detected open phase or severe current unbalance on motor output terminals U, V, or W, "
+                "causing shaft stall and tripping Err13 output phase loss protection."
+            )
+            proposed_actions = [
+                "Inspect motor output terminals U, V, W on VFD and motor terminal block for loose screws or disconnected leads",
+                "Measure three-phase stator winding resistance with ohmmeter (U-V, V-W, W-U) to verify continuity and balance",
+                "Perform Megger insulation resistance test on motor cabling (>50 M-Ohm)",
+                "Verify VFD output voltage symmetry across U, V, W under no-load test",
+            ]
+        else:
+            status = "REFUTED"
+            confidence = 0.96
+            evidence.append({
+                "check": "Modbus Trip Code Register (Reg 700BH)",
+                "observation": f"Fault register does not indicate Err13 output phase loss (Code: {active_fc}).",
+                "status": "WITHIN_LIMITS",
+            })
+            falsification_rationale = "REFUTED. Drive did not latch Err13 and three-phase output remained balanced."
+            proposed_actions = []
+
     elif hyp_id == "H1":
         # H1: Drive-End Bearing Lubrication Starvation / Degradation
         ti_profile = analytics_tool.profile_tag(ds_id, "TI-301-DE", 0, 3600) if "TI-301-DE" in available_cols else {"max": 48.5}
@@ -533,6 +580,8 @@ def aggregate_hypotheses(state: RCAState) -> Dict[str, Any]:
             exact_fc_match = 2
         elif fc == 11 and r["hypothesis_id"] == "H_VFD_ERR11":
             exact_fc_match = 2
+        elif fc == 13 and r["hypothesis_id"] == "H_VFD_ERR13":
+            exact_fc_match = 2
 
         return (priority, exact_fc_match, is_asset_match, r["confidence"])
 
@@ -548,6 +597,7 @@ def aggregate_hypotheses(state: RCAState) -> Dict[str, Any]:
         "H_VFD_ERR11": "VFD_MOTOR_OVERLOAD",
         "H_VFD_ERR02": "VFD_ACCEL_OVERCURRENT",
         "H_VFD_ERR03": "VFD_DECEL_OVERCURRENT",
+        "H_VFD_ERR13": "VFD_OUTPUT_PHASE_LOSS",
     }
     iso_key = hyp_iso_map.get(winning_hyp["hypothesis_id"], "CAVITATION")
     iso_info = ISO_14224_TAXONOMY.get(iso_key, ISO_14224_TAXONOMY.get("CAVITATION", {}))
@@ -736,6 +786,51 @@ def causal_deep_dive_5_whys(state: RCAState) -> Dict[str, Any]:
         root_desc = (
             "Prolonged continuous current elevation (2.45 A vs 1.15 A rating) due to mechanical load resistance exceeded inverter "
             "thermal model capacity, latching motor thermal overload trip Err11."
+        )
+
+    elif is_vfd and win_id == "H_VFD_ERR13":
+        # 5-Whys for Err13 (Output Phase Loss)
+        five_whys = [
+            {
+                "level": "Why 1",
+                "question": f"Why did Wecon VM Series VFD ({asset_id}) trip with fault code Err13?",
+                "answer": "The inverter detected output phase loss protection trip (Err13) on motor terminals U, V, or W.",
+                "evidence": "Modbus fault code register Reg 700BH reported 13 (Err13); inverter IGBT firing inhibited.",
+                "asset_involved": asset_id,
+            },
+            {
+                "level": "Why 2",
+                "question": "Why did the drive detect output phase loss?",
+                "answer": "Current collapsed on one or more output phases (U, V, W), breaking electrical continuity to the 3-phase motor.",
+                "evidence": "Motor line current dropped to 0.00 A while running frequency was active, causing shaft stall to 0 RPM.",
+                "asset_involved": "IND_MOTOR_01",
+            },
+            {
+                "level": "Why 3",
+                "question": "Why did output phase continuity break?",
+                "answer": "Terminal screw connection loosened on output terminals U/V/W, or motor cable conductor experienced an open circuit.",
+                "evidence": "Topology node IND_MOTOR_01 cabling inspection shows broken circuit or open winding on output line.",
+                "asset_involved": "IND_MOTOR_01",
+            },
+            {
+                "level": "Why 4",
+                "question": "Why was the wiring/terminal looseness not detected during maintenance?",
+                "answer": "Preventive maintenance inspection lacked periodic terminal torque verification and cable flexure inspection.",
+                "evidence": "CMMS maintenance records lack a recent terminal torque calibration protocol.",
+                "asset_involved": "VFD_VM_01",
+            },
+            {
+                "level": "Why 5 (Root Cause)",
+                "question": "What is the primary physical root cause of the Err13 trip?",
+                "answer": "Motor output terminal phase disconnection or open stator winding broke three-phase circuit balance, triggering Wecon VM Err13 output phase loss protection.",
+                "evidence": "Modbus Reg 700BH latched Err13 with zero current draw during commanded running state.",
+                "asset_involved": "IND_MOTOR_01",
+            },
+        ]
+        root_asset = "IND_MOTOR_01"
+        root_desc = (
+            "Output phase disconnection on terminals U, V, or W (open circuit / loose terminal / broken lead) interrupted 3-phase continuity, "
+            "causing motor stall and triggering Wecon VM Err13 output phase loss protection."
         )
 
     elif is_vfd:
@@ -985,6 +1080,16 @@ def generate_maintenance_artifacts(state: RCAState) -> Dict[str, Any]:
                 "PCA-2: Verify VFD parameter F2.03 (Motor Rated Current) matches motor nameplate (1.15 A).",
                 "PCA-3: Inspect motor forced cooling fan and clear ventilation shroud obstructions.",
                 "PCA-4: Configure 85% thermal pre-alarm in PLC ladder logic to prevent unannounced line shutdown.",
+            ]
+        elif "ERR13" in winning.get("hypothesis_id", ""):
+            fc = 13
+            fc_desc = "Output Phase Loss (Err13)"
+            impact = "Output phase connection on terminals U, V, or W was interrupted; phase current collapsed to 0.0A causing motor stall."
+            pca = [
+                "PCA-1: Inspect terminals U, V, W on VFD and motor junction box; re-torque screw terminals to 1.8 N-m.",
+                "PCA-2: Test three-phase stator winding balance and continuity (resistance across U-V, V-W, W-U within 2%).",
+                "PCA-3: Perform Megger insulation resistance test on motor cabling (>50 M-Ohm at 500V DC).",
+                "PCA-4: Implement annual vibration-proof cable strain-relief audit and terminal re-torque PM schedule.",
             ]
         else:
             vdc_trip = VFD_OPERATIONAL_LIMITS.get("v_dc", {}).get("trip_high", 220.0)

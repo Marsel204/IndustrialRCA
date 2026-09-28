@@ -402,6 +402,65 @@ def generate_vfd_dataset(
             fault_waveform={"t": t_wf_cav, "signal": sig_cav},
         )
 
+    elif scenario in ("exp_err13", "phase_loss", "output_phase_loss"):
+        # Output Phase Loss (Err13): Motor phase connection breaks at idx_trip
+        t = np.arange(duration_sec)
+        idx_trip = duration_sec - 15
+
+        f_out = np.full(duration_sec, 40.0)
+        v_dc = np.full(duration_sec, 208.0) + rng.normal(0, 0.3, duration_sec)
+        current = np.full(duration_sec, 1.15) + rng.normal(0, 0.02, duration_sec)
+        v_out = np.full(duration_sec, 220.0)
+        rpm = np.full(duration_sec, 1199.0) + rng.normal(0, 0.5, duration_sec)
+        fault_code = np.zeros(duration_sec, dtype=int)
+
+        # At idx_trip, phase connection on U/V/W breaks: current collapses to 0, motor stalls, drive trips Err13
+        fault_code[idx_trip:] = 13  # Err13
+        f_out[idx_trip:] = 0.0
+        v_out[idx_trip:] = 0.0
+        current[idx_trip:] = 0.0
+        rpm[idx_trip:] = 0.0
+
+        df = pd.DataFrame({
+            "timestamp_sec": t,
+            "f_out": np.round(f_out, 2),
+            "f_target": np.where(t >= idx_trip, 0.0, 40.0),
+            "v_dc": np.round(v_dc, 1),
+            "v_out": np.round(v_out, 1),
+            "current": np.round(current, 2),
+            "rpm": np.round(rpm, 1),
+            "fault_code": fault_code,
+            "PT-30101": np.full(duration_sec, 2.40),
+            "DPS-30101": np.full(duration_sec, 0.12),
+            "VI-301-R": np.full(duration_sec, 1.80),
+            "TI-301-DE": np.full(duration_sec, 48.5),
+            "IT-30101": np.round(current * 60.0, 1),
+        })
+
+        t_wf_norm, sig_norm = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
+        t_wf_cav, sig_cav = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
+
+        return TelemetryDataset(
+            scenario_name="Output Phase Loss Trip (Err13)",
+            df_1hz=df,
+            metadata={
+                "asset_id": VFD_EQUIPMENT_ID,
+                "duration_sec": duration_sec,
+                "condition": "HARDWARE_FAULT_TRIP",
+                "anomaly_expected": True,
+                "scenario": "exp_err13",
+                "trip_timestamp_sec": idx_trip,
+                "trip_time_str": "03:14:00 AM",
+                "primary_trip_sensor": "current",
+                "trip_value": 0.0,
+                "trip_setpoint": 0.0,
+                "fault_code": 13,
+                "fault_description": "Output Phase Loss (Err13) - Loss of phase connection on output terminals U, V, or W",
+            },
+            normal_waveform={"t": t_wf_norm, "signal": sig_norm},
+            fault_waveform={"t": t_wf_cav, "signal": sig_cav},
+        )
+
     else:
-        raise ValueError(f"Unknown VFD scenario: {scenario}. Expected live_stream, exp_err02, exp_err06, or nominal.")
+        raise ValueError(f"Unknown VFD scenario: {scenario}. Expected live_stream, exp_err02, exp_err06, exp_err13, or nominal.")
 

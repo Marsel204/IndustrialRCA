@@ -383,6 +383,92 @@ const DEFAULT_5_WHYS_ERR11 = [
   },
 ];
 
+const DEFAULT_HYPOTHESES_ERR13 = [
+  {
+    hypothesis_id: 'H_VFD_ERR13',
+    name: 'Output Phase Loss (WECON VM Err13)',
+    status: 'CONFIRMED',
+    confidence: 0.98,
+    falsification_rationale:
+      'VFD detected open circuit or severe current collapse across output terminals U, V, or W during commanded operation. Shaft stalled to 0 RPM and drive latched Err13 in Modbus register 700BH.',
+    evidence: [
+      { check: 'Modbus Trip Code Register (Reg 700BH)', observation: 'VFD reported Err13 (Output Phase Loss).', status: 'CONFIRMED' },
+      { check: 'Motor Line Current (Reg 3002H)', observation: 'Output current collapsed to 0.00 A during commanded running state.', status: 'CONFIRMED' },
+      { check: 'Rotor Speed (Reg 100FH)', observation: 'Rotor stalled to 0 RPM due to loss of rotating magnetic field.', status: 'CONFIRMED' },
+    ],
+    proposed_actions: [
+      'Inspect motor output terminals U, V, W on VFD and motor terminal block for loose screws or disconnected leads',
+      'Measure three-phase stator winding resistance with ohmmeter (U-V, V-W, W-U within 2%)',
+      'Perform Megger insulation resistance test on motor cabling (>50 M-Ohm)',
+    ],
+  },
+  {
+    hypothesis_id: 'H_VFD_ERR06',
+    name: 'Overfrequency Deceleration Overvoltage (WECON VM Err06)',
+    status: 'REFUTED',
+    confidence: 0.02,
+    falsification_rationale: 'Drive latched Err13 (not Err06 overvoltage). DC bus voltage remained within safe limits.',
+    evidence: [{ check: 'DC Bus Voltage', observation: 'V_dc remained nominal (~182 V).', status: 'PASSED' }],
+    proposed_actions: [],
+  },
+  {
+    hypothesis_id: 'H_VFD_ERR02',
+    name: 'Forced Sudden Deceleration Overcurrent (WECON VM Err02)',
+    status: 'REFUTED',
+    confidence: 0.03,
+    falsification_rationale: 'No overcurrent surge occurred; current collapsed to 0.00 A due to phase loss.',
+    evidence: [{ check: 'Motor Output Current', observation: 'Current collapsed to 0.00 A, no surge spike.', status: 'PASSED' }],
+    proposed_actions: [],
+  },
+  {
+    hypothesis_id: 'H_VFD_ERR11',
+    name: 'Motor Thermal Overload (WECON VM Err11)',
+    status: 'REFUTED',
+    confidence: 0.02,
+    falsification_rationale: 'Zero current flow post-trip; thermal accumulation remained low.',
+    evidence: [{ check: 'Motor Thermal Model', observation: 'No thermal overload accumulated.', status: 'PASSED' }],
+    proposed_actions: [],
+  },
+];
+
+const DEFAULT_5_WHYS_ERR13 = [
+  {
+    level: 'Why 1',
+    question: 'Why did Wecon VM Series VFD (VFD_VM_01) trip with fault code Err13?',
+    answer: 'The inverter detected output phase loss protection trip (Err13) on motor terminals U, V, or W.',
+    evidence: 'Modbus fault code register Reg 700BH reported 13 (Err13); inverter IGBT firing inhibited.',
+    asset_involved: 'VFD_VM_01',
+  },
+  {
+    level: 'Why 2',
+    question: 'Why did the drive detect output phase loss?',
+    answer: 'Current collapsed on one or more output phases (U, V, W), breaking electrical continuity to the 3-phase motor.',
+    evidence: 'Motor line current dropped to 0.00 A while running frequency was active, causing shaft stall to 0 RPM.',
+    asset_involved: 'IND_MOTOR_01',
+  },
+  {
+    level: 'Why 3',
+    question: 'Why did output phase continuity break?',
+    answer: 'Terminal screw connection loosened on output terminals U/V/W, or motor cable conductor experienced an open circuit.',
+    evidence: 'Topology node IND_MOTOR_01 cabling inspection shows broken circuit or open winding on output line.',
+    asset_involved: 'IND_MOTOR_01',
+  },
+  {
+    level: 'Why 4',
+    question: 'Why was the wiring/terminal looseness not detected during maintenance?',
+    answer: 'Preventive maintenance inspection lacked periodic terminal torque verification and cable flexure inspection.',
+    evidence: 'CMMS maintenance records lack a recent terminal torque calibration protocol.',
+    asset_involved: 'VFD_VM_01',
+  },
+  {
+    level: 'Why 5 (Root Cause)',
+    question: 'What is the primary physical root cause of the Err13 trip?',
+    answer: 'Motor output terminal phase disconnection or open stator winding broke three-phase circuit balance, triggering Wecon VM Err13 output phase loss protection.',
+    evidence: 'Modbus Reg 700BH latched Err13 with zero current draw during commanded running state.',
+    asset_involved: 'IND_MOTOR_01',
+  },
+];
+
 const STANDBY_HYPOTHESES = [
   {
     hypothesis_id: 'H_VFD_ERR06',
@@ -443,6 +529,19 @@ const STANDBY_HYPOTHESES = [
     ],
     proposed_actions: [],
   },
+  {
+    hypothesis_id: 'H_VFD_ERR13',
+    name: 'Output Phase Loss (WECON VM Err13)',
+    status: 'STANDBY',
+    confidence: 0,
+    falsification_rationale:
+      'Three-phase output circuit continuity is intact. Output current and speed are synchronized. Branch on standby for phase disconnection.',
+    evidence: [
+      { check: 'Three-Phase Current Symmetry', observation: 'Phase continuity normal; zero current collapse.', status: 'NOMINAL' },
+      { check: 'Fault Register (Reg 700BH)', observation: 'Modbus register 700BH = 0 (No phase loss trip).', status: 'NOMINAL' },
+    ],
+    proposed_actions: [],
+  },
 ];
 
 interface FMEAMatrixTabProps {
@@ -471,18 +570,21 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({
     (rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR02' ? 2 :
      rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR06' ? 6 :
      rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR03' ? 3 :
-     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR11' ? 11 : 6);
+     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR11' ? 11 :
+     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR13' ? 13 : 6);
 
   const defaultHypos =
     faultCode === 2 ? DEFAULT_HYPOTHESES_ERR02 :
     faultCode === 3 ? DEFAULT_HYPOTHESES_ERR03 :
     faultCode === 11 ? DEFAULT_HYPOTHESES_ERR11 :
+    faultCode === 13 ? DEFAULT_HYPOTHESES_ERR13 :
     DEFAULT_HYPOTHESES;
 
   const defaultWhys =
     faultCode === 2 ? DEFAULT_5_WHYS_ERR02 :
     faultCode === 3 ? DEFAULT_5_WHYS_ERR03 :
     faultCode === 11 ? DEFAULT_5_WHYS_ERR11 :
+    faultCode === 13 ? DEFAULT_5_WHYS_ERR13 :
     DEFAULT_5_WHYS;
 
   const rawHypotheses = rcaState?.hypothesis_results;
@@ -504,7 +606,8 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({
       ? (winningHyp?.hypothesis_id ||
          (faultCode === 2 ? 'H_VFD_ERR02' :
           faultCode === 3 ? 'H_VFD_ERR03' :
-          faultCode === 11 ? 'H_VFD_ERR11' : 'H_VFD_ERR06'))
+          faultCode === 11 ? 'H_VFD_ERR11' :
+          faultCode === 13 ? 'H_VFD_ERR13' : 'H_VFD_ERR06'))
       : ''
   );
 
@@ -611,7 +714,8 @@ export const FMEAMatrixTab: React.FC<FMEAMatrixTabProps> = ({
                (h.hypothesis_id === 'H_VFD_ERR06' && simulationScenario.toLowerCase().includes('err06')) ||
                (h.hypothesis_id === 'H_VFD_ERR02' && simulationScenario.toLowerCase().includes('err02')) ||
                (h.hypothesis_id === 'H_VFD_ERR03' && simulationScenario.toLowerCase().includes('err03')) ||
-               (h.hypothesis_id === 'H_VFD_ERR11' && simulationScenario.toLowerCase().includes('err11'))) &&
+               (h.hypothesis_id === 'H_VFD_ERR11' && simulationScenario.toLowerCase().includes('err11')) ||
+               (h.hypothesis_id === 'H_VFD_ERR13' && simulationScenario.toLowerCase().includes('err13'))) &&
               simulationPhase === 'NORMAL'
             );
 

@@ -328,6 +328,29 @@ class DeepSeekClient:
                 "3. Remedy: Mechanical bind inspection and parameter F2.03 verification."
             )
 
+        elif "err13" in latest_query or "phase loss" in latest_query or "open phase" in latest_query:
+            content = (
+                "**Diagnostic Root Cause: Wecon VM Output Phase Loss Trip (Err13)**\n\n"
+                "1. **Event Sequence & Symptom:**\n"
+                "   - The Wecon VM inverter detected output phase loss protection trip (Err13) on motor terminals U, V, or W.\n"
+                "   - Output current collapsed to **0.00 A** while frequency command was active, causing motor shaft stall to 0 RPM.\n"
+                "   - Inverter gate firing was inhibited immediately, latching fault code Err13 in Modbus register `700BH`.\n\n"
+                "2. **Physical Mechanism:**\n"
+                "   - An open circuit, loose terminal screw connection, or broken stator winding conductor severed 3-phase circuit continuity.\n"
+                "   - The severe phase current imbalance triggered hardware phase loss protection.\n\n"
+                "3. **Remediation Actions (SAP PM01 Work Order WO-VFD-2026-0043):**\n"
+                "   - Inspect and re-torque output terminal screws U, V, W on VFD and motor junction box to **1.8 N-m**.\n"
+                "   - Test three-phase stator winding resistance balance with digital ohmmeter (U-V, V-W, W-U within 2%).\n"
+                "   - Conduct 500V DC Megger insulation resistance test on motor leads and windings (>50 M-Ohm)."
+            )
+            reasoning = (
+                "DeepSeek Diagnostic Verification for Err13:\n"
+                "1. Detected current collapse to 0.00 A with commanded frequency active.\n"
+                "2. Motor speed stalled to 0 RPM confirming loss of rotating magnetic field.\n"
+                "3. Confirmed FMEA mode: Err13 (Output Phase Loss).\n"
+                "4. Remedy: Output terminal torque audit and stator winding continuity test."
+            )
+
         # ── 3. General "What caused the trip?" ──────────────────────────────
         elif (
             "trip" in latest_query
