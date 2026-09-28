@@ -234,6 +234,7 @@ class DeepSeekClient:
             "207" in latest_query
             or "50 hz" in latest_query
             or "50hz" in latest_query
+            or "220" in latest_query
             or "195" in latest_query
             or "err06" in latest_query
             or ("dc bus" in latest_query and ("high" in latest_query or "over" in latest_query or "spike" in latest_query or "trip" in latest_query or "why" in latest_query))
@@ -242,8 +243,8 @@ class DeepSeekClient:
             content = (
                 "**Diagnostic Root Cause: Wecon VM DC Bus Overvoltage Trip (Err06)**\n\n"
                 "1. **Physical Voltage Escalation:**\n"
-                "   - Nominal baseline operation: **40.00 Hz** output frequency and **182.0 V DC** on the DC bus link.\n"
-                "   - When the frequency setpoint was ramped past 40.00 Hz toward 50.00 Hz on the 220V grid, rectification harmonics and regenerative counter-EMF drove the DC bus to **206.9 V**, breaching the calibrated **195.0 V DC trip ceiling**.\n\n"
+                "   - Nominal baseline operation: **40.00 Hz** output frequency and **205.0 V – 210.0 V DC** on the DC bus link.\n"
+                "   - When the frequency setpoint was ramped past 40.00 Hz toward 50.00 Hz on the 220V grid, rectification harmonics and regenerative counter-EMF drove the DC bus past the calibrated **220.0 V DC trip ceiling** (pre-alarm warning at 215.0 V).\n\n"
                 "2. **Upstream Root Causes:**\n"
                 "   - **Unpopulated Braking Resistor:** Terminals `P+` and `PB` are open circuit; regenerative deceleration energy cannot be dissipated.\n"
                 "   - **Unclamped Frequency Limit:** Parameter `F0.10` was not clamped to the 40.00 Hz operational envelope.\n"
@@ -255,8 +256,8 @@ class DeepSeekClient:
             )
             reasoning = (
                 "DeepSeek Diagnostic Verification for Err06:\n"
-                "1. Evaluated DC bus timeseries: nominal 182.0 V escalated to peak 206.9 V during 50 Hz ramp.\n"
-                "2. Compared with calibrated safety setpoint: 195.0 V DC.\n"
+                "1. Evaluated DC bus timeseries: nominal 205-210 V escalated during 50 Hz ramp.\n"
+                "2. Compared with calibrated safety setpoint: 220.0 V DC (Alarm: 215.0 V).\n"
                 "3. Traced topology: terminals P+/PB unpopulated, braking chopper inactive.\n"
                 "4. Conclusion: Overvoltage Err06 confirmed with 98% confidence."
             )
@@ -339,7 +340,7 @@ class DeepSeekClient:
             content = (
                 "**Root Cause Diagnostic Summary for Wecon VFD Rig (VFD_VM_01):**\n\n"
                 "The hardware trip was caused by **DC Bus Overvoltage (Err06)**:\n\n"
-                "1. **Primary Trigger:** Output frequency was commanded past the 40.00 Hz operational ceiling toward 50.00 Hz, driving DC bus voltage to **202.5 V – 206.9 V** (breaching the calibrated 195.0 V trip limit).\n"
+                "1. **Primary Trigger:** Output frequency was commanded past the 40.00 Hz operational ceiling toward 50.00 Hz, driving DC bus voltage past the calibrated **220.0 V** trip limit.\n"
                 "2. **Physical Flaw:** Terminals `P+` and `PB` lack a dynamic braking resistor, preventing regenerative deceleration energy dissipation.\n"
                 "3. **Parameter Flaw:** Parameter `F0.10` was unclamped and decel time `F0.18` was set too aggressively (0.5s).\n\n"
                 "**Corrective Deliverables Generated:**\n"
@@ -349,7 +350,7 @@ class DeepSeekClient:
             reasoning = (
                 "DeepSeek Diagnostic Verification:\n"
                 "1. Analyzed active VFD trip registers.\n"
-                "2. Fault confirmed as Err06 overvoltage (>195V DC limit).\n"
+                "2. Fault confirmed as Err06 overvoltage (>220V DC limit).\n"
                 "3. Root cause: lack of dynamic braking resistor on P+/PB and unclamped frequency setpoint."
             )
 
@@ -365,7 +366,7 @@ class DeepSeekClient:
                 "- **Connection Terminals:** `P+` and `PB` (wired to internal braking chopper IGBT).\n"
                 "- **Recommended Resistance:** **100 Ohm** (minimum permissible: 75 Ohm).\n"
                 "- **Recommended Power Rating:** **200 Watt** wirewound or ceramic encased unit.\n"
-                "- **Function:** When motor deceleration causes regeneration (V_dc > 190.0 V), the internal braking chopper pulses current through the resistor, converting kinetic energy into heat and keeping V_dc below the 195.0 V trip limit."
+                "- **Function:** When motor deceleration causes regeneration (V_dc > 215.0 V), the internal braking chopper pulses current through the resistor, converting kinetic energy into heat and keeping V_dc below the 220.0 V trip limit."
             )
             reasoning = "Retrieved Wecon VM Hardware Installation Manual specifications for braking unit terminals P+ and PB."
 
@@ -382,7 +383,7 @@ class DeepSeekClient:
                 "1. **`F0.18` (Deceleration Time):** Change from 0.5s to **3.0s – 5.0s** to prevent excessive counter-EMF during stop.\n"
                 "2. **`F0.10` (Max Output Frequency):** Set to **40.00 Hz** to enforce operational ceiling on the test bench.\n"
                 "3. **`F0.14` (Acceleration Time):** Maintain at 3.0s for smooth ramp.\n"
-                "4. **`F3.08` (Overvoltage Stall Prevention):** Enable (`1`) to automatically pause deceleration if DC bus approaches 192.0 V."
+                "4. **`F3.08` (Overvoltage Stall Prevention):** Enable (`1`) to automatically pause deceleration if DC bus approaches 215.0 V."
             )
             reasoning = "Retrieved Wecon VM Parameter Programming Guide values for overvoltage and overcurrent mitigation."
 
@@ -393,13 +394,13 @@ class DeepSeekClient:
                     {
                         "level": "Why 1",
                         "question": "Why did Wecon VM VFD (VFD_VM_01) trip Err06?",
-                        "answer": "DC bus link voltage escalated to 202.5V, breaching the 195.0V emergency ceiling.",
-                        "evidence": "Embedded TSDB register 'v_dc' logged 202.5V peak during 50 Hz ramp.",
+                        "answer": "DC bus link voltage escalated, breaching the 220.0V emergency ceiling.",
+                        "evidence": "Embedded TSDB register 'v_dc' logged trip peak above 220.0V during 50 Hz ramp.",
                         "asset_involved": "VFD_VM_01"
                     },
                     {
                         "level": "Why 2",
-                        "question": "Why did DC bus link voltage escalate past 195.0V?",
+                        "question": "Why did DC bus link voltage escalate past 220.0V?",
                         "answer": "Kinetic energy regenerated by the induction motor during 50 Hz operation could not be dissipated.",
                         "evidence": "Dynamic braking resistor circuit was inactive.",
                         "asset_involved": "VFD_VM_01"
@@ -442,7 +443,7 @@ class DeepSeekClient:
             content = (
                 "**Wecon VM VFD (VFD_VM_01) System Status: NOMINAL**\n\n"
                 "- **Output Frequency (`f_out`):** 40.00 Hz (Nominal envelope: 38.0 – 42.0 Hz)\n"
-                "- **DC Bus Voltage (`v_dc`):** 182.0 V (Nominal envelope: 175.0 – 190.0 V, Trip limit: 195.0 V)\n"
+                "- **DC Bus Voltage (`v_dc`):** 208.0 V (Nominal envelope: 200.0 – 214.0 V, Alarm: 215.0 V, Trip limit: 220.0 V)\n"
                 "- **Motor Current (`current`):** 1.15 A (Nominal envelope: 0.8 – 1.8 A, Trip limit: 2.50 A)\n"
                 "- **Rotor Speed (`rpm`):** 1199 RPM\n"
                 "- **Trip Status:** None (Fault code: 0)\n\n"
@@ -456,9 +457,9 @@ class DeepSeekClient:
                 "**Wecon VM VFD Diagnostic Copilot:**\n\n"
                 "I am actively monitoring asset **VFD_VM_01** (Wecon VM Series VFD & Induction Motor Test Bench).\n\n"
                 "- **Active Scenario:** Monitoring 1 Hz Modbus stream (`f_out`, `v_dc`, `current`, `rpm`, `fault_code`).\n"
-                "- **Calibrated Safety Limits:** DC Bus Overvoltage trip at **195.0 V** (`Err06`), Motor Current trip at **2.50 A** (`Err02`).\n\n"
+                "- **Calibrated Safety Limits:** DC Bus Overvoltage trip at **220.0 V** (`Err06`), Motor Current trip at **2.50 A** (`Err02`).\n\n"
                 "You can ask me about:\n"
-                "- *\"Why does DC bus reach ~207V at 50 Hz and trip Err06 above 195V?\"*\n"
+                "- *\"Why does DC bus reach >220V at 50 Hz and trip Err06 above 220V?\"*\n"
                 "- *\"What caused the instantaneous Err02 current spike on PLC stop?\"*\n"
                 "- *\"What braking resistor is needed on terminals P+/PB?\"*\n"
                 "- *\"How does increasing parameter F0.18 prevent regeneration trips?\"*"

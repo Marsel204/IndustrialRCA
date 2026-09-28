@@ -35,6 +35,7 @@ from industrial_rca.config import (
     EQUIPMENT_ID,
     EQUIPMENT_NAME,
     OPERATIONAL_LIMITS,
+    VFD_OPERATIONAL_LIMITS,
     RUNNING_FREQUENCY_1X_HZ,
     RUNNING_FREQUENCY_2X_HZ,
     CAVITATION_BROADBAND_BAND_HZ,
@@ -310,7 +311,7 @@ def _dispatch_simulated_incident(incident: IncidentPayload):
             "f_target": 0.0,
             "current": 2.95 if incident.fault_code in (2, 3) else (2.45 if incident.fault_code == 11 else 1.15),
             "v_out": 0.0,
-            "v_dc": 206.5 if incident.fault_code == 6 else 182.0,
+            "v_dc": 222.5 if incident.fault_code == 6 else 182.0,
             "fault_code": incident.fault_code,
         })
     else:
@@ -322,8 +323,8 @@ def _dispatch_simulated_incident(incident: IncidentPayload):
                 raw_points[-1]["current"] = 2.95
             elif incident.fault_code == 11 and float(raw_points[-1].get("current", 0) or 0) < 2.00:
                 raw_points[-1]["current"] = 2.45
-            elif incident.fault_code == 6 and float(raw_points[-1].get("v_dc", 0) or 0) < 195.0:
-                raw_points[-1]["v_dc"] = 206.5
+            elif incident.fault_code == 6 and float(raw_points[-1].get("v_dc", 0) or 0) < 220.0:
+                raw_points[-1]["v_dc"] = 222.5
 
     df = pd.DataFrame(raw_points)
     for col, default in [("f_out", 0.0), ("f_target", 0.0), ("current", 0.0), ("v_out", 0.0), ("v_dc", 182.0), ("fault_code", 0)]:
@@ -362,7 +363,7 @@ def _dispatch_simulated_incident(incident: IncidentPayload):
             "trip_time_str": time.strftime("%H:%M:%S UTC"),
             "primary_trip_sensor": "current" if is_curr_fault else "v_dc",
             "trip_value": float(df["current"].max()) if is_curr_fault else float(df["v_dc"].max()),
-            "trip_setpoint": 2.00 if incident.fault_code == 11 else (2.50 if is_curr_fault else 195.0),
+            "trip_setpoint": 2.00 if incident.fault_code == 11 else (2.50 if is_curr_fault else VFD_OPERATIONAL_LIMITS.get("v_dc", {}).get("trip_high", 220.0)),
         },
         normal_waveform={"t": t_norm, "signal": sig_norm},
         fault_waveform={"t": t_fault, "signal": sig_fault},
@@ -734,7 +735,7 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
             "f_target": 0.0,
             "current": 3.5 if incident.fault_code in (2, 3) else 1.2,
             "v_out": 0.0,
-            "v_dc": 202.5 if incident.fault_code == 6 else 182.0,
+            "v_dc": 222.5 if incident.fault_code == 6 else 182.0,
             "fault_code": incident.fault_code,
         })
     else:
@@ -748,8 +749,8 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
                 raw_points[-1]["current"] = 3.50
             elif incident.fault_code == 11 and float(raw_points[-1].get("current", 0) or 0) < 2.00:
                 raw_points[-1]["current"] = 2.45
-            elif incident.fault_code == 6 and float(raw_points[-1].get("v_dc", 0) or 0) < 195.0:
-                raw_points[-1]["v_dc"] = 202.5
+            elif incident.fault_code == 6 and float(raw_points[-1].get("v_dc", 0) or 0) < 220.0:
+                raw_points[-1]["v_dc"] = 222.5
 
     df = pd.DataFrame(raw_points)
     for col, default in [("f_out", 0.0), ("f_target", 0.0), ("current", 0.0), ("v_out", 0.0), ("v_dc", 182.0), ("fault_code", 0)]:
@@ -788,7 +789,7 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
             "trip_time_str": time.strftime("%H:%M:%S UTC"),
             "primary_trip_sensor": "current" if is_curr_fault else "v_dc",
             "trip_value": float(df["current"].max()) if is_curr_fault else float(df["v_dc"].max()),
-            "trip_setpoint": 2.00 if incident.fault_code == 11 else (2.50 if is_curr_fault else 195.0),
+            "trip_setpoint": 2.00 if incident.fault_code == 11 else (2.50 if is_curr_fault else VFD_OPERATIONAL_LIMITS.get("v_dc", {}).get("trip_high", 220.0)),
         },
         normal_waveform={"t": t_norm, "signal": sig_norm},
         fault_waveform={"t": t_fault, "signal": sig_fault},
@@ -1752,7 +1753,7 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
             f"- Active Trip Code: {fault_str}",
             f"- Output Frequency: {f_out:.2f} Hz",
             f"- Frequency Target / Setpoint: {f_target:.2f} Hz",
-            f"- DC Bus Voltage: {v_dc:.1f} V (Calibrated: 0.0 V unpowered, ~182 V nominal idle link, 195.0 V trip limit)",
+            f"- DC Bus Voltage: {v_dc:.1f} V (Calibrated: 200.0-214.0 V nominal operating range at 40 Hz, Alarm: 215.0 V, Trip limit: 220.0 V. Readings between 200.0-214.0 V such as 205-210 V are strictly NORMAL and HEALTHY)",
             f"- Motor Output Current: {current:.2f} A (Nominal FLA: 1.15 A, Trip Limit: 2.50 A)",
             f"- Rotor Speed: {rpm:.1f} RPM (Synchronous: 1450 RPM)",
             "",
@@ -1800,8 +1801,8 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
         "",
         "=== DOMAIN KNOWLEDGE & EXPERT RULES ===",
         "1. Wecon VM Inverter Specifications:",
-        "   - Single-phase 220V AC input, rectified to ~310V DC peak, operating with ~182V intermediate DC link under load.",
-        "   - Overvoltage Trip (Err06): Triggered when DC bus exceeds 195.0 V. At 50 Hz, bus voltage rises to ~207 V.",
+        "   - Single-phase 220V AC input, rectified to ~310V DC peak, operating with ~205-210V nominal intermediate DC link under 40 Hz load (normal operating envelope: 200.0-214.0 V).",
+        "   - Overvoltage Trip (Err06): Triggered when DC bus exceeds 220.0 V (warning pre-alarm at 215.0 V). Normal 40 Hz steady state is 205.0-210.0 V (strictly healthy).",
         "     If no dynamic braking resistor is installed across terminals P+ and PB, regenerative kinetic energy pumps into the DC bus during decel or overfrequency.",
         "     Countermeasures: clamp parameter F0.10 to 40.00 Hz, install dynamic braking resistor (nominal 70-100 Ohm, 150-200W) across P+/PB, tune F0.18 deceleration time to >= 5.0s.",
         "   - Overcurrent Trip (Err02): Triggered when instantaneous current exceeds 2.50 A (217% FLA).",

@@ -88,15 +88,15 @@ def run_test():
         print(f"  Ramp {i}: f_out={step['f_out']} Hz | v_dc={step['v_dc']} V | rpm={step['rpm']} | Status: RUNNING")
         time.sleep(1.0)
 
-    # 4. Breaching ceiling at 50 Hz -> DC bus voltage surges to 202.5 V (> 195V trip limit) -> Err06 Trip!
-    print("\n[Step 3] Output reaches 50.0 Hz! DC Bus escalates to 202.5 V (> 195.0 V limit) -> TRIGGERING Err06...")
+    # 4. Breaching ceiling at 50 Hz -> DC bus voltage surges to 222.5 V (> 220V trip limit) -> Err06 Trip!
+    print("\n[Step 3] Output reaches 50.0 Hz! DC Bus escalates to 222.5 V (> 220.0 V limit) -> TRIGGERING Err06...")
     t = time.time()
     trip_metric = {
         "timestamp": t,
         "asset_id": "VFD_VM_01",
         "f_out": 50.0,
         "f_target": 50.0,
-        "v_dc": 202.5,
+        "v_dc": 222.5,
         "v_out": 220.0,
         "current": 1.95,
         "rpm": 1495.0,

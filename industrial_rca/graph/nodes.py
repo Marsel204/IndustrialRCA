@@ -132,9 +132,9 @@ def detect_anomalies(state: RCAState) -> Dict[str, Any]:
             breached = True
             breach_desc = f"VFD reported active trip code Err{int(profile['max']):02d}"
             has_active_trip = True
-        elif tag == "v_dc" and profile["max"] >= limits.get("trip_high", 195.0):
+        elif tag == "v_dc" and profile["max"] >= limits.get("trip_high", 220.0):
             breached = True
-            breach_desc = f"DC bus voltage reached {profile['max']:.1f}V (Trip Limit: {limits.get('trip_high', 195.0)}V)"
+            breach_desc = f"DC bus voltage reached {profile['max']:.1f}V (Trip Limit: {limits.get('trip_high', 220.0)}V)"
             has_active_trip = True
         elif tag == "current" and profile["max"] >= limits.get("trip_high", 2.50):
             breached = True
@@ -299,13 +299,17 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
         metrics["fout_max"] = fout_max
         metrics["fault_code"] = active_fc
 
-        is_confirmed = (active_fc == 6) or (active_fc == 0 and (vdc_max >= 195.0 or (fout_max >= 42.0 and vdc_max >= 190.0)))
+        vdc_limits = VFD_OPERATIONAL_LIMITS.get("v_dc", {})
+        vdc_trip = vdc_limits.get("trip_high", 220.0)
+        vdc_alarm = vdc_limits.get("alarm_high", 215.0)
+
+        is_confirmed = (active_fc == 6) or (active_fc == 0 and (vdc_max >= vdc_trip or (fout_max >= 45.0 and vdc_max >= vdc_alarm)))
         if is_confirmed:
             status = "CONFIRMED"
             confidence = 0.98
             evidence.append({
                 "check": "DC Bus Voltage (Reg 1003H / 3004H)",
-                "observation": f"DC bus voltage reached {vdc_max:.1f} V, breaching calibrated hardware trip limit (195.0 V). At 50 Hz, bus voltage reaches ~207 V.",
+                "observation": f"DC bus voltage reached {vdc_max:.1f} V, breaching calibrated hardware trip limit ({vdc_trip:.1f} V).",
                 "status": "VIOLATED_TRIP_LIMIT",
             })
             evidence.append({
@@ -320,24 +324,24 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
             })
             falsification_rationale = (
                 f"CONFIRMED. Output frequency was ramped past the 40.00 Hz limit, causing DC bus voltage to escalate to "
-                f"{vdc_max:.1f} V (breaching the 195.0 V trip limit). In the absence of an external braking resistor across P+/PB, "
+                f"{vdc_max:.1f} V (breaching the {vdc_trip:.1f} V trip limit). In the absence of an external braking resistor across P+/PB, "
                 f"the drive latched Err06 trip protection."
             )
             proposed_actions = [
                 "Lock maximum output frequency parameter F0.10 to 40.00 Hz in Wecon VM VFD",
                 "Install dynamic braking resistor (nominal 100-250 Ohm, 100W) across terminals P+ and PB",
                 "Increase parameter F0.18 deceleration ramp time to >= 5.0 seconds",
-                "Configure high DC bus pre-alarm in HMI at 190.0 V",
+                f"Configure high DC bus pre-alarm in HMI at {vdc_alarm:.1f} V (trip limit: {vdc_trip:.1f} V)",
             ]
         else:
             status = "REFUTED"
             confidence = 0.97 if active_fc > 0 else 0.96
             evidence.append({
                 "check": "DC Bus Voltage (Reg 1003H / 3004H)",
-                "observation": f"DC bus voltage ({vdc_max:.1f} V) does not indicate Err06 trip. Active hardware fault register: Err0{active_fc}." if active_fc > 0 else f"DC bus voltage remained within safe limits (peak {vdc_max:.1f} V < 195.0 V trip threshold).",
+                "observation": f"DC bus voltage ({vdc_max:.1f} V) does not indicate Err06 trip. Active hardware fault register: Err0{active_fc}." if active_fc > 0 else f"DC bus voltage remained within safe limits (peak {vdc_max:.1f} V < {vdc_trip:.1f} V trip threshold).",
                 "status": "WITHIN_LIMITS",
             })
-            falsification_rationale = f"REFUTED. Drive latched Err0{active_fc} (not Err06 overvoltage)." if active_fc > 0 else f"REFUTED. DC bus voltage ({vdc_max:.1f} V) did not breach the 195.0 V trip limit."
+            falsification_rationale = f"REFUTED. Drive latched Err0{active_fc} (not Err06 overvoltage)." if active_fc > 0 else f"REFUTED. DC bus voltage ({vdc_max:.1f} V) did not breach the {vdc_trip:.1f} V trip limit."
             proposed_actions = []
 
     elif hyp_id == "H_VFD_ERR02":
@@ -735,20 +739,22 @@ def causal_deep_dive_5_whys(state: RCAState) -> Dict[str, Any]:
         )
 
     elif is_vfd:
-        # 5-Whys for Experiment 2 (Overfrequency Excursion > 40 Hz, Vdc > 195 V)
+        vdc_trip = VFD_OPERATIONAL_LIMITS.get("v_dc", {}).get("trip_high", 220.0)
+        vdc_alarm = VFD_OPERATIONAL_LIMITS.get("v_dc", {}).get("alarm_high", 215.0)
+        # 5-Whys for Experiment 2 (Overfrequency Excursion > 40 Hz, Vdc > trip limit)
         five_whys = [
             {
                 "level": "Why 1",
                 "question": f"Why did Wecon VM Series VFD ({asset_id}) trip with fault code Err06?",
-                "answer": "DC link bus voltage exceeded the calibrated hardware protection ceiling (reached 202.5 V vs 195.0 V trip limit, operating up to ~207 V at 50 Hz).",
-                "evidence": "Modbus DC Bus Voltage (Reg 1003H / 3004H) surged past 195.0 V trip setpoint at T_trip. Inverter IGBT firing cut off immediately.",
+                "answer": f"DC link bus voltage exceeded the calibrated hardware protection ceiling (reached 222.5 V vs {vdc_trip:.1f} V trip limit).",
+                "evidence": f"Modbus DC Bus Voltage (Reg 1003H / 3004H) surged past {vdc_trip:.1f} V trip setpoint at T_trip. Inverter IGBT firing cut off immediately.",
                 "asset_involved": "DC_BUS_LINK",
             },
             {
                 "level": "Why 2",
-                "question": "Why did the DC bus voltage elevate past the 195.0 V trip limit?",
+                "question": f"Why did the DC bus voltage elevate past the {vdc_trip:.1f} V trip limit?",
                 "answer": "VFD output frequency setpoint was increased past the 40.00 Hz operational ceiling toward 50.00 Hz without dynamic regenerative absorption.",
-                "evidence": "Output frequency Reg 1001H climbed from 40.00 Hz to 48.5 Hz, driving intermediate capacitor bank voltage from 182.0 V to > 200 V.",
+                "evidence": f"Output frequency Reg 1001H climbed from 40.00 Hz to 48.5 Hz, driving intermediate capacitor bank voltage toward > {vdc_alarm:.1f} V.",
                 "asset_involved": "VFD_VM_01",
             },
             {
@@ -776,7 +782,7 @@ def causal_deep_dive_5_whys(state: RCAState) -> Dict[str, Any]:
         root_asset = "PLC_LX_01"
         root_desc = (
             "Output frequency setpoint was ramped past the 40.00 Hz operational ceiling toward 50.00 Hz, causing DC bus voltage "
-            "to escalate to 202.5 V (breaching the calibrated 195.0 V trip limit) because Wecon VM parameter F0.10 was unclamped and "
+            f"to escalate to 222.5 V (breaching the calibrated {vdc_trip:.1f} V trip limit) because Wecon VM parameter F0.10 was unclamped and "
             "dynamic braking resistor terminals P+/PB were unpopulated."
         )
 
@@ -981,13 +987,15 @@ def generate_maintenance_artifacts(state: RCAState) -> Dict[str, Any]:
                 "PCA-4: Configure 85% thermal pre-alarm in PLC ladder logic to prevent unannounced line shutdown.",
             ]
         else:
+            vdc_trip = VFD_OPERATIONAL_LIMITS.get("v_dc", {}).get("trip_high", 220.0)
+            vdc_alarm = VFD_OPERATIONAL_LIMITS.get("v_dc", {}).get("alarm_high", 215.0)
             fc = 6
             fc_desc = "Overfrequency Deceleration Overvoltage (Err06)"
-            impact = "Frequency setpoint exceeded 40.00 Hz ceiling, driving DC bus voltage past 195.0 V (~207 V at 50 Hz)."
+            impact = f"Frequency setpoint exceeded 40.00 Hz ceiling, driving DC bus voltage past calibrated {vdc_trip:.1f} V trip limit."
             pca = [
                 "PCA-1: Lock parameter F0.10 (Upper Frequency Limit) to 40.00 Hz in Wecon VM VFD.",
                 "PCA-2: Install dynamic braking resistor (100-250 Ohm, 100W) across terminals P+ and PB.",
-                "PCA-3: Configure high DC bus pre-alarm in HMI at 190.0 V (trip limit: 195.0 V).",
+                f"PCA-3: Configure high DC bus pre-alarm in HMI at {vdc_alarm:.1f} V (trip limit: {vdc_trip:.1f} V).",
                 "PCA-4: Adjust parameter F0.18 deceleration time to >= 5.0 seconds.",
             ]
 
@@ -1028,7 +1036,7 @@ def generate_maintenance_artifacts(state: RCAState) -> Dict[str, Any]:
             "d5_permanent_corrective_actions": pca,
             "d6_implementation_and_validation": {
                 "validation_method": "Run test bench at 40.00 Hz steady-state for 15 minutes followed by controlled start/stop cycles.",
-                "acceptance_criteria": "DC bus voltage stable at ~182 V (never exceeding 190 V alarm / 195 V trip limit), current < 1.50 A, zero trip codes.",
+                "acceptance_criteria": f"DC bus voltage stable at ~205-210 V (never exceeding {VFD_OPERATIONAL_LIMITS.get('v_dc', {}).get('alarm_high', 215.0):.1f} V alarm / {VFD_OPERATIONAL_LIMITS.get('v_dc', {}).get('trip_high', 220.0):.1f} V trip limit), current < 1.50 A, zero trip codes.",
             },
             "d7_systemic_prevention": [
                 "Standardize PLC program template with ramped stop routines across all test benches.",
