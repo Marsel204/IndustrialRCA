@@ -624,6 +624,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     const assistantMsgId = `asst-${Date.now()}`;
     let accumulatedContent = '';
     let accumulatedReasoning = '';
+    const streamStartTime = Date.now();
 
     streamCopilotChat(
       newHistory.map((m) => ({ role: m.role, content: m.content })),
@@ -639,6 +640,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
         }
       },
       () => {
+        const elapsedSec = Math.max(0.1, Number(((Date.now() - streamStartTime) / 1000).toFixed(1)));
         setMessages((prev) => [
           ...prev,
           {
@@ -646,7 +648,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
             role: 'assistant',
             content: accumulatedContent || 'Diagnosis confirmed by DeepSeek Copilot.',
             reasoning_content: accumulatedReasoning || undefined,
-            elapsed_time_sec: 1.4,
+            elapsed_time_sec: elapsedSec,
             tools: chatTools,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
@@ -658,6 +660,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
       },
       (err) => {
         console.error('Chat error:', err);
+        const elapsedSec = Math.max(0.1, Number(((Date.now() - streamStartTime) / 1000).toFixed(1)));
         setMessages((prev) => [
           ...prev,
           {
@@ -667,7 +670,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
               accumulatedContent ||
               `Diagnosis verified from deterministic FMEA convergence. (Notice: ${err.message})`,
             reasoning_content: accumulatedReasoning || undefined,
-            elapsed_time_sec: 0.8,
+            elapsed_time_sec: elapsedSec,
             tools: chatTools,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
@@ -794,7 +797,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                 Industrial RCA Agent
               </span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 font-bold">
-                V4.1 Flash
+                V4 Flash
               </span>
             </div>
             <div className="text-[11px] text-slate-500 font-mono truncate">

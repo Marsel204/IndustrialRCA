@@ -70,9 +70,13 @@ export function useLiveTelemetry(
           setRollingTimestamps(history.map((_, i) => i));
           setRollingSeries({
             f_out: history.map((p) => p.f_out ?? 40.0),
-            v_dc: history.map((p) => p.v_dc ?? 182.0),
+            f_in: history.map((p) => p.f_in ?? p.f_target ?? p.f_out ?? 40.0),
+            v_dc: history.map((p) => p.v_dc ?? 276.0),
+            v_out: history.map((p) => p.v_out ?? 184.0),
             current: history.map((p) => p.current ?? 0.0),
             rpm: history.map((p) => p.rpm ?? 1199.0),
+            torque: history.map((p) => p.torque ?? 0.0),
+            power: history.map((p) => p.power ?? 0.0),
             fault_code: history.map((p) => p.fault_code ?? 0),
             'IT-30101': history.map((p) => (p['IT-30101'] !== undefined ? p['IT-30101'] : (p.current ?? 0) * 60.0)),
             'PT-30101': history.map((p) => p['PT-30101'] ?? 2.40),
@@ -102,9 +106,13 @@ export function useLiveTelemetry(
           return {
             ...prev,
             f_out: appendVal('f_out', m.f_out),
+            f_in: appendVal('f_in', m.f_in ?? m.f_target ?? m.f_out),
             v_dc: appendVal('v_dc', m.v_dc),
+            v_out: appendVal('v_out', m.v_out ?? 184.0),
             current: appendVal('current', m.current),
             rpm: appendVal('rpm', m.rpm),
+            torque: appendVal('torque', m.torque ?? 0.0),
+            power: appendVal('power', m.power ?? 0.0),
             fault_code: appendVal('fault_code', m.fault_code),
             'IT-30101': appendVal('IT-30101', m.current * 60.0),
             'PT-30101': appendVal('PT-30101', m.fault_code > 0 ? 0.58 : 2.40),

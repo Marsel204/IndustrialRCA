@@ -459,7 +459,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                       onChange={(e) => setSelectedModel(e.target.value)}
                       className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-purple-500/20 outline-hidden"
                     >
-                      <option value="deepseek-flash">deepseek-flash (MoE V4.1 Flash · High-Speed Reasoning)</option>
+                      <option value="deepseek-flash">deepseek-flash (DeepSeek V4 Flash · High-Speed Reasoning)</option>
                       <option value="deepseek-chat">deepseek-chat (General Diagnostic Assistant)</option>
                       <option value="deepseek-reasoner">deepseek-reasoner (R1 Deep Deliberation with Chain-of-Thought)</option>
                     </select>

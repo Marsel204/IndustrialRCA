@@ -191,6 +191,8 @@ def generate_vfd_dataset(
             ("v_dc", 182.0),
             ("v_out", 220.0),
             ("rpm", 1199.0),
+            ("torque", 2.2),
+            ("power", 0.0),
             ("fault_code", 0),
         ]:
             if col not in df.columns:
@@ -240,6 +242,9 @@ def generate_vfd_dataset(
         v_out = np.full(duration_sec, 220.0) + rng.normal(0, 0.2, duration_sec)
         fault_code = np.zeros(duration_sec, dtype=int)
 
+        torque = np.full(duration_sec, 2.5) + rng.normal(0, 0.15, duration_sec)
+        power = np.round(np.clip(current * v_out * np.sqrt(3) * 0.85 / 1000.0, 0.0, 1.5), 2)
+
         df = pd.DataFrame({
             "timestamp_sec": t,
             "f_out": np.round(f_out, 2),
@@ -248,6 +253,8 @@ def generate_vfd_dataset(
             "v_out": np.round(v_out, 1),
             "current": np.round(current, 2),
             "rpm": np.round(rpm, 1),
+            "torque": np.round(torque, 1),
+            "power": power,
             "fault_code": fault_code,
             "PT-30101": np.full(duration_sec, 2.40),
             "DPS-30101": np.full(duration_sec, 0.12),
@@ -294,6 +301,11 @@ def generate_vfd_dataset(
         rpm[idx_trip:] = 0.0
         current[idx_trip + 1:] = 0.0
 
+        torque = np.full(duration_sec, 2.5) + rng.normal(0, 0.15, duration_sec)
+        torque[idx_trip] = 12.5  # Transient surge at abrupt cutoff
+        torque[idx_trip + 1:] = 0.0
+        power = np.round(np.clip(current * v_out * np.sqrt(3) * 0.85 / 1000.0, 0.0, 2.5), 2)
+
         df = pd.DataFrame({
             "timestamp_sec": t,
             "f_out": np.round(f_out, 2),
@@ -302,6 +314,8 @@ def generate_vfd_dataset(
             "v_out": np.round(v_out, 1),
             "current": np.round(current, 2),
             "rpm": np.round(rpm, 1),
+            "torque": np.round(torque, 1),
+            "power": power,
             "fault_code": fault_code,
             "PT-30101": np.full(duration_sec, 2.40),
             "DPS-30101": np.full(duration_sec, 0.12),
@@ -362,6 +376,11 @@ def generate_vfd_dataset(
         current[idx_trip:] = 0.0
         rpm[idx_trip:] = 0.0
 
+        torque = np.full(duration_sec, 2.5) + rng.normal(0, 0.15, duration_sec)
+        torque[idx_ramp:idx_trip] = np.linspace(2.5, 6.8, ramp_len)
+        torque[idx_trip:] = 0.0
+        power = np.round(np.clip(current * v_out * np.sqrt(3) * 0.85 / 1000.0, 0.0, 2.5), 2)
+
         df = pd.DataFrame({
             "timestamp_sec": t,
             "f_out": np.round(f_out, 2),
@@ -370,6 +389,8 @@ def generate_vfd_dataset(
             "v_out": np.round(v_out, 1),
             "current": np.round(current, 2),
             "rpm": np.round(rpm, 1),
+            "torque": np.round(torque, 1),
+            "power": power,
             "fault_code": fault_code,
             "PT-30101": np.full(duration_sec, 2.40),
             "DPS-30101": np.full(duration_sec, 0.12),
@@ -421,6 +442,10 @@ def generate_vfd_dataset(
         current[idx_trip:] = 0.0
         rpm[idx_trip:] = 0.0
 
+        torque = np.full(duration_sec, 2.5) + rng.normal(0, 0.15, duration_sec)
+        torque[idx_trip:] = 0.0
+        power = np.round(np.clip(current * v_out * np.sqrt(3) * 0.85 / 1000.0, 0.0, 1.5), 2)
+
         df = pd.DataFrame({
             "timestamp_sec": t,
             "f_out": np.round(f_out, 2),
@@ -429,6 +454,8 @@ def generate_vfd_dataset(
             "v_out": np.round(v_out, 1),
             "current": np.round(current, 2),
             "rpm": np.round(rpm, 1),
+            "torque": np.round(torque, 1),
+            "power": power,
             "fault_code": fault_code,
             "PT-30101": np.full(duration_sec, 2.40),
             "DPS-30101": np.full(duration_sec, 0.12),

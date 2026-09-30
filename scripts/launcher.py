@@ -151,7 +151,7 @@ def print_banner():
         "                  Unified One-Click Launcher                         \n"
         f"======================================================================{C_RESET}"
     )
-    print(f" {C_BOLD}Model Engine:{C_RESET} {C_MAGENTA}DeepSeek V4.1 Flash (deepseek-flash){C_RESET}")
+    print(f" {C_BOLD}Model Engine:{C_RESET} {C_MAGENTA}DeepSeek V4 Flash (deepseek-flash){C_RESET}")
     print(f" {C_BOLD}Root Dir    :{C_RESET} {ROOT_DIR}")
     print(f"{C_CYAN}----------------------------------------------------------------------{C_RESET}\n")
 
@@ -165,6 +165,12 @@ def main():
 
     npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
     python_exe = sys.executable
+
+    if "--restart" in sys.argv or "-r" in sys.argv:
+        print(f" {C_YELLOW}▶{C_RESET} Stopping existing background services (--restart requested)...")
+        from scripts.stop_services import main as stop_services_main
+        stop_services_main()
+        time.sleep(1)
 
     processes = []
 
@@ -293,7 +299,7 @@ def main():
             print(f"  • {C_BOLD}Public Web Link :{C_RESET} {C_GREEN}{C_BOLD}{public_url}{C_RESET}  ◄── {C_YELLOW}SHARE WITH OPERATORS{C_RESET}")
         print(f"  • {C_BOLD}FastAPI Swagger :{C_RESET} {C_CYAN}http://localhost:8000/docs{C_RESET}")
         print(f"  • {C_BOLD}Edge MQTT Broker:{C_RESET} {C_CYAN}tcp://localhost:1883{C_RESET}")
-        print(f"  • {C_BOLD}AI Model        :{C_RESET} {C_MAGENTA}DeepSeek V4.1 Flash{C_RESET}")
+        print(f"  • {C_BOLD}AI Model        :{C_RESET} {C_MAGENTA}DeepSeek V4 Flash{C_RESET}")
         print(f"\n{C_YELLOW}{C_BOLD}NOTE:{C_RESET} This terminal window must stay open while using the app.")
         print(f"{C_DIM}Press Ctrl+C (or close this window) to terminate all services.{C_RESET}\n")
 

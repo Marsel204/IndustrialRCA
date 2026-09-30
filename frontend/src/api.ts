@@ -12,6 +12,8 @@ import {
   TelegramBotStatus,
   TelegramBotSaveParams,
   TelegramBotTestAlertResponse,
+  VfdParameter,
+  VfdParametersResponse,
 } from './types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || '/api/v1';
@@ -262,9 +264,15 @@ export async function fetchSimulationStatus(): Promise<SimulationStatusResponse>
 }
 
 export async function fetchApiKeyStatus(): Promise<ApiKeyStatus> {
-  const res = await fetch(`${API_BASE}/settings/api-key`);
-  if (!res.ok) throw new Error(`Failed to fetch API key status: ${res.statusText}`);
-  return res.json();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(`${API_BASE}/settings/api-key`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`Failed to fetch API key status: ${res.statusText}`);
+    return res.json();
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function saveApiKey(params: {
@@ -272,16 +280,23 @@ export async function saveApiKey(params: {
   base_url?: string;
   model?: string;
 }): Promise<ApiKeySaveResponse> {
-  const res = await fetch(`${API_BASE}/settings/api-key`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.detail || `Failed to save API key: ${res.statusText}`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(`${API_BASE}/settings/api-key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || `Failed to save API key: ${res.statusText}`);
+    }
+    return res.json();
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return res.json();
 }
 
 export async function testApiKeyConnection(params?: {
@@ -289,16 +304,23 @@ export async function testApiKeyConnection(params?: {
   base_url?: string;
   model?: string;
 }): Promise<ApiKeyTestResponse> {
-  const res = await fetch(`${API_BASE}/settings/api-key/test`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params || {}),
-  });
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.detail || `Failed to test API key: ${res.statusText}`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch(`${API_BASE}/settings/api-key/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params || {}),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || `Failed to test API key: ${res.statusText}`);
+    }
+    return res.json();
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return res.json();
 }
 
 export async function deleteApiKey(): Promise<{ success: boolean; message: string }> {
@@ -344,6 +366,31 @@ export async function sendBotTestAlert(chatId?: string, message?: string): Promi
   }
   return res.json();
 }
+
+export async function fetchVfdParameters(assetId: string = 'VFD_VM_01'): Promise<VfdParametersResponse> {
+  const res = await fetch(`${API_BASE}/telemetry/parameters?asset_id=${encodeURIComponent(assetId)}`);
+  if (!res.ok) throw new Error(`Failed to fetch VFD parameters: ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateVfdParameter(key: string, value: number, description?: string, assetId: string = 'VFD_VM_01'): Promise<any> {
+  const res = await fetch(`${API_BASE}/telemetry/parameters`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key, value, description, asset_id: assetId }),
+  });
+  if (!res.ok) throw new Error(`Failed to update VFD parameter: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchVfdParameterHistory(key?: string, limit: number = 50, assetId: string = 'VFD_VM_01'): Promise<any> {
+  const q = new URLSearchParams({ limit: limit.toString(), asset_id: assetId });
+  if (key) q.append('key', key);
+  const res = await fetch(`${API_BASE}/telemetry/parameters/history?${q.toString()}`);
+  if (!res.ok) throw new Error(`Failed to fetch parameter history: ${res.statusText}`);
+  return res.json();
+}
+
 
 
 

@@ -20,6 +20,7 @@ import random
 import socket
 import asyncio
 import threading
+from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional, Generator
 import numpy as np
 import pandas as pd
@@ -80,10 +81,42 @@ from industrial_rca.bot import get_telegram_service, TelegramBotService
 
 logger = get_logger("industrial_rca.api")
 
+# Global instances
+analytics_tool = TelemetryAnalyticsTool(GLOBAL_TELEMETRY_CACHE)
+topology_tracer = AssetTopologyTracer()
+cmms_tool = CMMSConnector()
+deepseek_client = DeepSeekClient()
+influx_tool = InfluxDBTelemetryTool()
+telegram_bot_service = get_telegram_service()
+telegram_bot_service.set_api_context(sys.modules[__name__])
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Starts Telegram Bot polling loop if token is configured and syncs environment."""
+    from dotenv import load_dotenv
+    from industrial_rca.config import ENV_FILE
+    from industrial_rca.tools.deepseek_client import reconfigure_all_deepseek_clients
+    if ENV_FILE.exists():
+        load_dotenv(dotenv_path=ENV_FILE, override=False)
+        reconfigure_all_deepseek_clients()
+        logger.info(f"Synchronized DeepSeek client credentials from {ENV_FILE}")
+
+    telegram_bot_service.set_api_context(sys.modules[__name__])
+    if telegram_bot_service.token:
+        telegram_bot_service.start_background_polling()
+        logger.info("Telegram Bot service background polling initialized.")
+
+    yield
+
+    await telegram_bot_service.stop()
+
+
 api_app = FastAPI(
     title="Industrial RCA Unified REST & SSE API",
     description="High-performance backend serving telemetry, ISA-95 topology, LangGraph RCA, and DeepSeek streaming.",
     version="2.1.0",
+    lifespan=lifespan,
 )
 
 # Correlation ID and error handling middleware
@@ -98,14 +131,6 @@ api_app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global instances
-analytics_tool = TelemetryAnalyticsTool(GLOBAL_TELEMETRY_CACHE)
-topology_tracer = AssetTopologyTracer()
-cmms_tool = CMMSConnector()
-deepseek_client = DeepSeekClient()
-influx_tool = InfluxDBTelemetryTool()
-telegram_bot_service = get_telegram_service()
-telegram_bot_service.set_api_context(sys.modules[__name__])
 
 
 def _safe_async_run(coro):
@@ -234,7 +259,7 @@ class RCARunRequest(BaseModel):
     asset_id: str = Field(default=EQUIPMENT_ID, description="Target asset ID")
     thread_id: Optional[str] = Field(default=None, description="Session thread ID for LangGraph checkpointer")
     use_deepseek: bool = Field(default=True, description="Enable DeepSeek AI evaluation")
-    deepseek_model: str = Field(default="deepseek-flash", description="Model: deepseek-flash (V4.1 Flash)")
+    deepseek_model: str = Field(default="deepseek-flash", description="Model: deepseek-flash (V4 Flash)")
 
 
 class HumanReviewRequest(BaseModel):
@@ -901,7 +926,7 @@ def clear_incident():
     LATEST_HIL_INCIDENT["received_at"] = None
     LATEST_HIL_INCIDENT["version"] += 1
 
-    GLOBAL_TSDB.clear()
+    GLOBAL_TSDB.reset_trip()
 
     if influx_tool.is_simulation_enabled():
         _SIMULATION_STATE["fault_injected"] = False
@@ -1076,7 +1101,7 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
     has_telemetry_tag = any(
         k in metric
         for k in (
-            "f_out", "frequency", "f_in", "f_target", "v_dc", "bus_voltage",
+            "f_out", "frequency", "f_in", "f_target", "v_dc", "bus_voltage", "v_bus", "v_out",
             "current", "rpm", "fault_code", "fault", "error", "trip", "d_trigger",
         )
     )
@@ -1105,8 +1130,8 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
         # Handle signed 16-bit Modbus rollover (e.g. 50000 sent as -15536)
         if raw_f_target < 0:
             raw_f_target += 65536.0
-        # HMI / PLC setpoint register (f_in) resolution is 0.001 Hz (divisor 1000.0)
-        # e.g., 30000 = 30.00 Hz, 3000 = 3.00 Hz, 40000 = 40.00 Hz, 50000 = 50.00 Hz
+        # HMI / PLC setpoint register (f_in) resolution is 0.001 Hz or 1 Hz
+        # e.g., 30000 = 30.00 Hz, 40 = 40.00 Hz, 4000 = 40.00 Hz
         if raw_f_target > 600.0:
             f_target = round(raw_f_target / 1000.0, 2)
         elif raw_f_target > 60.0:
@@ -1120,48 +1145,101 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
     else:
         rpm = round(raw_rpm, 1)
 
-    raw_v_dc = _unpack(metric.get("v_dc", metric.get("bus_voltage", None)))
+    raw_v_dc = _unpack(metric.get("v_dc", metric.get("bus_voltage", metric.get("v_bus", None))))
     if raw_v_dc is None:
         latest = GLOBAL_TSDB.get_latest("VFD_VM_01")
         v_dc = float(latest.get("v_dc", 0.0)) if latest else 0.0
     else:
-        v_dc = round(raw_v_dc, 1)
+        if raw_v_dc > 1000.0:
+            v_dc = round(raw_v_dc / 10.0, 1)
+        else:
+            v_dc = round(raw_v_dc, 1)
 
-    raw_current = _unpack(metric.get("current", 0.0))
-    if raw_current > 100.0:
+    raw_v_out = _unpack(metric.get("v_out", None))
+    if raw_v_out is None or raw_v_out <= 0:
+        v_out = 220.0 if f_out > 0 else 0.0
+    else:
+        v_out = round(raw_v_out, 1)
+
+    raw_current_val = metric.get("current", 0.0)
+    raw_current = _unpack(raw_current_val, 0.0)
+    # Physical Wecon VM Modbus register (1004H / 3005H) resolution is ALWAYS 0.01 A (e.g. 2 = 0.02 A, 115 = 1.15 A, 250 = 2.50 A).
+    # Packets from edge gateway contain raw counts inside single-element lists/tuples [2] or raw integers 2.
+    is_modbus_raw = (
+        isinstance(raw_current_val, (list, tuple))
+        or isinstance(raw_current_val, int)
+        or (isinstance(raw_current_val, str) and "." not in raw_current_val)
+        or raw_current > 10.0
+    )
+    if is_modbus_raw:
         current = round(raw_current / 100.0, 2)
-    elif raw_current > 5.0:
-        current = round(raw_current / 10.0, 2)
     else:
         current = round(raw_current, 2)
 
-    # Check for trip code across common industrial keys (fault_code, error, err, trip, code, d_trigger, D-registers)
+    # Check for trip code across explicit industrial fault keys
     raw_fault = None
-    for key in ("fault_code", "fault", "error", "err", "code", "trip", "trip_code", "d_trigger"):
+    for key in ("fault_code", "fault", "error", "error_code", "trip", "trip_code", "reg_700b", "700bh"):
         if metric.get(key) is not None:
             raw_fault = metric.get(key)
             break
 
     if raw_fault is None:
-        for k, v in metric.items():
-            if k.upper().startswith("D") or "PLC" in k.upper():
+        topic_name = str(metric.get("_mqtt_topic", metric.get("topic", ""))).lower()
+        if any(w in topic_name for w in ("fault", "error", "trip", "alarm", "700b")):
+            if "err02" in topic_name or "error02" in topic_name:
+                raw_fault = 2
+            elif "err06" in topic_name or "error06" in topic_name:
+                raw_fault = 6
+            elif "err03" in topic_name or "error03" in topic_name:
+                raw_fault = 3
+            elif "err11" in topic_name or "error11" in topic_name:
+                raw_fault = 11
+            elif "err13" in topic_name or "error13" in topic_name:
+                raw_fault = 13
+
+    raw_torque_val = metric.get("torque", metric.get("Torque", metric.get("d006", metric.get("D006", 0.0))))
+    raw_torque = _unpack(raw_torque_val, 0.0)
+    # Wecon VM Modbus register 1006H (D006) resolution is 0.1% (e.g. 22 = 2.2%, 12 = 1.2%, 100 = 10.0%).
+    # Packets from edge gateway contain raw counts inside single-element lists/tuples [22] or raw integers 22.
+    is_torque_modbus_raw = (
+        isinstance(raw_torque_val, (list, tuple))
+        or (isinstance(raw_torque_val, int) and not isinstance(raw_torque_val, bool))
+        or (isinstance(raw_torque_val, str) and "." not in raw_torque_val and raw_torque_val.strip().isdigit())
+        or raw_torque > 15.0
+    )
+    if is_torque_modbus_raw:
+        torque = round(raw_torque / 10.0, 1)
+    else:
+        torque = round(raw_torque, 1)
+
+    raw_power_val = metric.get("power", metric.get("Power", metric.get("d005", metric.get("D005", 0.0))))
+    raw_power = _unpack(raw_power_val, 0.0)
+    # Wecon VM Modbus register 1005H (D005) resolution is 0.1 kW (e.g. 2 = 0.2 kW, 15 = 1.5 kW).
+    is_power_modbus_raw = (
+        isinstance(raw_power_val, (list, tuple))
+        or (isinstance(raw_power_val, int) and not isinstance(raw_power_val, bool))
+        or (isinstance(raw_power_val, str) and "." not in raw_power_val and raw_power_val.strip().isdigit())
+        or raw_power > 5.0
+    )
+    if is_power_modbus_raw:
+        power = round(raw_power / 10.0, 2)
+    else:
+        power = round(raw_power, 2)
+
+    raw_v_bus = _unpack(metric.get("v_bus", v_dc))
+
+    # Detect and persist any parameter updates passed in MQTT metric payload
+    param_keys = ("f0.02", "f0.03", "f0.10", "f0.17", "f0.18", "f2.03", "f9.01", "decel", "accel")
+    for mk, mv in metric.items():
+        low_mk = mk.lower().replace("_", ".")
+        for pk in param_keys:
+            if pk in low_mk:
+                clean_pk = mk.upper().replace("_", ".")
                 try:
-                    val = int(_unpack(v, 0))
-                    if val in (2, 3, 6, 11, 13) or val > 0:
-                        raw_fault = val
-                        break
-                except (ValueError, TypeError):
+                    p_val = float(_unpack(mv))
+                    GLOBAL_TSDB.set_parameter(clean_pk, p_val, f"Updated via MQTT {topic_name}")
+                except Exception:
                     pass
-    if raw_fault is None:
-        topic_name = str(metric.get("_mqtt_topic", "")).lower()
-        if "err02" in topic_name or "error02" in topic_name:
-            raw_fault = 2
-        elif "err06" in topic_name or "error06" in topic_name:
-            raw_fault = 6
-        elif "err11" in topic_name or "error11" in topic_name:
-            raw_fault = 11
-        elif "err13" in topic_name or "error13" in topic_name:
-            raw_fault = 13
 
     fault_code = int(_unpack(raw_fault, 0) if raw_fault is not None else 0)
     status = "TRIPPED" if fault_code > 0 else "RUNNING"
@@ -1171,9 +1249,14 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
         "asset_id": asset_id,
         "f_out": f_out,
         "f_target": f_target,
+        "f_in": f_target,
         "v_dc": v_dc,
+        "v_bus": round(raw_v_bus / 10.0 if raw_v_bus > 1000.0 else raw_v_bus, 1) if raw_v_bus else v_dc,
+        "v_out": v_out,
         "current": current,
         "rpm": rpm,
+        "torque": torque,
+        "power": power,
         "fault_code": fault_code,
         "status": status,
         "timestamp": ts if isinstance(ts, (int, float)) else now,
@@ -1201,6 +1284,11 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
             ingest_incident(inc, background_tasks)
         except Exception as e:
             logger.warning(f"Auto-trip dispatch error: {e}")
+    elif fault_code == 0 and (f_out > 0.5 or rpm > 10.0 or metric.get("reset")):
+        # Auto-clear active incident when equipment recovers and runs nominally with fault_code == 0
+        if LATEST_HIL_INCIDENT.get("has_incident"):
+            logger.info("Equipment healthy and running (fault_code=0). Auto-clearing active incident.")
+            clear_incident()
 
     # 3. Update active tools & broadcast live metric to connected SSE frontend clients
     influx_tool.update_latest(normalized)
@@ -1209,7 +1297,51 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
     return {"status": "INGESTED", "metric": normalized, "tsdb_buffered": True}
 
 
-# ── Embedded TSDB History & Diagnostics ───────────────────────────────
+# ── Embedded TSDB History & Parameter APIs ──────────────────────────
+
+class ParameterUpdateRequest(BaseModel):
+    key: str
+    value: float
+    description: Optional[str] = ""
+    asset_id: Optional[str] = "VFD_VM_01"
+
+
+@api_app.get("/api/v1/telemetry/parameters")
+def get_vfd_parameters(asset_id: str = "VFD_VM_01"):
+    """Returns active VFD control parameters with current values and descriptions."""
+    return {
+        "asset_id": asset_id,
+        "parameters": GLOBAL_TSDB.get_parameters(asset_id=asset_id),
+    }
+
+
+@api_app.post("/api/v1/telemetry/parameters")
+def set_vfd_parameter(req: ParameterUpdateRequest):
+    """Updates and persists a VFD control parameter."""
+    updated = GLOBAL_TSDB.set_parameter(
+        param_key=req.key,
+        param_value=req.value,
+        param_desc=req.description or "Configured via Dashboard UI",
+        asset_id=req.asset_id or "VFD_VM_01",
+    )
+    return {
+        "status": "UPDATED",
+        "key": req.key,
+        "parameter": updated,
+        "all_parameters": GLOBAL_TSDB.get_parameters(),
+    }
+
+
+@api_app.get("/api/v1/telemetry/parameters/history")
+def get_vfd_parameter_history(key: Optional[str] = None, limit: int = 50, asset_id: str = "VFD_VM_01"):
+    """Returns audit trail history of VFD parameter updates."""
+    history = GLOBAL_TSDB.get_parameter_history(param_key=key, limit=limit, asset_id=asset_id)
+    return {
+        "asset_id": asset_id,
+        "count": len(history),
+        "history": history,
+    }
+
 
 @api_app.get("/api/v1/telemetry/tsdb/history")
 def get_tsdb_history(seconds: int = 120, asset_id: str = "VFD_VM_01"):
@@ -1680,13 +1812,27 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
 
     f_out = _val("f_out", 0.0)
     f_target = _val("f_target", 0.0)
+    f_in = _val("f_in", f_target)
     if f_target < 0:
         f_target = round((f_target + 65536.0) / 1000.0, 2) if f_target < -1000 else round((f_target + 65536.0) / 100.0, 2)
-    v_dc = _val("v_dc", 0.0)
+    v_bus = _val("v_bus", _val("v_dc", 0.0))
+    v_dc = v_bus
+    v_out = _val("v_out", 0.0)
     current = _val("current", 0.0)
     rpm = _val("rpm", 0.0)
+    torque = _val("torque", _val("Torque", 0.0))
+    power = _val("power", _val("Power", 0.0))
     raw_fc = int(_val("fault_code", 0.0))
-    status = str(latest_tel.get("status", "TRIPPED" if raw_fc > 0 else ("RUNNING" if is_sim else "READY")))
+    status = str(latest_tel.get("status", "TRIPPED" if raw_fc > 0 else ("RUNNING" if (is_sim or rpm > 50 or f_out > 1.0) else "READY")))
+
+    # Retrieve live VFD parameters from embedded TSDB
+    vfd_params = GLOBAL_TSDB.get_parameters("VFD_VM_01")
+    if isinstance(vfd_params, dict):
+        param_map = {k: (v.get("value", 0.0) if isinstance(v, dict) else float(v)) for k, v in vfd_params.items()}
+    elif isinstance(vfd_params, list):
+        param_map = {p.get("key", ""): p.get("value", 0.0) for p in vfd_params if isinstance(p, dict)}
+    else:
+        param_map = {}
 
     # Check active HIL incident
     has_inc = bool(LATEST_HIL_INCIDENT.get("has_incident"))
@@ -1711,7 +1857,7 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
     root_desc = graph_state.get("root_cause_description", "")
     five_whys = graph_state.get("causal_chain_5_whys", [])
 
-    is_motor_disconnected = (current == 0.0 and rpm == 0.0)
+    is_motor_disconnected = (current <= 0.05 and rpm == 0.0 and f_out == 0.0)
 
     prompt_lines = [
         "You are the Industrial RCA AI Copilot, a senior power electronics and plant reliability engineer.",
@@ -1720,13 +1866,22 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
         "- Equipment Name: Wecon VM Series Inverter (VFD) & 3-Phase Induction Motor Test Bench",
         "- Controller / HMI: Wecon PLC LX3V and HMI Touch Panel (192.168.1.104) via Modbus RTU / MQTT",
         "",
+        "=== ACTIVE VFD PARAMETER CONFIGURATION (Wecon VM Series) ===",
+        f"- F0.02 (Run Command Channel): {int(param_map.get('F0.02', 1))} (0: Keypad, 1: Terminals/PLC, 2: Modbus)",
+        f"- F0.03 (Frequency Command Channel): {int(param_map.get('F0.03', 0))} (0: Digital Setting, 1: AI1, 2: AI2, 9: Modbus)",
+        f"- F0.10 (Max Frequency Limit): {param_map.get('F0.10', 40.0):.2f} Hz",
+        f"- F0.17 (Acceleration Time): {param_map.get('F0.17', 5.0):.1f} s",
+        f"- F0.18 (Deceleration Time): {param_map.get('F0.18', 5.0):.1f} s",
+        f"- F2.03 (Motor Rated Current / FLA): {param_map.get('F2.03', 1.15):.2f} A",
+        f"- F9.01 (Modbus Baud Rate): {int(param_map.get('F9.01', 9600))} bps",
+        "",
     ]
 
     if not is_telemetry_live:
         prompt_lines.extend([
             "=== ⚠️ CRITICAL TELEMETRY STATUS: DISCONNECTED / OFFLINE ⚠️ ===",
             "- Connection State: DISCONNECTED (OFFLINE)",
-            f"- MQTT Broker: {'PORT 1883 OPEN (No data packets received in >30s)' if mqtt_active else 'PORT 1883 CLOSED / INACTIVE'}",
+            f"- MQTT Broker: {'PORT 1883/8883 OPEN (No data packets received in >30s)' if mqtt_active else 'PORT 1883/8883 CLOSED / INACTIVE'}",
             "- Live Modbus RTU Telemetry: NONE received in >30 seconds.",
             "- Simulation Mode: DISABLED by user (Offline).",
             "- Current Sensor Values: 0.00 Hz, 0.0 V, 0.00 A, 0 RPM (All Channels Inactive / Disconnected)",
@@ -1735,10 +1890,10 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
             "1. THE LIVE TELEMETRY STREAM IS CURRENTLY DISCONNECTED AND OFFLINE.",
             "2. When the user asks about the motor, VFD, operating status, frequency, current, RPM, or general questions ('what is the motor speed?', 'is it running?', 'is everything ok?'):",
             "   - YOU MUST IMMEDIATELY AND PROMINENTLY INFORM THE USER THAT TELEMETRY IS CURRENTLY DISCONNECTED / OFF.",
-            "   - Clarify that no live Modbus packets are being received from the MQTT broker (port 1883) or Modbus gateway.",
-            "   - Explain that sensor readings are 0.0 because the telemetry stream is inactive, NOT because the physical motor is running or in a specific verified operational state.",
+            "   - Clarify that no live Modbus packets are being received from the MQTT broker or Modbus gateway.",
+            "   - Explain that sensor readings are 0.0 because the telemetry stream is inactive, NOT because the physical motor is in a verified operational state.",
             "   - Guide the user that they can either:",
-            "     a) Start the hardware telemetry bridge (e.g. `scripts/modbus_rtu_bridge.py`), or",
+            "     a) Start the hardware telemetry bridge or verify MQTT gateway IP, or",
             "     b) Click the '[Enable Simulation]' button in the top navigation bar to test with simulated telemetry.",
             "3. DO NOT hallucinate that the motor is running, DO NOT fabricate fake frequency or voltage numbers, and DO NOT claim the motor is physically disconnected from terminals when the telemetry data link itself is offline.",
             "",
@@ -1766,28 +1921,34 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
         ])
     else:
         prompt_lines.extend([
-            "=== ✅ TELEMETRY CONNECTION STATUS: LIVE RIG STREAMING (MQTT 1883) ===",
+            "=== ✅ TELEMETRY CONNECTION STATUS: LIVE RIG STREAMING (MQTT 1883/8883) ===",
             "- Connection State: LIVE HARDWARE CONNECTED (1 Hz Modbus RTU over MQTT)",
             f"- Operating Status: {status}",
             f"- Active Trip Code: {fault_str}",
-            f"- Output Frequency: {f_out:.2f} Hz",
-            f"- Frequency Target / Setpoint: {f_target:.2f} Hz",
-            f"- DC Bus Voltage: {v_dc:.1f} V (Calibrated: 200.0-214.0 V nominal operating range at 40 Hz, Alarm: 215.0 V, Trip limit: 220.0 V. Readings between 200.0-214.0 V such as 205-210 V are strictly NORMAL and HEALTHY)",
-            f"- Motor Output Current: {current:.2f} A (Nominal FLA: 1.15 A, Trip Limit: 2.50 A)",
+            f"- Output Frequency: {f_out:.2f} Hz (Input Frequency Setpoint f_in: {f_in:.2f} Hz)",
+            f"- DC Bus Voltage: {v_bus:.1f} V DC (Single-phase 220V AC input rectified, nominal operating range: 270.0-285.0 V DC, Pre-alarm: 340.0 V, Trip limit: 380.0 V. Reading {v_bus:.1f} V is strictly NORMAL and HEALTHY)",
+            f"- AC Output Voltage: {v_out:.1f} V AC",
+            f"- Motor Output Current: {current:.2f} A (Nominal FLA: {param_map.get('F2.03', 1.15):.2f} A, Trip Limit: 2.50 A)",
+            f"- Output Torque: {torque:.1f}",
+            f"- Power: {power:.2f} kW",
             f"- Rotor Speed: {rpm:.1f} RPM (Synchronous: 1450 RPM)",
             "",
             "=== PHYSICAL BENCH SETUP & MOTOR STATE ===",
         ])
-        if is_motor_disconnected:
+        if rpm > 100 or f_out > 1.0:
+            prompt_lines.extend([
+                f"- **MOTOR CONNECTION / SHAFT STATUS:** Motor is actively spinning at {rpm:.0f} RPM with {f_out:.2f} Hz output frequency.",
+                f"  * Drawing {current:.2f} A current with {v_out:.1f} V AC output and {torque:.0f} internal torque metric.",
+            ])
+        elif is_motor_disconnected:
             prompt_lines.extend([
                 "- **MOTOR CONNECTION / SHAFT STATUS:** Current is 0.00 A and RPM is 0.0 RPM.",
-                "  * The physical 3-phase induction motor is currently uncoupled or disconnected from the VFD output terminals (U/V/W), OR the drive is stopped.",
-                "  * With no motor connected, phase current is strictly 0.00 A and rotor speed is strictly 0.0 RPM.",
-                "  * CRITICAL: NEVER claim or hallucinate that current is 1.15 A or that the motor is spinning at 1199 RPM! Always confirm that 0.00 A and 0 RPM correctly reflects the disconnected/idle motor.",
+                "  * The physical 3-phase induction motor is stopped or disconnected from VFD terminals U/V/W.",
+                "  * Phase current is 0.00 A and rotor speed is 0.0 RPM.",
             ])
         else:
             prompt_lines.extend([
-                f"- **MOTOR CONNECTION / SHAFT STATUS:** Motor is connected and drawing {current:.2f} A at {rpm:.1f} RPM.",
+                f"- **MOTOR CONNECTION / SHAFT STATUS:** Motor is connected (current: {current:.2f} A, speed: {rpm:.1f} RPM).",
             ])
         prompt_lines.append("")
 
@@ -1813,16 +1974,17 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
         prompt_lines.extend([
             f"- Incident Active: NO ({'Equipment is in healthy monitoring state' if is_telemetry_live else 'Awaiting telemetry connection'})",
             f"- System Health: {'Operational parameters within ISA-95 envelopes.' if is_telemetry_live else 'Telemetry offline.'}",
-            "- Continuous safety monitoring: Listening for trip triggers over MQTT 1883.",
+            "- Continuous safety monitoring: Listening for trip triggers over MQTT 1883/8883.",
         ])
 
     prompt_lines.extend([
         "",
         "=== DOMAIN KNOWLEDGE & EXPERT RULES ===",
-        "1. Wecon VM Inverter Specifications:",
-        "   - Single-phase 220V AC input, rectified to ~310V DC peak, operating with ~205-210V nominal intermediate DC link under 40 Hz load (normal operating envelope: 200.0-214.0 V).",
-        "   - Overvoltage Trip (Err06): Triggered when DC bus exceeds 220.0 V (warning pre-alarm at 215.0 V). Normal 40 Hz steady state is 205.0-210.0 V (strictly healthy).",
-        "     If no dynamic braking resistor is installed across terminals P+ and PB, regenerative kinetic energy pumps into the DC bus during decel or overfrequency.",
+        "1. Wecon VM Inverter Specifications (Bench 01 Single-Phase 220V Rig):",
+        "   - Single-phase 220V AC input, rectified to intermediate DC link bus.",
+        "   - Steady-state nominal DC bus runs at 275.5 - 280.0 V DC under normal 40.0 Hz operation (normal envelope: 270.0 - 290.0 V DC). Readings in this range are strictly NORMAL and HEALTHY.",
+        "   - Overvoltage Trip (Err06): Triggered when DC bus exceeds 380.0 V DC (warning pre-alarm at 340.0 V DC).",
+        "     If no dynamic braking resistor is installed across terminals P+ and PB, regenerative kinetic energy pumps into the DC bus during rapid decel or overfrequency.",
         "     Countermeasures: clamp parameter F0.10 to 40.00 Hz, install dynamic braking resistor (nominal 70-100 Ohm, 150-200W) across P+/PB, tune F0.18 deceleration time to >= 5.0s.",
         "   - Overcurrent Trip (Err02): Triggered when instantaneous current exceeds 2.50 A (217% FLA).",
         "     Typically caused by abrupt stop command from PLC de-energizing the Run coil instantaneously without a deceleration ramp.",
@@ -1839,7 +2001,7 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
         "=== INSTRUCTIONS FOR YOUR RESPONSES ===",
         "- You are the engineer's copilot for THIS specific test bench (VFD_VM_01).",
         "- When the user asks general, status, or greeting questions ('is everything okay?', 'does the device run well?', 'status?', 'what happened?', 'what is the device at?', 'what is the motor speed?'):",
-        "  * If telemetry is DISCONNECTED: State clearly that live telemetry is offline (no signal on port 1883) and guide them to connect the Modbus bridge or click [Enable Simulation].",
+        "  * If telemetry is DISCONNECTED: State clearly that live telemetry is offline (no signal on port 1883/8883) and guide them to connect the Modbus bridge or click [Enable Simulation].",
         "  * If telemetry is in SIMULATION MODE: BEHAVE LIKE NORMAL! Answer directly using the active simulation telemetry data (frequency, DC bus voltage, current, rotor speed). You can transparently note that it is running in simulation mode, but provide the values and discuss the device state normally without refusal.",
         "  * If telemetry is LIVE HARDWARE: Reference the actual equipment (Wecon VM Series VFD_VM_01) and quote its real-time telemetry values.",
         "- NEVER say 'I don't have access to your hardware or sensors', 'what device are you using?', or treat this as a generic chat. You have direct system integration with the telemetry pipeline above.",
@@ -1960,21 +2122,6 @@ def delete_api_key_settings():
         logger.error(f"Failed to delete API key: {e}")
 
 # ── Telegram Bot Lifecycle & Management Endpoints ──────────────────────
-
-@api_app.on_event("startup")
-async def on_startup():
-    """Starts Telegram Bot polling loop if token is configured."""
-    telegram_bot_service.set_api_context(sys.modules[__name__])
-    if telegram_bot_service.token:
-        telegram_bot_service.start_background_polling()
-        logger.info("Telegram Bot service background polling initialized.")
-
-
-@api_app.on_event("shutdown")
-async def on_shutdown():
-    """Cleanly stops background Telegram polling loop."""
-    await telegram_bot_service.stop()
-
 
 @api_app.get("/api/v1/bot/status")
 def get_bot_status():

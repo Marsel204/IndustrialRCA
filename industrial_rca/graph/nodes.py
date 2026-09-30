@@ -102,7 +102,7 @@ def detect_anomalies(state: RCAState) -> Dict[str, Any]:
     ds = TelemetryStore.get(ds_id)
     available_cols = set(ds.df_1hz.columns)
 
-    vfd_tags = ["v_dc", "current", "f_out", "rpm", "fault_code"]
+    vfd_tags = ["v_dc", "v_bus", "current", "f_out", "rpm", "fault_code", "v_out", "torque"]
     legacy_tags = ["PT-30101", "DPS-30101", "VI-301-R", "TI-301-DE", "IT-30101"]
 
     tags_to_monitor = [t for t in vfd_tags if t in available_cols]
@@ -132,10 +132,14 @@ def detect_anomalies(state: RCAState) -> Dict[str, Any]:
             breached = True
             breach_desc = f"VFD reported active trip code Err{int(profile['max']):02d}"
             has_active_trip = True
-        elif tag == "v_dc" and profile["max"] >= limits.get("trip_high", 220.0):
-            breached = True
-            breach_desc = f"DC bus voltage reached {profile['max']:.1f}V (Trip Limit: {limits.get('trip_high', 220.0)}V)"
-            has_active_trip = True
+        elif tag in ("v_dc", "v_bus"):
+            # On physical 220V AC input rig, DC bus nominal is ~276V DC, trip threshold is 380V.
+            # On simulated datasets, DC bus baseline is 182V, trip threshold is 220V.
+            effective_trip = 380.0 if profile["max"] > 240.0 else limits.get("trip_high", 220.0)
+            if profile["max"] >= effective_trip:
+                breached = True
+                breach_desc = f"DC bus voltage reached {profile['max']:.1f}V (Trip Limit: {effective_trip:.1f}V)"
+                has_active_trip = True
         elif tag == "current" and profile["max"] >= limits.get("trip_high", 2.50):
             breached = True
             breach_desc = f"Motor current reached {profile['max']:.2f}A (Trip Limit: {limits.get('trip_high', 2.50)}A)"
@@ -278,6 +282,7 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
     # VFD telemetry metrics
     fc_max = analytics_tool.profile_tag(ds_id, "fault_code", 0, 3600).get("max", 0) if "fault_code" in available_cols else 0
     vdc_profile = analytics_tool.profile_tag(ds_id, "v_dc", 0, 3600) if "v_dc" in available_cols else {"max": 0, "mean": 0, "min": 0}
+    vbus_profile = analytics_tool.profile_tag(ds_id, "v_bus", 0, 3600) if "v_bus" in available_cols else {"max": 0, "mean": 0, "min": 0}
     curr_profile = analytics_tool.profile_tag(ds_id, "current", 0, 3600) if "current" in available_cols else {"max": 0, "mean": 0, "min": 0}
     fout_profile = analytics_tool.profile_tag(ds_id, "f_out", 0, 3600) if "f_out" in available_cols else {"max": 0, "mean": 0, "min": 0}
     rpm_profile = analytics_tool.profile_tag(ds_id, "rpm", 0, 3600) if "rpm" in available_cols else {"max": 0, "mean": 0, "min": 0}
@@ -294,15 +299,15 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
 
     if hyp_id == "H_VFD_ERR06":
         # Overfrequency Deceleration Overvoltage (WECON VM Err06)
-        vdc_max = vdc_profile.get("max", 0.0)
+        vdc_max = max(vdc_profile.get("max", 0.0), vbus_profile.get("max", 0.0))
         fout_max = fout_profile.get("max", 0.0)
         metrics["vdc_max"] = vdc_max
         metrics["fout_max"] = fout_max
         metrics["fault_code"] = active_fc
 
-        vdc_limits = VFD_OPERATIONAL_LIMITS.get("v_dc", {})
-        vdc_trip = vdc_limits.get("trip_high", 220.0)
-        vdc_alarm = vdc_limits.get("alarm_high", 215.0)
+        is_physical_rig = (vdc_max > 240.0)
+        vdc_trip = 380.0 if is_physical_rig else VFD_OPERATIONAL_LIMITS.get("v_dc", {}).get("trip_high", 220.0)
+        vdc_alarm = 340.0 if is_physical_rig else VFD_OPERATIONAL_LIMITS.get("v_dc", {}).get("alarm_high", 215.0)
 
         is_confirmed = (active_fc == 6) or (active_fc == 0 and (vdc_max >= vdc_trip or (fout_max >= 45.0 and vdc_max >= vdc_alarm)))
         if is_confirmed:
@@ -1140,8 +1145,8 @@ def generate_maintenance_artifacts(state: RCAState) -> Dict[str, Any]:
             "ai_diagnostic_engine": state.get("deepseek_evaluation", {}).get("model", "Deterministic Expert Rules Engine"),
             "d5_permanent_corrective_actions": pca,
             "d6_implementation_and_validation": {
-                "validation_method": "Run test bench at 40.00 Hz steady-state for 15 minutes followed by controlled start/stop cycles.",
-                "acceptance_criteria": f"DC bus voltage stable at ~205-210 V (never exceeding {VFD_OPERATIONAL_LIMITS.get('v_dc', {}).get('alarm_high', 215.0):.1f} V alarm / {VFD_OPERATIONAL_LIMITS.get('v_dc', {}).get('trip_high', 220.0):.1f} V trip limit), current < 1.50 A, zero trip codes.",
+                "validation_method": "Run test bench at 40.00 Hz steady-state for 15 minutes followed by controlled start/stop cycles with parameter F0.18 deceleration ramp.",
+                "acceptance_criteria": "DC bus voltage stable within nominal baseline (~275-285 V DC on physical rig, ~205-210 V on simulation, never exceeding 340 V alarm / 380 V trip limit), controlled ramp down per F0.18 >= 5.0s, motor line current < 1.50 A, and zero trip codes latched.",
             },
             "d7_systemic_prevention": [
                 "Standardize PLC program template with ramped stop routines across all test benches.",

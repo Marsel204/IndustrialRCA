@@ -60,6 +60,17 @@ async def _custom_broadcast(self, session, topic, data, force_qos=None):
     print(f"\n[MQTT-LIVE] [{now_str}] Client: {cid} | Topic: {topic}", flush=True)
     print(f"   Payload: {raw_text}", flush=True)
 
+    # Persist all non-system incoming packets to mqtt_broker.log
+    if not topic.startswith("$") and cid != "broker":
+        try:
+            from pathlib import Path
+            log_path = Path(__file__).resolve().parent / "mqtt_broker.log"
+            with open(log_path, "a", encoding="utf-8") as f_log:
+                f_log.write(f"[{now_str}] CID: {cid} | Topic: {topic} | Payload: {raw_text}\n")
+                f_log.flush()
+        except Exception:
+            pass
+
     # Do NOT forward internal broker statistics ($SYS/...) to the live telemetry feed
     if topic.startswith("$") or cid == "broker":
         return await _orig_broadcast(self, session, topic, data, force_qos=force_qos)
@@ -74,31 +85,70 @@ async def _custom_broadcast(self, session, topic, data, force_qos=None):
                 payload_dict = parsed
         else:
             low = trimmed.lower()
-            if low in ("0", "reset", "clear", "ack", "normal"):
+            topic_lower = topic.lower()
+
+            # Check if this is an explicit reset/clear command
+            if low in ("reset", "clear", "ack") or "reset" in topic_lower or "clear" in topic_lower:
                 payload_dict = {"reset": True, "fault_code": 0, "topic": topic}
-            elif low in ("2", "02", "err02", "error02"):
+            # Check if this topic specifically represents fault/error codes
+            elif any(w in topic_lower for w in ("fault", "error", "trip", "alarm", "700b")):
+                if low in ("0", "normal", "none", "ok"):
+                    payload_dict = {"reset": True, "fault_code": 0, "topic": topic}
+                elif low in ("2", "02", "err02", "error02"):
+                    payload_dict = {"fault_code": 2, "fault_description": "Overcurrent during deceleration (Err02)", "topic": topic}
+                elif low in ("6", "06", "err06", "error06"):
+                    payload_dict = {"fault_code": 6, "fault_description": "Overvoltage during operation / Overfrequency (Err06)", "topic": topic}
+                elif low in ("3", "03", "err03"):
+                    payload_dict = {"fault_code": 3, "fault_description": "Overcurrent during constant speed (Err03)", "topic": topic}
+                elif low in ("11", "err11"):
+                    payload_dict = {"fault_code": 11, "fault_description": "Motor Overload (Err11)", "topic": topic}
+                elif low in ("13", "err13"):
+                    payload_dict = {"fault_code": 13, "fault_description": "Output Phase Loss (Err13)", "topic": topic}
+                else:
+                    try:
+                        code_val = int(float(trimmed))
+                        if code_val == 0:
+                            payload_dict = {"reset": True, "fault_code": 0, "topic": topic}
+                        else:
+                            payload_dict = {"fault_code": code_val, "topic": topic}
+                    except ValueError:
+                        payload_dict = {"fault_description": trimmed, "topic": topic}
+            # If payload explicitly states an error string like "err02", "err06", "err13" regardless of topic
+            elif low in ("err02", "error02"):
                 payload_dict = {"fault_code": 2, "fault_description": "Overcurrent during deceleration (Err02)", "topic": topic}
-            elif low in ("6", "06", "err06", "error06"):
+            elif low in ("err06", "error06"):
                 payload_dict = {"fault_code": 6, "fault_description": "Overvoltage during operation / Overfrequency (Err06)", "topic": topic}
-            elif low in ("3", "03", "err03"):
+            elif low in ("err03", "error03"):
                 payload_dict = {"fault_code": 3, "fault_description": "Overcurrent during constant speed (Err03)", "topic": topic}
-            elif low in ("11", "err11"):
+            elif low in ("err11", "error11"):
                 payload_dict = {"fault_code": 11, "fault_description": "Motor Overload (Err11)", "topic": topic}
-            elif "reset" in topic.lower() or "clear" in topic.lower():
-                payload_dict = {"reset": True, "fault_code": 0, "topic": topic}
-            elif "error" in topic.lower() or "fault" in topic.lower():
+            elif low in ("err13", "error13"):
+                payload_dict = {"fault_code": 13, "fault_description": "Output Phase Loss (Err13)", "topic": topic}
+            # Specific sensor topic mapping
+            elif any(w in topic_lower for w in ("current", "amp")):
                 try:
-                    code_val = int(float(trimmed))
-                    if code_val == 0:
-                        payload_dict = {"reset": True, "fault_code": 0, "topic": topic}
-                    else:
-                        payload_dict = {"fault_code": code_val, "topic": topic}
+                    payload_dict = {"current": float(trimmed), "topic": topic}
                 except ValueError:
-                    payload_dict = {"fault_description": trimmed, "fault_code": 2 if "02" in trimmed else 6, "topic": topic}
-            elif "trigger" in topic.lower() or "d_var" in topic.lower():
+                    payload_dict = {"raw": trimmed, "topic": topic}
+            elif any(w in topic_lower for w in ("frequency", "f_out", "hz")):
+                try:
+                    payload_dict = {"f_out": float(trimmed), "topic": topic}
+                except ValueError:
+                    payload_dict = {"raw": trimmed, "topic": topic}
+            elif any(w in topic_lower for w in ("voltage", "v_dc", "bus")):
+                try:
+                    payload_dict = {"v_dc": float(trimmed), "topic": topic}
+                except ValueError:
+                    payload_dict = {"raw": trimmed, "topic": topic}
+            elif any(w in topic_lower for w in ("rpm", "speed")):
+                try:
+                    payload_dict = {"rpm": float(trimmed), "topic": topic}
+                except ValueError:
+                    payload_dict = {"raw": trimmed, "topic": topic}
+            elif "trigger" in topic_lower or "d_var" in topic_lower or "d100" in topic_lower:
                 try:
                     code_val = int(float(trimmed))
-                    payload_dict = {"d_trigger": code_val, "fault_code": code_val, "topic": topic}
+                    payload_dict = {"d_trigger": code_val, "topic": topic}
                 except ValueError:
                     payload_dict = {"d_trigger": trimmed, "topic": topic}
             else:

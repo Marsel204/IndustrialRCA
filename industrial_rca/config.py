@@ -11,6 +11,11 @@ from typing import Dict, Any
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 ENV_FILE = ROOT_DIR / ".env"
+if not ENV_FILE.exists():
+    fallback_env = Path("C:/HMI/RCA/.env")
+    if fallback_env.exists():
+        ENV_FILE = fallback_env
+
 DATA_DIR = BASE_DIR / "data"
 TOPOLOGY_FILE = DATA_DIR / "asset_topology.json"
 

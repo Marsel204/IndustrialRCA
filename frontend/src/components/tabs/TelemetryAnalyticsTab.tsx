@@ -503,17 +503,13 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
     };
   }, [spectrum]);
 
-  // 7. VFD Output Frequency Chart (live_stream)
+  // 7. VFD Output Frequency Chart (live_stream) with Setpoint Overlay
   const vfdFrequencyOption = useMemo(() => {
-    const data = series['f_out'] || [];
+    const fOutData = series['f_out'] || [];
+    const fTargetData = series['f_in'] || series['f_target'] || [];
     return {
       ...baseChartTheme,
-      title: {
-        text: 'f_out · VFD Inverter Output Frequency (Hz)',
-        textStyle: { color: '#0F172A', fontSize: 12, fontWeight: 'bold' },
-        left: 10,
-        top: 8,
-      },
+      grid: { top: 12, right: 15, bottom: 22, left: 45 },
       xAxis: {
         type: 'category',
         data: timestamps,
@@ -529,11 +525,11 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
       },
       series: [
         {
-          name: 'Output Frequency',
+          name: 'Output (f_out)',
           type: 'line',
           showSymbol: false,
           sampling: 'lttb',
-          lineStyle: { width: 2, color: '#0284C7' },
+          lineStyle: { width: 2.2, color: '#0284C7' },
           areaStyle: {
             color: {
               type: 'linear',
@@ -544,18 +540,15 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
               ],
             },
           },
-          markLine: {
-            symbol: 'none',
-            data: [
-              {
-                yAxis: 40.0,
-                name: 'Trip Limit',
-                lineStyle: { color: '#DC2626', type: 'dashed', width: 2 },
-                label: { formatter: '40.00 Hz', position: 'insideEndTop', color: '#DC2626', fontSize: 10, fontWeight: 'bold' },
-              },
-            ],
-          },
-          data,
+          data: fOutData,
+        },
+        {
+          name: 'Setpoint (f_in)',
+          type: 'line',
+          showSymbol: false,
+          sampling: 'lttb',
+          lineStyle: { width: 1.5, color: '#D97706', type: 'dashed' },
+          data: fTargetData,
         },
       ],
     };
@@ -566,13 +559,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
     const data = series['v_dc'] || [];
     return {
       ...baseChartTheme,
-      grid: { top: 35, right: 35, bottom: 25, left: 55 },
-      title: {
-        text: 'v_dc · DC Bus Voltage (V DC)',
-        textStyle: { color: '#0F172A', fontSize: 12, fontWeight: 'bold' },
-        left: 10,
-        top: 8,
-      },
+      grid: { top: 12, right: 15, bottom: 22, left: 45 },
       xAxis: {
         type: 'category',
         data: timestamps,
@@ -582,7 +569,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
       yAxis: {
         type: 'value',
         min: 0,
-        max: (value: { max: number }) => Math.max(225, Math.ceil(value.max * 1.08)),
+        max: (value: { max: number }) => Math.max(390, Math.ceil(value.max * 1.08)),
         axisLabel: { formatter: '{value} V', fontSize: 10, color: '#334155' },
         splitLine: { lineStyle: { color: '#F1F5F9' } },
       },
@@ -607,11 +594,22 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
             symbol: 'none',
             data: [
               {
-                yAxis: 220.0,
+                yAxis: 276.0,
+                name: 'Nominal DC Bus',
+                lineStyle: { color: '#059669', type: 'dotted', width: 1.5 },
+                label: {
+                  formatter: 'Nom 276V',
+                  position: 'insideEndBottom',
+                  color: '#059669',
+                  fontSize: 10,
+                },
+              },
+              {
+                yAxis: 380.0,
                 name: 'Err06 Trip Threshold',
                 lineStyle: { color: '#DC2626', type: 'dashed', width: 2 },
                 label: {
-                  formatter: '220.0 V',
+                  formatter: 'Trip 380V',
                   position: 'insideEndTop',
                   color: '#DC2626',
                   fontSize: 10,
@@ -626,18 +624,12 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
     };
   }, [baseChartTheme, series, timestamps]);
 
-  // 9. VFD Motor Current Chart (live_stream)
-  const vfdCurrentOption = useMemo(() => {
-    const data = series['current'] || [];
+  // 9. VFD AC Output Voltage Chart (v_out)
+  const vfdVoutOption = useMemo(() => {
+    const data = series['v_out'] || [];
     return {
       ...baseChartTheme,
-      grid: { top: 35, right: 35, bottom: 25, left: 55 },
-      title: {
-        text: 'I_out · Motor Phase Current (Amperes)',
-        textStyle: { color: '#0F172A', fontSize: 12, fontWeight: 'bold' },
-        left: 10,
-        top: 8,
-      },
+      grid: { top: 12, right: 15, bottom: 22, left: 45 },
       xAxis: {
         type: 'category',
         data: timestamps,
@@ -647,8 +639,71 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
       yAxis: {
         type: 'value',
         min: 0,
-        max: 4.0,
-        axisLabel: { formatter: '{value} A', fontSize: 10, color: '#334155' },
+        max: 250,
+        axisLabel: { formatter: '{value} V', fontSize: 10, color: '#334155' },
+        splitLine: { lineStyle: { color: '#F1F5F9' } },
+      },
+      series: [
+        {
+          name: 'Output Voltage (AC)',
+          type: 'line',
+          showSymbol: false,
+          sampling: 'lttb',
+          lineStyle: { width: 2, color: '#6366F1' },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: 'rgba(99, 102, 241, 0.20)' },
+                { offset: 1, color: 'rgba(99, 102, 241, 0.0)' },
+              ],
+            },
+          },
+          markLine: {
+            symbol: 'none',
+            data: [
+              {
+                yAxis: 184.0,
+                name: '40Hz Nom',
+                lineStyle: { color: '#059669', type: 'dotted', width: 1.5 },
+                label: { formatter: 'Nom 184V', position: 'insideEndBottom', color: '#059669', fontSize: 10 },
+              },
+              {
+                yAxis: 220.0,
+                name: 'Rated 220V',
+                lineStyle: { color: '#94A3B8', type: 'dashed', width: 1.5 },
+                label: { formatter: 'Rated 220V', position: 'insideEndTop', color: '#64748B', fontSize: 10 },
+              },
+            ],
+          },
+          data,
+        },
+      ],
+    };
+  }, [baseChartTheme, series, timestamps]);
+
+  // 10. VFD Motor Current Chart with Adaptive Scaling
+  const vfdCurrentOption = useMemo(() => {
+    const data = series['current'] || [];
+    return {
+      ...baseChartTheme,
+      grid: { top: 12, right: 15, bottom: 22, left: 48 },
+      xAxis: {
+        type: 'category',
+        data: timestamps,
+        axisLabel: { formatter: (v: number) => (v % 60 === 0 ? formatTime(v) : ''), fontSize: 10, color: '#334155' },
+        axisLine: { lineStyle: { color: '#CBD5E1' } },
+      },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        max: (value: { max: number }) => (value.max > 0.5 ? Math.max(3.0, Math.ceil(value.max * 1.25 * 10) / 10) : 0.25),
+        axisLabel: {
+          formatter: (v: number) => `${v >= 1 ? v.toFixed(1) : v.toFixed(2)} A`,
+          fontSize: 10,
+          color: '#334155',
+        },
         splitLine: { lineStyle: { color: '#F1F5F9' } },
       },
       series: [
@@ -663,7 +718,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: 'rgba(13, 148, 136, 0.20)' },
+                { offset: 0, color: 'rgba(13, 148, 136, 0.22)' },
                 { offset: 1, color: 'rgba(13, 148, 136, 0.0)' },
               ],
             },
@@ -675,7 +730,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
                 yAxis: 2.50,
                 name: 'Trip Limit',
                 lineStyle: { color: '#DC2626', type: 'dashed', width: 2 },
-                label: { formatter: '2.50 A', position: 'insideEndTop', color: '#DC2626', fontSize: 10, fontWeight: 'bold' },
+                label: { formatter: 'Trip 2.50 A', position: 'insideEndTop', color: '#DC2626', fontSize: 10, fontWeight: 'bold' },
               },
             ],
           },
@@ -685,17 +740,12 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
     };
   }, [baseChartTheme, series, timestamps]);
 
-  // 10. VFD Motor RPM Chart (live_stream)
+  // 11. VFD Motor RPM Chart
   const vfdRpmOption = useMemo(() => {
     const data = series['rpm'] || [];
     return {
       ...baseChartTheme,
-      title: {
-        text: 'RPM · Induction Motor Speed (RPM)',
-        textStyle: { color: '#0F172A', fontSize: 12, fontWeight: 'bold' },
-        left: 10,
-        top: 8,
-      },
+      grid: { top: 12, right: 15, bottom: 22, left: 48 },
       xAxis: {
         type: 'category',
         data: timestamps,
@@ -731,13 +781,74 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
             data: [
               {
                 yAxis: 1450.0,
-                name: 'Trip Limit',
-                lineStyle: { color: '#DC2626', type: 'dashed', width: 2 },
-                label: { formatter: '1450 RPM', position: 'insideEndTop', color: '#DC2626', fontSize: 10, fontWeight: 'bold' },
+                name: '4-Pole Sync Speed',
+                lineStyle: { color: '#D97706', type: 'dashed', width: 1.5 },
+                label: { formatter: 'Sync 1450', position: 'insideEndTop', color: '#D97706', fontSize: 10, fontWeight: 'bold' },
               },
             ],
           },
           data,
+        },
+      ],
+    };
+  }, [baseChartTheme, series, timestamps]);
+
+  // 12. VFD Torque & Active Power Chart (NEW)
+  const vfdTorquePowerOption = useMemo(() => {
+    const torqueData = series['torque'] || [];
+    const powerData = series['power'] || [];
+    return {
+      ...baseChartTheme,
+      grid: { top: 12, right: 35, bottom: 22, left: 45 },
+      xAxis: {
+        type: 'category',
+        data: timestamps,
+        axisLabel: { formatter: (v: number) => (v % 60 === 0 ? formatTime(v) : ''), fontSize: 10, color: '#334155' },
+        axisLine: { lineStyle: { color: '#CBD5E1' } },
+      },
+      yAxis: [
+        {
+          type: 'value',
+          min: 0,
+          max: (value: { max: number }) => Math.max(10, Math.ceil(value.max * 1.25)),
+          axisLabel: { formatter: '{value}%', fontSize: 10, color: '#EC4899' },
+          splitLine: { lineStyle: { color: '#F1F5F9' } },
+        },
+        {
+          type: 'value',
+          min: 0,
+          max: (value: { max: number }) => Math.max(0.5, Math.ceil(value.max * 1.25 * 10) / 10),
+          axisLabel: { formatter: '{value} kW', fontSize: 10, color: '#D97706' },
+          splitLine: { show: false },
+        },
+      ],
+      series: [
+        {
+          name: 'Torque (% FLA)',
+          type: 'line',
+          showSymbol: false,
+          sampling: 'lttb',
+          lineStyle: { width: 2, color: '#EC4899' },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: 'rgba(236, 72, 153, 0.20)' },
+                { offset: 1, color: 'rgba(236, 72, 153, 0.0)' },
+              ],
+            },
+          },
+          data: torqueData,
+        },
+        {
+          name: 'Active Power (kW)',
+          type: 'line',
+          yAxisIndex: 1,
+          showSymbol: false,
+          sampling: 'lttb',
+          lineStyle: { width: 1.5, color: '#D97706', type: 'dashed' },
+          data: powerData,
         },
       ],
     };
@@ -758,17 +869,33 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
   const _serAmp   = series['current']?.[series['current'].length - 1];
   const _serRpm   = series['rpm']?.[series['rpm'].length - 1];
 
+  const _lmVOut   = isLiveStream && liveMetric ? liveMetric.v_out   : null;
+  const _lmTorque = isLiveStream && liveMetric ? liveMetric.torque  : null;
+  const _lmPower  = isLiveStream && liveMetric ? liveMetric.power   : null;
+  const _serVOut  = series['v_out']?.[series['v_out'].length - 1];
+  const _serTorque = series['torque']?.[series['torque'].length - 1];
+  const _serPower = series['power']?.[series['power'].length - 1];
+
   const currentFOut = isTelemetryConnected
     ? (((_lmFOut !== null && _lmFOut !== 0) ? _lmFOut : (_serFOut ?? _lmFOut)) ?? 40.0)
     : 0.0;
   const currentVDc  = isTelemetryConnected
     ? (((_lmVDc  !== null && _lmVDc  !== 0) ? _lmVDc  : (_serVDc  ?? _lmVDc )) ?? 182.0)
     : 0.0;
+  const currentVOut = isTelemetryConnected
+    ? (((_lmVOut !== null && _lmVOut !== 0) ? _lmVOut : (_serVOut ?? _lmVOut)) ?? 184.0)
+    : 0.0;
   const currentAmp  = isTelemetryConnected
     ? (_lmAmp  !== null ? _lmAmp  : (_serAmp  ?? 0.0))
     : 0.0;
   const currentRpm  = isTelemetryConnected
     ? (((_lmRpm  !== null && _lmRpm  !== 0) ? _lmRpm  : (_serRpm  ?? _lmRpm )) ?? 1199.0)
+    : 0.0;
+  const currentTorque = isTelemetryConnected
+    ? (_lmTorque !== null ? _lmTorque : (_serTorque ?? 28.0))
+    : 0.0;
+  const currentPower = isTelemetryConnected
+    ? (_lmPower !== null ? _lmPower : (_serPower ?? 0.0))
     : 0.0;
   const currentStatus = isLiveStream
     ? (liveMetric ? liveMetric.status : (isTelemetryConnected ? 'RUNNING' : 'OFFLINE'))
@@ -823,6 +950,10 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
         currentAmp={currentAmp}
         currentRpm={currentRpm}
         currentStatus={currentStatus}
+        targetFrequencyHz={liveMetric?.f_in ?? liveMetric?.f_target ?? currentFOut}
+        voltageVout={currentVOut}
+        torqueFeedback={currentTorque}
+        powerKw={currentPower}
         latestTi={latestTi}
         latestVi={latestVi}
         latestDps={latestDps}
@@ -878,11 +1009,29 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
 
       {/* Timeseries Charts Grid */}
       {isVfdAsset ? (
-        /* VFD Hardware Timeseries Grid (live_stream or VFD HIL incident) */
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Chart 1: VFD Output Frequency */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs">
-            <div className="h-[200px] w-full">
+        /* VFD 6-Channel Telemetry Grid */
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {/* Chart 1: Output Frequency vs Setpoint */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs hover:border-slate-300 transition-colors flex flex-col justify-between">
+            <div className="flex items-center justify-between pb-2 mb-1 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                  f_out
+                </span>
+                <span className="text-xs font-bold font-mono text-slate-800">
+                  Frequency vs Setpoint
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-sky-500 inline-block"></span> Output
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2.5 h-0.5 border-t border-dashed border-amber-500 inline-block"></span> Setpoint
+                </span>
+              </div>
+            </div>
+            <div className="h-[190px] w-full">
               <ReactECharts
                 option={vfdFrequencyOption}
                 style={{ height: '100%', width: '100%' }}
@@ -895,8 +1044,21 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
           </div>
 
           {/* Chart 2: DC Bus Voltage */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs">
-            <div className="h-[200px] w-full">
+          <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs hover:border-slate-300 transition-colors flex flex-col justify-between">
+            <div className="flex items-center justify-between pb-2 mb-1 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                  v_dc
+                </span>
+                <span className="text-xs font-bold font-mono text-slate-800">
+                  DC Bus Voltage
+                </span>
+              </div>
+              <div className="text-[10px] font-mono text-slate-400">
+                Nom ~276V · <span className="text-rose-600 font-semibold">Trip 380V</span>
+              </div>
+            </div>
+            <div className="h-[190px] w-full">
               <ReactECharts
                 option={vfdDcBusOption}
                 style={{ height: '100%', width: '100%' }}
@@ -908,9 +1070,49 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
             </div>
           </div>
 
-          {/* Chart 3: Motor Output Current */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs">
-            <div className="h-[200px] w-full">
+          {/* Chart 3: AC Output Voltage */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs hover:border-slate-300 transition-colors flex flex-col justify-between">
+            <div className="flex items-center justify-between pb-2 mb-1 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  v_out
+                </span>
+                <span className="text-xs font-bold font-mono text-slate-800">
+                  AC Output Voltage
+                </span>
+              </div>
+              <div className="text-[10px] font-mono text-slate-400">
+                Nom 184V · Rated 220V
+              </div>
+            </div>
+            <div className="h-[190px] w-full">
+              <ReactECharts
+                option={vfdVoutOption}
+                style={{ height: '100%', width: '100%' }}
+                opts={ECHARTS_OPTS}
+                lazyUpdate={true}
+                notMerge={false}
+                onChartReady={onTelemetryChartReady}
+              />
+            </div>
+          </div>
+
+          {/* Chart 4: Motor Phase Current */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs hover:border-slate-300 transition-colors flex flex-col justify-between">
+            <div className="flex items-center justify-between pb-2 mb-1 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200">
+                  I_out
+                </span>
+                <span className="text-xs font-bold font-mono text-slate-800">
+                  Motor Phase Current
+                </span>
+              </div>
+              <div className="text-[10px] font-mono text-slate-400">
+                FLA 1.15A · <span className="text-rose-600 font-semibold">Trip 2.50A</span>
+              </div>
+            </div>
+            <div className="h-[190px] w-full">
               <ReactECharts
                 option={vfdCurrentOption}
                 style={{ height: '100%', width: '100%' }}
@@ -922,11 +1124,56 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
             </div>
           </div>
 
-          {/* Chart 4: Motor RPM (Full Width or 2-col) */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs">
-            <div className="h-[200px] w-full">
+          {/* Chart 5: Motor RPM */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs hover:border-slate-300 transition-colors flex flex-col justify-between">
+            <div className="flex items-center justify-between pb-2 mb-1 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                  RPM
+                </span>
+                <span className="text-xs font-bold font-mono text-slate-800">
+                  Induction Motor Speed
+                </span>
+              </div>
+              <div className="text-[10px] font-mono text-slate-400">
+                Sync: 1,450 RPM
+              </div>
+            </div>
+            <div className="h-[190px] w-full">
               <ReactECharts
                 option={vfdRpmOption}
+                style={{ height: '100%', width: '100%' }}
+                opts={ECHARTS_OPTS}
+                lazyUpdate={true}
+                notMerge={false}
+                onChartReady={onTelemetryChartReady}
+              />
+            </div>
+          </div>
+
+          {/* Chart 6: Motor Torque & Power */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs hover:border-slate-300 transition-colors flex flex-col justify-between">
+            <div className="flex items-center justify-between pb-2 mb-1 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold bg-pink-50 text-pink-700 border border-pink-200">
+                  τ & P
+                </span>
+                <span className="text-xs font-bold font-mono text-slate-800">
+                  Torque & Active Power
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-pink-500 inline-block"></span> Torque (%)
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2.5 h-0.5 border-t border-dashed border-amber-500 inline-block"></span> Power (kW)
+                </span>
+              </div>
+            </div>
+            <div className="h-[190px] w-full">
+              <ReactECharts
+                option={vfdTorquePowerOption}
                 style={{ height: '100%', width: '100%' }}
                 opts={ECHARTS_OPTS}
                 lazyUpdate={true}

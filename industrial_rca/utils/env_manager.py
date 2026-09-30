@@ -47,6 +47,9 @@ def get_api_key_status() -> Dict[str, Any]:
     # If not in os.environ, check .env directly
     if not raw_key and env_path.exists():
         raw_key = dotenv.get_key(str(env_path), "DEEPSEEK_API_KEY")
+        if raw_key:
+            os.environ["DEEPSEEK_API_KEY"] = raw_key
+            reconfigure_all_deepseek_clients()
 
     has_key = bool(raw_key and raw_key.strip() not in ("mock", "test", "dummy", ""))
     base_url = os.environ.get("DEEPSEEK_BASE_URL") or (
@@ -188,6 +191,7 @@ def test_api_credentials(
         api_key=effective_key,
         base_url=base_url,
         default_model=model,
+        register_active=False,
     )
 
     result = temp_client.test_connection()

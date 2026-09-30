@@ -67,79 +67,81 @@ export function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [activeThreadId, setActiveThreadId] = useState<string>(
-    `rca-gui-${Date.now()}`
+    `rca-live-${Date.now()}`
   );
   const activeThreadIdRef = useRef<string>(activeThreadId);
   activeThreadIdRef.current = activeThreadId;
   const latestIncidentRef = useRef<LatestIncident | null>(latestIncident);
   latestIncidentRef.current = latestIncident;
 
-  // Initialize and load base data
+  // Initialize and load base data in parallel
   const loadInitialData = useCallback(async () => {
     try {
       setIsLoading(true);
       setErrorMessage(null);
 
-      // 1. Health check
-      try {
-        const health = await fetchHealth();
+      const [healthRes, scListRes, incRes, topoRes, keyStatusRes, bStatusRes] =
+        await Promise.allSettled([
+          fetchHealth(),
+          fetchScenarios(),
+          fetchLatestIncident(),
+          fetchTopology('VFD_VM_01'),
+          fetchApiKeyStatus(),
+          fetchBotStatus(),
+        ]);
+
+      if (healthRes.status === 'fulfilled') {
+        const health = healthRes.value;
         setApiOnline(true);
         if (health?.mqtt_connected !== undefined) setMqttConnected(Boolean(health.mqtt_connected));
         if (health?.telemetry_connected !== undefined) setTelemetryConnected(Boolean(health.telemetry_connected));
         if (health?.is_simulated !== undefined) setIsSimulated(Boolean(health.is_simulated));
         if (health?.simulation_scenario) setSimulationScenario(health.simulation_scenario);
         if (health?.simulation_phase) setSimulationPhase(health.simulation_phase);
-      } catch {
+      } else {
         setApiOnline(false);
       }
 
-      // 2. Fetch scenarios
-      const scList = await fetchScenarios();
-      setScenarios(scList);
-
-      // 3. Fetch latest HIL incident
-      try {
-        const inc = await fetchLatestIncident();
-        setLatestIncident(inc);
-        if (inc?.has_incident && inc.incident_data?.thread_id) {
-          const state = await fetchRCAState(inc.incident_data.thread_id).catch(() => null);
-          if (state) {
-            setRcaState(state);
-            if (
-              state.pipeline_status === 'CAUSAL_TRACE_COMPLETED' ||
-              state.pipeline_status === 'ANALYSIS_COMPLETE' ||
-              state.pipeline_status === 'COMPLETED' ||
-              state.pipeline_status === 'AWAITING_REVIEW'
-            ) {
-              setIsPipelineRunning(false);
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to fetch latest incident:', e);
+      if (scListRes.status === 'fulfilled') {
+        setScenarios(scListRes.value);
       }
 
-      // 4. Fetch Topology
-      const topo = await fetchTopology('VFD_VM_01');
-      setTopology(topo);
+      if (incRes.status === 'fulfilled') {
+        const inc = incRes.value;
+        setLatestIncident(inc);
+        if (inc?.has_incident && inc.incident_data?.thread_id) {
+          fetchRCAState(inc.incident_data.thread_id)
+            .then((state) => {
+              if (state) {
+                setRcaState(state);
+                if (
+                  state.pipeline_status === 'CAUSAL_TRACE_COMPLETED' ||
+                  state.pipeline_status === 'ANALYSIS_COMPLETE' ||
+                  state.pipeline_status === 'COMPLETED' ||
+                  state.pipeline_status === 'AWAITING_REVIEW'
+                ) {
+                  setIsPipelineRunning(false);
+                }
+              }
+            })
+            .catch(() => null);
+        }
+      }
 
-      // 5. Fetch API Key & Engine Status
-      try {
-        const keyStatus = await fetchApiKeyStatus();
+      if (topoRes.status === 'fulfilled') {
+        setTopology(topoRes.value);
+      }
+
+      if (keyStatusRes.status === 'fulfilled') {
+        const keyStatus = keyStatusRes.value;
         setApiKeyStatus(keyStatus);
         if (keyStatus?.model) {
           setDeepseekModel(keyStatus.model);
         }
-      } catch (e) {
-        console.warn('Failed to fetch API key status:', e);
       }
 
-      // 6. Fetch Telegram Bot Status
-      try {
-        const bStatus = await fetchBotStatus();
-        setTelegramStatus(bStatus);
-      } catch (e) {
-        console.warn('Failed to fetch bot status:', e);
+      if (bStatusRes.status === 'fulfilled') {
+        setTelegramStatus(bStatusRes.value);
       }
     } catch (err: any) {
       console.error('Initialization error:', err);
@@ -199,9 +201,10 @@ export function App() {
           } catch {
             // Pipeline is actively computing on backend
           }
-        } else if (scenarioId === 'live_stream' && threadId.startsWith('rca-live-')) {
+        } else if (scenarioId === 'live_stream') {
           // Live edge stream in nominal monitoring mode: do NOT run trip pipeline!
           // State is managed by SSE events and handleResetPipeline.
+          setIsPipelineRunning(false);
         } else {
           // Run LangGraph pipeline for this scenario & thread
           await runRCAPipeline({
@@ -224,7 +227,7 @@ export function App() {
           threadId.startsWith('rca-hil-') ||
           scenarioId.startsWith('ds_hil') ||
           scenarioId === 'hil';
-        if (!isHilIncident) {
+        if (!isHilIncident || scenarioId === 'live_stream') {
           setIsPipelineRunning(false);
         }
       }

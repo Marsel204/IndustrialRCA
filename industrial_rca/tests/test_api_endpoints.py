@@ -187,3 +187,34 @@ def test_api_rca_normal_baseline(client):
     assert data["pipeline_status"] == "NORMAL_STABLE"
     assert data["is_paused_at_hitl"] is False
     assert data["current_step"] == 2
+
+
+def test_api_vfd_parameters(client):
+    """Test retrieving and updating VFD parameters via REST API."""
+    # 1. Get initial parameters
+    resp = client.get("/api/v1/telemetry/parameters")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "parameters" in data
+    assert "F0.10" in data["parameters"]
+    assert "F0.18" in data["parameters"]
+
+    # 2. Update parameter F0.18 to 0.2s
+    update_resp = client.post("/api/v1/telemetry/parameters", json={
+        "key": "F0.18",
+        "value": 0.2,
+        "description": "Trip injection test deceleration ramp",
+    })
+    assert update_resp.status_code == 200
+    res_data = update_resp.json()
+    assert res_data["status"] == "UPDATED"
+    assert res_data["parameter"]["value"] == 0.2
+    assert res_data["parameter"]["desc"] == "Trip injection test deceleration ramp"
+
+    # 3. Verify parameter history
+    hist_resp = client.get("/api/v1/telemetry/parameters/history?key=F0.18")
+    assert hist_resp.status_code == 200
+    hist_data = hist_resp.json()
+    assert hist_data["count"] >= 1
+    assert hist_data["history"][0]["param_value"] == 0.2
+

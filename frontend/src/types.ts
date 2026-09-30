@@ -315,9 +315,15 @@ export interface LatestIncident {
 
 export interface LiveMetric {
   f_out: number;
+  f_target?: number;
+  f_in?: number;
   v_dc: number;
+  v_bus?: number;
+  v_out?: number;
   current: number;
   rpm: number;
+  torque?: number;
+  power?: number;
   fault_code: number;
   status: 'RUNNING' | 'TRIPPED' | 'WARNING' | string;
   timestamp: number;
@@ -333,6 +339,18 @@ export interface LiveMetric {
   simulation_scenario?: string;
   simulation_phase?: 'NORMAL' | 'TRIPPED' | string;
   simulation_countdown?: number;
+}
+
+export interface VfdParameter {
+  value: number;
+  desc?: string;
+  name?: string;
+  updated_at?: number;
+}
+
+export interface VfdParametersResponse {
+  asset_id: string;
+  parameters: Record<string, VfdParameter>;
 }
 
 export interface ApiKeyStatus {

@@ -282,6 +282,8 @@ class InfluxDBTelemetryTool:
             "v_out": np.zeros(count),
             "current": np.zeros(count),
             "rpm": np.zeros(count),
+            "torque": np.zeros(count),
+            "power": np.zeros(count),
             "fault_code": np.zeros(count, dtype=int),
             "status": ["OFFLINE"] * count,
         })
@@ -299,6 +301,8 @@ class InfluxDBTelemetryTool:
         current = 1.15 + 0.03 * np.sin(t_sec * 0.08) + np.random.normal(0, 0.02, count)
         rpm = f_out * 29.9 + np.random.normal(0, 1.0, count)
         v_out = np.full(count, 220.0) + np.random.normal(0, 0.5, count)
+        torque = np.full(count, 2.5) + np.random.normal(0, 0.15, count)
+        power = np.zeros(count)
 
         df = pd.DataFrame({
             "timestamp_sec": t_sec,
@@ -310,6 +314,8 @@ class InfluxDBTelemetryTool:
             "v_out": np.round(v_out, 1),
             "current": np.round(current, 2),
             "rpm": np.round(rpm, 1),
+            "torque": np.round(torque, 1),
+            "power": np.round(power, 2),
             "fault_code": 0,
             "status": "RUNNING",
         })
@@ -395,6 +401,8 @@ class InfluxDBTelemetryTool:
                         "v_dc": float(merged_fields.get("v_dc", 182.0)),
                         "current": float(merged_fields.get("current", 1.15)),
                         "rpm": float(merged_fields.get("rpm", 1199.0)),
+                        "torque": float(merged_fields.get("torque", 2.2)),
+                        "power": float(merged_fields.get("power", 0.0)),
                         "fault_code": fault_code,
                         "status": status,
                         "timestamp": ts_float,
@@ -417,6 +425,8 @@ class InfluxDBTelemetryTool:
                 "v_out": 0.0,
                 "current": 0.0,
                 "rpm": 0.0,
+                "torque": 0.0,
+                "power": 0.0,
                 "fault_code": 0,
                 "status": "OFFLINE",
                 "timestamp": now,
@@ -439,6 +449,8 @@ class InfluxDBTelemetryTool:
             v_dc = round(182.0 + 1.8 * math.cos(now * 0.08), 1)
             current = round(1.15 + 0.04 * math.sin(now * 0.15), 2)
             rpm = round(f_out * 29.0, 1)
+            torque = round(2.5 + 0.15 * math.sin(now * 0.1), 1)
+            power = 0.0
             fault_code = 0
             status = "RUNNING"
             phase = "NORMAL"
@@ -467,6 +479,8 @@ class InfluxDBTelemetryTool:
                 current = 0.0
             f_out = 0.0
             rpm = 0.0
+            torque = 0.0
+            power = 0.0
             status = "TRIPPED"
             phase = "TRIPPED"
 
@@ -478,6 +492,8 @@ class InfluxDBTelemetryTool:
             "v_out": 220.0 if is_normal_phase else 0.0,
             "current": current,
             "rpm": rpm,
+            "torque": torque,
+            "power": power,
             "fault_code": fault_code,
             "status": status,
             "timestamp": now,

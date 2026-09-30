@@ -40,6 +40,17 @@ class EmbeddedTSDB:
         self._lock = threading.RLock()
         self._last_trip_time: float = 0.0
 
+        # Default Wecon VM VFD parameter set
+        self._parameters: Dict[str, Dict[str, Any]] = {
+            "F0.02": {"value": 2.0, "desc": "Run Command Source (RS-485)", "name": "Run Command Source"},
+            "F0.03": {"value": 2.0, "desc": "Frequency Reference Source (RS-485)", "name": "Frequency Source"},
+            "F0.10": {"value": 40.0, "desc": "Max Operating Frequency Clamp (Hz)", "name": "Max Frequency"},
+            "F0.17": {"value": 5.0, "desc": "Acceleration Time (s)", "name": "Acceleration Time"},
+            "F0.18": {"value": 5.0, "desc": "Deceleration Time (s)", "name": "Deceleration Time"},
+            "F2.03": {"value": 1.15, "desc": "Motor Rated Current (A)", "name": "Motor Rated Current"},
+            "F9.01": {"value": 3.0, "desc": "Modbus Baud Rate (9600 bps)", "name": "Baud Rate"},
+        }
+
         if db_path is None:
             os.makedirs(str(DATA_DIR), exist_ok=True)
             db_path = os.path.join(str(DATA_DIR), "telemetry_tsdb.db")
@@ -48,7 +59,7 @@ class EmbeddedTSDB:
         self._init_sqlite()
 
     def _init_sqlite(self):
-        """Initializes SQLite tables and WAL mode for high-throughput concurrent logging."""
+        """Initializes SQLite tables, WAL mode, schema migrations, and loads parameters."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("PRAGMA journal_mode = WAL;")
             conn.execute("PRAGMA synchronous = NORMAL;")
@@ -59,17 +70,70 @@ class EmbeddedTSDB:
                     asset_id TEXT NOT NULL,
                     f_out REAL,
                     f_target REAL,
+                    f_in REAL,
                     v_dc REAL,
+                    v_bus REAL,
                     v_out REAL,
                     current REAL,
                     rpm REAL,
+                    torque REAL DEFAULT 0.0,
+                    power REAL DEFAULT 0.0,
                     fault_code INTEGER DEFAULT 0,
                     status TEXT DEFAULT 'RUNNING'
                 );
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ts ON vfd_telemetry(timestamp);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_asset ON vfd_telemetry(asset_id);")
+
+            # Check and perform non-destructive schema migrations for legacy tables
+            cursor = conn.execute("PRAGMA table_info(vfd_telemetry);")
+            existing_cols = {row[1] for row in cursor.fetchall()}
+            for col, col_type in [
+                ("f_in", "REAL"),
+                ("v_bus", "REAL"),
+                ("torque", "REAL DEFAULT 0.0"),
+                ("power", "REAL DEFAULT 0.0"),
+            ]:
+                if col not in existing_cols:
+                    try:
+                        conn.execute(f"ALTER TABLE vfd_telemetry ADD COLUMN {col} {col_type};")
+                    except Exception:
+                        pass
+
+            # Create parameter persistence table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS vfd_parameters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL NOT NULL,
+                    asset_id TEXT NOT NULL,
+                    param_key TEXT NOT NULL,
+                    param_value REAL NOT NULL,
+                    param_desc TEXT
+                );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_param ON vfd_parameters(asset_id, param_key);")
             conn.commit()
+
+            # Load any persisted parameter values from database
+            try:
+                cur = conn.execute("""
+                    SELECT param_key, param_value, param_desc, timestamp
+                    FROM vfd_parameters
+                    WHERE id IN (
+                        SELECT MAX(id) FROM vfd_parameters GROUP BY param_key
+                    )
+                """)
+                for row in cur.fetchall():
+                    k, v, desc, ts = row[0], float(row[1]), row[2], row[3]
+                    if k in self._parameters:
+                        self._parameters[k]["value"] = v
+                        if desc:
+                            self._parameters[k]["desc"] = desc
+                        self._parameters[k]["updated_at"] = ts
+                    else:
+                        self._parameters[k] = {"value": v, "desc": desc or "", "name": k, "updated_at": ts}
+            except Exception:
+                pass
 
     def insert(self, metric: Dict[str, Any]) -> None:
         """
@@ -87,10 +151,14 @@ class EmbeddedTSDB:
         asset_id = str(metric.get("asset_id", VFD_EQUIPMENT_ID))
         f_out = float(metric.get("f_out", 40.0))
         f_target = float(metric.get("f_target", 40.0))
-        v_dc = float(metric.get("v_dc", 312.0))
-        v_out = float(metric.get("v_out", 220.0))
-        current = float(metric.get("current", 1.35))
+        f_in = float(metric.get("f_in", f_target))
+        v_dc = float(metric.get("v_dc", 276.0))
+        v_bus = float(metric.get("v_bus", v_dc))
+        v_out = float(metric.get("v_out", 184.0))
+        current = float(metric.get("current", 0.02))
         rpm = float(metric.get("rpm", f_out * 29.0))
+        torque = float(metric.get("torque", metric.get("Torque", 0.0)) or 0.0)
+        power = float(metric.get("power", metric.get("Power", 0.0)) or 0.0)
         fault_code = int(metric.get("fault_code", 0) or 0)
         status = str(metric.get("status", "TRIPPED" if fault_code > 0 else "RUNNING"))
 
@@ -99,10 +167,14 @@ class EmbeddedTSDB:
             "asset_id": asset_id,
             "f_out": f_out,
             "f_target": f_target,
+            "f_in": f_in,
             "v_dc": v_dc,
+            "v_bus": v_bus,
             "v_out": v_out,
             "current": current,
             "rpm": rpm,
+            "torque": torque,
+            "power": power,
             "fault_code": fault_code,
             "status": status,
         }
@@ -115,14 +187,75 @@ class EmbeddedTSDB:
             with sqlite3.connect(self.db_path, timeout=1.0) as conn:
                 conn.execute(
                     """
-                    INSERT INTO vfd_telemetry (timestamp, asset_id, f_out, f_target, v_dc, v_out, current, rpm, fault_code, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    INSERT INTO vfd_telemetry (timestamp, asset_id, f_out, f_target, f_in, v_dc, v_bus, v_out, current, rpm, torque, power, fault_code, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                     """,
-                    (ts, asset_id, f_out, f_target, v_dc, v_out, current, rpm, fault_code, status),
+                    (ts, asset_id, f_out, f_target, f_in, v_dc, v_bus, v_out, current, rpm, torque, power, fault_code, status),
                 )
                 conn.commit()
         except Exception:
             pass  # Buffer in memory remains available even if disk locks briefly
+
+    def set_parameter(self, param_key: str, param_value: float, param_desc: str = "", asset_id: str = VFD_EQUIPMENT_ID) -> Dict[str, Any]:
+        """Sets and persists a VFD control parameter."""
+        clean_key = param_key.upper().strip().replace("_", ".")
+        now = time.time()
+        val = float(param_value)
+        with self._lock:
+            if clean_key not in self._parameters:
+                self._parameters[clean_key] = {"value": val, "desc": param_desc, "name": clean_key}
+            else:
+                self._parameters[clean_key]["value"] = val
+                if param_desc:
+                    self._parameters[clean_key]["desc"] = param_desc
+            self._parameters[clean_key]["updated_at"] = now
+
+        try:
+            with sqlite3.connect(self.db_path, timeout=1.0) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO vfd_parameters (timestamp, asset_id, param_key, param_value, param_desc)
+                    VALUES (?, ?, ?, ?, ?);
+                    """,
+                    (now, asset_id, clean_key, val, param_desc),
+                )
+                conn.commit()
+        except Exception:
+            pass
+
+        return dict(self._parameters[clean_key])
+
+    def get_parameters(self, asset_id: str = VFD_EQUIPMENT_ID) -> Dict[str, Dict[str, Any]]:
+        """Returns the dictionary of active VFD control parameters."""
+        with self._lock:
+            return {k: dict(v) for k, v in self._parameters.items()}
+
+    def get_parameter_history(self, param_key: Optional[str] = None, limit: int = 50, asset_id: str = VFD_EQUIPMENT_ID) -> List[Dict[str, Any]]:
+        """Retrieves audit trail of parameter changes from SQLite."""
+        try:
+            with sqlite3.connect(self.db_path, timeout=1.0) as conn:
+                if param_key:
+                    clean_key = param_key.upper().strip().replace("_", ".")
+                    query = """
+                        SELECT id, timestamp, asset_id, param_key, param_value, param_desc
+                        FROM vfd_parameters
+                        WHERE asset_id = ? AND param_key = ?
+                        ORDER BY id DESC LIMIT ?
+                    """
+                    params = (asset_id, clean_key, limit)
+                else:
+                    query = """
+                        SELECT id, timestamp, asset_id, param_key, param_value, param_desc
+                        FROM vfd_parameters
+                        WHERE asset_id = ?
+                        ORDER BY id DESC LIMIT ?
+                    """
+                    params = (asset_id, limit)
+                cursor = conn.execute(query, params)
+                cols = [desc[0] for desc in cursor.description]
+                return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except Exception:
+            return []
 
     def get_window(self, seconds: int = 60, asset_id: str = VFD_EQUIPMENT_ID) -> pd.DataFrame:
         """
@@ -142,7 +275,7 @@ class EmbeddedTSDB:
             try:
                 with sqlite3.connect(self.db_path) as conn:
                     query = """
-                        SELECT timestamp, asset_id, f_out, f_target, v_dc, v_out, current, rpm, fault_code, status
+                        SELECT timestamp, asset_id, f_out, f_target, f_in, v_dc, v_bus, v_out, current, rpm, torque, power, fault_code, status
                         FROM vfd_telemetry
                         WHERE asset_id = ? AND timestamp >= ?
                         ORDER BY timestamp ASC
@@ -216,16 +349,16 @@ class EmbeddedTSDB:
         Prevents redundant cascading triggers within a 15-second debounce window.
         """
         fault_code = int(metric.get("fault_code", 0) or 0)
-        v_dc = float(metric.get("v_dc", 0.0) or 0.0)
-        current = float(metric.get("current", 0.0) or 0.0)
-        v_dc_trip = float(VFD_OPERATIONAL_LIMITS.get("v_dc", {}).get("trip_high", 210.0))
-        current_trip = float(VFD_OPERATIONAL_LIMITS.get("current", {}).get("trip_high", 2.50))
-
         if fault_code == 0:
-            if v_dc >= v_dc_trip:
-                fault_code = 6  # Err06 Overfrequency / Deceleration Overvoltage trip
-            elif current >= current_trip:
-                fault_code = 2  # Err02 Forced Sudden Deceleration Overcurrent trip
+            for k in ("error", "fault", "trip", "trip_code", "error_code", "700bh", "reg_700b"):
+                if metric.get(k) is not None:
+                    try:
+                        val = int(metric.get(k))
+                        if val > 0:
+                            fault_code = val
+                            break
+                    except (ValueError, TypeError):
+                        pass
 
         last_code = getattr(self, "_last_fault_code", 0)
 
@@ -291,6 +424,12 @@ class EmbeddedTSDB:
         })
         self._enrich_rca_tags(df)
         return df
+
+    def reset_trip(self):
+        """Resets the trip debounce and fault latch so subsequent faults can trigger without clearing history."""
+        with self._lock:
+            self._last_trip_time = 0.0
+            self._last_fault_code = 0
 
     def clear(self):
         """Clears memory buffer and SQLite table for tests and resets."""

@@ -275,7 +275,7 @@ export const Header: React.FC<HeaderProps> = ({
                 ? 'R1 Reasoner'
                 : deepseekModel === 'deepseek-chat'
                 ? 'V3 Chat'
-                : 'V4.1 Flash'}
+                : 'V4 Flash'}
             </span>
           </button>
 

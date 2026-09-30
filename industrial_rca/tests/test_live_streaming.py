@@ -78,12 +78,16 @@ def test_influx_tool_graceful_fallback():
     assert len(df_offline) == 50
     assert (df_offline["f_out"] == 0.0).all()
     assert (df_offline["status"] == "OFFLINE").all()
+    assert "torque" in df_offline.columns
+    assert "power" in df_offline.columns
 
     metric_offline = tool.get_latest_metrics()
     assert metric_offline["status"] == "OFFLINE"
     assert metric_offline["telemetry_connected"] is False
     assert metric_offline["is_simulated"] is False
     assert metric_offline["f_out"] == 0.0
+    assert "torque" in metric_offline
+    assert "power" in metric_offline
 
     # 2. When simulation mode is explicitly enabled by user
     tool.set_simulation_mode(True)
@@ -93,7 +97,10 @@ def test_influx_tool_graceful_fallback():
     assert isinstance(df_sim, pd.DataFrame)
     assert len(df_sim) == 50
     assert "f_out" in df_sim.columns
+    assert "torque" in df_sim.columns
+    assert "power" in df_sim.columns
     assert 35.0 <= df_sim["f_out"].mean() <= 45.0
+    assert 1.0 <= df_sim["torque"].mean() <= 5.0
 
     metric_sim = tool.get_latest_metrics()
     assert metric_sim["status"] == "RUNNING"
@@ -337,4 +344,32 @@ def test_vfd_decel_overvoltage_maintains_pump_baseline():
     assert (df["DPS-30101"] <= 0.20).all()
     assert (df["TI-301-DE"] <= 55.0).all()
     assert (df["VI-301-R"] <= 2.5).all()
+
+
+def test_feed_live_telemetry_modbus_current_scaling(client):
+    """Verify live feed correctly scales raw Modbus integer lists [2] -> 0.02 A, not 2.0 A."""
+    from industrial_rca.api import GLOBAL_TSDB
+
+    # Physical gateway sends current as raw 0.01A Modbus integer count in a single-element list
+    payload = {
+        "f_out": [4000],
+        "rpm": [1198],
+        "v_out": [184],
+        "current": [2],  # 2 * 0.01A = 0.02 A (unloaded motor)
+        "fault_code": [0],
+        "f_in": [40],
+        "v_bus": [2764],
+        "Power": [15],  # 15 * 0.1 kW = 1.5 kW
+        "Torque": [22],  # 22 * 0.1% = 2.2%
+    }
+    resp = client.post("/api/v1/telemetry/live/feed", json=payload)
+    assert resp.status_code == 200
+    latest = GLOBAL_TSDB.get_latest("VFD_VM_01")
+    # 2 in register must be 0.02 A, NOT 2.0 A!
+    assert latest["current"] == 0.02
+    # 22 in register 1006H (0.1% resolution) must be 2.2%, NOT 22.0%!
+    assert latest["torque"] == 2.2
+    # 15 in register 1005H (0.1 kW resolution) must be 1.5 kW, NOT 15.0 kW!
+    assert latest["power"] == 1.5
+
 

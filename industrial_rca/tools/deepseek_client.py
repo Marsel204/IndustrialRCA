@@ -1,21 +1,23 @@
 """
 DeepSeek API Client for Industrial Root Cause Analysis.
-Supports deepseek-flash (DeepSeek-V4.1-Flash with MoE CoT reasoning), deepseek-chat, and deepseek-reasoner.
+Supports deepseek-flash (DeepSeek V4 Flash with MoE CoT reasoning), deepseek-chat, and deepseek-reasoner.
 Loads configuration from .env using python-dotenv.
 Provides automatic fallback to high-fidelity deterministic simulation if API key is not present.
 """
 
 import os
 import json
+import time
 import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Generator
 from dotenv import load_dotenv
 from openai import OpenAI
+from industrial_rca.config import ENV_FILE
 
-# Load .env file from project root
-env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-load_dotenv(dotenv_path=env_path)
+# Load .env file from canonical config path
+if ENV_FILE.exists():
+    load_dotenv(dotenv_path=ENV_FILE)
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +50,15 @@ class DeepSeekClient:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         default_model: Optional[str] = None,
+        register_active: bool = True,
     ):
+        if ENV_FILE.exists():
+            load_dotenv(dotenv_path=ENV_FILE, override=False)
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
         self.base_url = base_url or os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
         self.default_model = default_model or os.environ.get("DEEPSEEK_MODEL", "deepseek-flash")
         self._init_client()
-        if self not in _ACTIVE_CLIENTS:
+        if register_active and self not in _ACTIVE_CLIENTS:
             _ACTIVE_CLIENTS.append(self)
 
     def _init_client(self) -> None:
@@ -67,6 +72,8 @@ class DeepSeekClient:
                 self.client = OpenAI(
                     api_key=self.api_key,
                     base_url=self.base_url,
+                    timeout=60.0,
+                    max_retries=1,
                 )
                 logger.info(f"Initialized live DeepSeek client with endpoint {self.base_url} (model: {self.default_model})")
             except Exception as e:
@@ -192,6 +199,7 @@ class DeepSeekClient:
                 return
             except Exception as e:
                 logger.error(f"DeepSeek live streaming error: {e}. Falling back to simulated stream.")
+                yield {"content": f"*(Live DeepSeek stream failed: {e}. Falling back to deterministic FMEA knowledge base:)*\n\n", "reasoning_content": ""}
 
         # Deterministic simulation streaming
         simulated = self._generate_simulated_response(messages, target_model)
@@ -207,6 +215,7 @@ class DeepSeekClient:
                 if len(chunk_buf) >= 3 or i == len(r_words) - 1:
                     yield {"content": "", "reasoning_content": "".join(chunk_buf)}
                     chunk_buf = []
+                    time.sleep(0.015)
 
         # Stream content
         if content:
@@ -217,6 +226,7 @@ class DeepSeekClient:
                 if len(chunk_buf) >= 4 or i == len(c_words) - 1:
                     yield {"content": "".join(chunk_buf), "reasoning_content": ""}
                     chunk_buf = []
+                    time.sleep(0.015)
 
     def _generate_simulated_response(
         self, messages: List[Dict[str, str]], model: str
@@ -228,6 +238,17 @@ class DeepSeekClient:
         user_msgs = [m.get("content", "") for m in messages if m.get("role") == "user"]
         latest_query = (user_msgs[-1] if user_msgs else "").lower().strip()
         full_prompt = " ".join([m.get("content", "") for m in messages]).lower()
+
+        # ── Ping / Connection Test Handler ─────────────────────────────────
+        if "deepseek_online" in latest_query or "deepseek_online" in full_prompt or "ping" in latest_query:
+            return {
+                "success": True,
+                "is_mock": True,
+                "model": f"{model}-simulated",
+                "content": "DEEPSEEK_ONLINE",
+                "reasoning_content": "Deterministic connectivity test verified.",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            }
 
         # ── 1. VFD Overvoltage & 50Hz Trip (Err06) ─────────────────────────
         if (
