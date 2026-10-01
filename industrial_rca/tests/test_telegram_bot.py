@@ -257,6 +257,59 @@ def test_bot_conversational_copilot_query():
     async_test(_run())
 
 
+def test_bot_copilot_prompt_caching_prefix_invariance():
+    """Verifies that the Telegram Copilot system prompt has a static prefix invariant to sensor values."""
+    async def _run():
+        service = TelegramBotService(token="mock_token_123")
+        service.client.send_message = AsyncMock(return_value={"message_id": 20})
+
+        captured_prompts = []
+        mock_ds = MagicMock()
+        def mock_cc(messages, model=None):
+            for m in messages:
+                if m.get("role") == "system":
+                    captured_prompts.append(m.get("content"))
+            return {"content": "Telemetry nominal."}
+
+        mock_ds.chat_completion.side_effect = mock_cc
+
+        # State 1: Telemetry reading A
+        mock_api_a = MagicMock()
+        mock_api_a.deepseek_client = mock_ds
+        mock_tsdb_a = MagicMock()
+        mock_tsdb_a.get_latest.return_value = {"f_out": 40.0, "v_dc": 182.0, "current": 1.2, "rpm": 1200, "fault_code": 0}
+        mock_api_a.GLOBAL_TSDB = mock_tsdb_a
+        mock_api_a.LATEST_HIL_INCIDENT = {}
+        service.set_api_context(mock_api_a)
+        await service.handle_conversational_query(chat_id=111, user_query="Status?")
+
+        # State 2: Telemetry reading B with different values
+        mock_api_b = MagicMock()
+        mock_api_b.deepseek_client = mock_ds
+        mock_tsdb_b = MagicMock()
+        mock_tsdb_b.get_latest.return_value = {"f_out": 15.0, "v_dc": 210.0, "current": 2.4, "rpm": 450, "fault_code": 6}
+        mock_api_b.GLOBAL_TSDB = mock_tsdb_b
+        mock_api_b.LATEST_HIL_INCIDENT = {}
+        service.set_api_context(mock_api_b)
+        await service.handle_conversational_query(chat_id=222, user_query="Status?")
+
+        assert len(captured_prompts) == 2
+        prompt_1, prompt_2 = captured_prompts[0], captured_prompts[1]
+
+        dynamic_boundary = "=== CURRENT ASSET TELEMETRY & INCIDENT STATE (DYNAMIC) ==="
+        assert dynamic_boundary in prompt_1, "Missing dynamic boundary in Telegram prompt 1"
+        assert dynamic_boundary in prompt_2, "Missing dynamic boundary in Telegram prompt 2"
+
+        prefix_1 = prompt_1.split(dynamic_boundary)[0]
+        prefix_2 = prompt_2.split(dynamic_boundary)[0]
+
+        assert prefix_1 == prefix_2, "Cache violation: Telegram copilot static prefix differs across sensor readings"
+        assert "Err13" in prefix_1, "Missing Err13 phase loss in Telegram domain reference"
+        assert "Err06" in prefix_1, "Missing Err06 overvoltage in Telegram domain reference"
+
+    async_test(_run())
+
+
 # ── 4. FastAPI Bot Endpoints ──────────────────────────────────────────
 
 def test_fastapi_bot_status_endpoint():

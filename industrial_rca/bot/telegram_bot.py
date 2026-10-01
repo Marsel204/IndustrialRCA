@@ -601,26 +601,32 @@ class TelegramBotService:
 
         fault_info = get_vfd_fault_info(fault_code) if fault_code else {}
 
+        # ── 1. STATIC PREFIX (Invariant for DeepSeek server-side KV-cache reuse) ──
+        # ── 2. DYNAMIC SUFFIX (Appended at the end) ──
         system_prompt = (
             f"You are the Senior SCADA & Reliability Engineer AI Copilot on Telegram for {EQUIPMENT_NAME} ({EQUIPMENT_ID}).\n"
             f"Assist plant operators with concise, technically accurate, reassuring, and conversational answers.\n\n"
-            f"CURRENT ASSET TELEMETRY:\n"
-            f"• Output Frequency: {f_out:.1f} Hz\n"
-            f"• DC Bus Voltage: {v_dc:.1f} V (Nominal ~182V, High Trip Limit: 195V)\n"
-            f"• Motor Line Current: {current:.2f} A (High Trip Limit: 2.50A)\n"
-            f"• Motor Speed: {rpm:.0f} RPM\n"
-            f"• Active Fault Code: {fault_code} ({fault_info.get('name', 'None')})\n"
-            f"• Incident State: {active_incident_summary}\n\n"
             f"DOMAIN REFERENCE:\n"
-            f"• WECON VM Inverter trips: Err02 (Overcurrent accel), Err03 (Overcurrent decel), "
-            f"Err06 (Overvoltage decel from motor back-EMF), Err11 (Motor overload).\n"
-            f"• ISA-95 Asset: VFD_VM_01 powers the slurry feed train.\n\n"
+            f"• WECON VM Inverter specifications & fault mechanisms:\n"
+            f"  - Err02 (Overcurrent acceleration): Motor instantaneous current spikes past 2.50A; enforce PLC ramp-down, check motor insulation (>50 M-Ohm).\n"
+            f"  - Err03 (Overcurrent deceleration): High rotational inertia during decel; tune parameter F0.18 >= 5.0s, install dynamic braking resistor (100 Ohm 200W).\n"
+            f"  - Err06 (Overvoltage deceleration): Kinetic back-EMF charges DC bus past trip limit; clamp F0.10 to 40.00 Hz, tune F0.18 >= 5.0s, connect dynamic braking resistor across terminals P+ and PB.\n"
+            f"  - Err11 (Motor thermal overload): Continuous current exceeds rated FLA (1.15A); inspect shaft mechanical binding and clear cooling airflow obstructions.\n"
+            f"  - Err13 (Output phase loss): Output current collapse on terminals U, V, or W; re-torque screw terminals (1.8 N-m), test 3-phase winding balance (<2% deviation), Megger test (>50 M-Ohm).\n"
+            f"• ISA-95 Asset Hierarchy: VFD_VM_01 powers the slurry feed train / pump test bench.\n\n"
             f"STYLE & RESPONSE INSTRUCTIONS:\n"
             f"1. BOTTOM LINE FIRST: For general health checks (e.g. 'is the system okay?'), start with a clear emoji verdict (e.g. '✅ System is operating normally within safe parameters.').\n"
             f"2. CONCISE & CLEAN: Present key telemetry cleanly. Highlight numbers in code or bold.\n"
             f"3. NO UNNECESSARY ALARM WARNINGS: If operating normally with no active fault, DO NOT list hypothetical trip codes (Err02, Err06, etc.) unless the user specifically asks about them.\n"
             f"4. ACTIONABLE: Conclude with a brief 1-sentence operational takeaway.\n"
-            f"5. Keep responses concise (under 120 words), friendly, and professional."
+            f"5. Keep responses concise (under 120 words), friendly, and professional.\n\n"
+            f"=== CURRENT ASSET TELEMETRY & INCIDENT STATE (DYNAMIC) ===\n"
+            f"• Output Frequency: {f_out:.1f} Hz\n"
+            f"• DC Bus Voltage: {v_dc:.1f} V (Nominal ~200-214V, Trip Limit: 220V)\n"
+            f"• Motor Line Current: {current:.2f} A (Nominal FLA: 1.15A, High Trip Limit: 2.50A)\n"
+            f"• Motor Speed: {rpm:.0f} RPM\n"
+            f"• Active Fault Code: {fault_code} ({fault_info.get('name', 'None')})\n"
+            f"• Incident State: {active_incident_summary}"
         )
 
         # Build message chain with memory
@@ -629,17 +635,28 @@ class TelegramBotService:
             messages.append(turn)
         messages.append({"role": "user", "content": user_query})
 
+        t0_query = time.time()
         reply_text = ""
         try:
             if self._api_context and hasattr(self._api_context, "deepseek_client"):
                 client = self._api_context.deepseek_client
                 res = client.chat_completion(messages, model="deepseek-flash")
                 reply_text = res.get("content", "") if isinstance(res, dict) else str(res)
+                usage = res.get("usage", {}) if isinstance(res, dict) else {}
             else:
                 from industrial_rca.tools.deepseek_client import DeepSeekClient
                 ds = DeepSeekClient()
                 res = ds.chat_completion(messages, model="deepseek-flash")
                 reply_text = res.get("content", "") if isinstance(res, dict) else str(res)
+                usage = res.get("usage", {}) if isinstance(res, dict) else {}
+
+            latency_ms = (time.time() - t0_query) * 1000
+            cached_tokens = usage.get("prompt_cache_hit_tokens", 0)
+            total_prompt = usage.get("prompt_tokens", 0)
+            logger.info(
+                f"[TELEGRAM_COPILOT] Query from chat_id={cid} processed in {latency_ms:.0f}ms "
+                f"(Prompt Cache: {cached_tokens}/{total_prompt} tokens hit)."
+            )
         except Exception as e:
             logger.warning(f"Copilot query failed: {e}")
             reply_text = f"⚙️ <b>Copilot Diagnostic</b>:\nCurrent Status: V_dc={v_dc:.1f}V, F_out={f_out:.1f}Hz, Current={current:.2f}A, Fault Code={fault_code}.\n(Detailed LLM reasoning offline: {str(e)})"
