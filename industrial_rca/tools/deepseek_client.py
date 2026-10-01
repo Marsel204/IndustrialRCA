@@ -137,6 +137,20 @@ class DeepSeekClient:
                 content = message.content or ""
                 reasoning_content = getattr(message, "reasoning_content", None) or ""
 
+                # Extract prompt cache metrics if reported by provider
+                cached_prompt_tokens = 0
+                if response.usage:
+                    details = getattr(response.usage, "prompt_tokens_details", None)
+                    if details:
+                        cached_prompt_tokens = getattr(details, "cached_tokens", 0) or 0
+                    if not cached_prompt_tokens:
+                        cached_prompt_tokens = getattr(response.usage, "prompt_cache_hit_tokens", 0) or 0
+
+                prompt_tokens = response.usage.prompt_tokens if response.usage else 0
+                completion_tokens = response.usage.completion_tokens if response.usage else 0
+                total_tokens = response.usage.total_tokens if response.usage else 0
+                cache_miss_tokens = max(0, prompt_tokens - cached_prompt_tokens)
+
                 return {
                     "success": True,
                     "is_mock": False,
@@ -144,9 +158,11 @@ class DeepSeekClient:
                     "content": content,
                     "reasoning_content": reasoning_content,
                     "usage": {
-                        "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
-                        "completion_tokens": response.usage.completion_tokens if response.usage else 0,
-                        "total_tokens": response.usage.total_tokens if response.usage else 0,
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                        "prompt_cache_hit_tokens": cached_prompt_tokens,
+                        "prompt_cache_miss_tokens": cache_miss_tokens,
                     },
                 }
             except Exception as e:

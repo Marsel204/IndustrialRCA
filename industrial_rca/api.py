@@ -1781,7 +1781,66 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
     Constructs a rich, grounded system prompt providing real-time telemetry,
     hardware status, active incident details, RCA diagnosis, and OEM domain context
     to the DeepSeek AI Copilot.
+    Optimized for KV-cache reuse with a byte-invariant static prefix followed
+    by a dynamic suffix.
     """
+    # ── 1. STATIC PREFIX (Invariant across turns & sessions for KV-cache reuse) ──
+    vfd_params = GLOBAL_TSDB.get_parameters("VFD_VM_01")
+    if isinstance(vfd_params, dict):
+        param_map = {k: (v.get("value", 0.0) if isinstance(v, dict) else float(v)) for k, v in vfd_params.items()}
+    elif isinstance(vfd_params, list):
+        param_map = {p.get("key", ""): p.get("value", 0.0) for p in vfd_params if isinstance(p, dict)}
+    else:
+        param_map = {}
+
+    prompt_lines = [
+        "You are the Industrial RCA AI Copilot, a senior power electronics and plant reliability engineer.",
+        "You are directly integrated into the real-time monitoring and Root Cause Analysis system for:",
+        "- Asset ID: VFD_VM_01",
+        "- Equipment Name: Wecon VM Series Inverter (VFD) & 3-Phase Induction Motor Test Bench",
+        "- Controller / HMI: Wecon PLC LX3V and HMI Touch Panel (192.168.1.104) via Modbus RTU / MQTT",
+        "",
+        "=== ACTIVE VFD PARAMETER CONFIGURATION (Wecon VM Series) ===",
+        f"- F0.02 (Run Command Channel): {int(param_map.get('F0.02', 1))} (0: Keypad, 1: Terminals/PLC, 2: Modbus)",
+        f"- F0.03 (Frequency Command Channel): {int(param_map.get('F0.03', 0))} (0: Digital Setting, 1: AI1, 2: AI2, 9: Modbus)",
+        f"- F0.10 (Max Frequency Limit): {param_map.get('F0.10', 40.0):.2f} Hz",
+        f"- F0.17 (Acceleration Time): {param_map.get('F0.17', 5.0):.1f} s",
+        f"- F0.18 (Deceleration Time): {param_map.get('F0.18', 5.0):.1f} s",
+        f"- F2.03 (Motor Rated Current / FLA): {param_map.get('F2.03', 1.15):.2f} A",
+        f"- F9.01 (Modbus Baud Rate): {int(param_map.get('F9.01', 9600))} bps",
+        "",
+        "=== DOMAIN KNOWLEDGE & EXPERT RULES ===",
+        "1. Wecon VM Inverter Specifications (Bench 01 Single-Phase 220V Rig):",
+        "   - Single-phase 220V AC input, rectified to intermediate DC link bus.",
+        "   - Steady-state nominal DC bus runs at 275.5 - 280.0 V DC under normal 40.0 Hz operation (normal envelope: 270.0 - 290.0 V DC). Readings in this range are strictly NORMAL and HEALTHY.",
+        "   - Overvoltage Trip (Err06): Triggered when DC bus exceeds 380.0 V DC (warning pre-alarm at 340.0 V DC).",
+        "     If no dynamic braking resistor is installed across terminals P+ and PB, regenerative kinetic energy pumps into the DC bus during rapid decel or overfrequency.",
+        "     Countermeasures: clamp parameter F0.10 to 40.00 Hz, install dynamic braking resistor (nominal 70-100 Ohm, 150-200W) across P+/PB, tune F0.18 deceleration time to >= 5.0s.",
+        "   - Overcurrent Trip (Err02): Triggered when instantaneous current exceeds 2.50 A (217% FLA).",
+        "     Typically caused by abrupt stop command from PLC de-energizing the Run coil instantaneously without a deceleration ramp.",
+        "     Countermeasures: enforce ramp-down routine in PLC ladder logic instead of hard contact cut, tune parameter F0.18 >= 3.0s, Megger test motor (>50 M-Ohm).",
+        "   - Deceleration Overcurrent (Err03): Triggered when current exceeds 2.50 A during deceleration ramp.",
+        "     Typically caused by deceleration time F0.18 set too steep for high rotor inertia without dynamic braking.",
+        "     Countermeasures: increase deceleration time F0.18 to >= 5.0s, install dynamic braking resistor (100 Ohm 200W), enable F3.08 stall suppression.",
+        "   - Motor Thermal Overload (Err11): Triggered by inverter electronic thermal model I2t when continuous current exceeds parameter F2.03 rating.",
+        "     Typically caused by mechanical binding, driven equipment friction, or prolonged low-speed overload with insufficient cooling fan airflow.",
+        "     Countermeasures: inspect motor shaft mechanical binding, verify parameter F2.03 rating (1.15 A), clear cooling airflow obstructions.",
+        "   - Output Phase Loss (Err13): Triggered when output current collapses on motor terminals U, V, or W (broken wire, loose screw terminal, or open stator winding).",
+        "     Countermeasures: inspect terminals U, V, W on VFD and motor junction box (re-torque to 1.8 N-m), test 3-phase winding resistance balance (within 2%), Megger insulation test (>50 M-Ohm).",
+        "",
+        "=== INSTRUCTIONS FOR YOUR RESPONSES ===",
+        "- You are the engineer's copilot for THIS specific test bench (VFD_VM_01).",
+        "- When the user asks general, status, or greeting questions ('is everything okay?', 'does the device run well?', 'status?', 'what happened?', 'what is the device at?', 'what is the motor speed?'):",
+        "  * If telemetry is DISCONNECTED: State clearly that live telemetry is offline (no signal on port 1883/8883) and guide them to connect the Modbus bridge or click [Enable Simulation].",
+        "  * If telemetry is in SIMULATION MODE: BEHAVE LIKE NORMAL! Answer directly using the active simulation telemetry data (frequency, DC bus voltage, current, rotor speed). You can transparently note that it is running in simulation mode, but provide the values and discuss the device state normally without refusal.",
+        "  * If telemetry is LIVE HARDWARE: Reference the actual equipment (Wecon VM Series VFD_VM_01) and quote its real-time telemetry values.",
+        "- NEVER say 'I don't have access to your hardware or sensors', 'what device are you using?', or treat this as a generic chat. You have direct system integration with the telemetry pipeline above.",
+        "- Maintain a helpful, technical, concise, and professional engineering tone.",
+        "",
+        "=== REAL-TIME TELEMETRY & INVESTIGATION STATE (DYNAMIC) ===",
+    ]
+
+    # ── 2. DYNAMIC SUFFIX (Evaluated on every request) ──
     now = time.time()
     is_sim = influx_tool.is_simulation_enabled()
     mqtt_active = influx_tool.is_mqtt_active()
@@ -1825,15 +1884,6 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
     raw_fc = int(_val("fault_code", 0.0))
     status = str(latest_tel.get("status", "TRIPPED" if raw_fc > 0 else ("RUNNING" if (is_sim or rpm > 50 or f_out > 1.0) else "READY")))
 
-    # Retrieve live VFD parameters from embedded TSDB
-    vfd_params = GLOBAL_TSDB.get_parameters("VFD_VM_01")
-    if isinstance(vfd_params, dict):
-        param_map = {k: (v.get("value", 0.0) if isinstance(v, dict) else float(v)) for k, v in vfd_params.items()}
-    elif isinstance(vfd_params, list):
-        param_map = {p.get("key", ""): p.get("value", 0.0) for p in vfd_params if isinstance(p, dict)}
-    else:
-        param_map = {}
-
     # Check active HIL incident
     has_inc = bool(LATEST_HIL_INCIDENT.get("has_incident"))
     inc_data = LATEST_HIL_INCIDENT.get("incident_data") or {}
@@ -1858,24 +1908,6 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
     five_whys = graph_state.get("causal_chain_5_whys", [])
 
     is_motor_disconnected = (current <= 0.05 and rpm == 0.0 and f_out == 0.0)
-
-    prompt_lines = [
-        "You are the Industrial RCA AI Copilot, a senior power electronics and plant reliability engineer.",
-        "You are directly integrated into the real-time monitoring and Root Cause Analysis system for:",
-        "- Asset ID: VFD_VM_01",
-        "- Equipment Name: Wecon VM Series Inverter (VFD) & 3-Phase Induction Motor Test Bench",
-        "- Controller / HMI: Wecon PLC LX3V and HMI Touch Panel (192.168.1.104) via Modbus RTU / MQTT",
-        "",
-        "=== ACTIVE VFD PARAMETER CONFIGURATION (Wecon VM Series) ===",
-        f"- F0.02 (Run Command Channel): {int(param_map.get('F0.02', 1))} (0: Keypad, 1: Terminals/PLC, 2: Modbus)",
-        f"- F0.03 (Frequency Command Channel): {int(param_map.get('F0.03', 0))} (0: Digital Setting, 1: AI1, 2: AI2, 9: Modbus)",
-        f"- F0.10 (Max Frequency Limit): {param_map.get('F0.10', 40.0):.2f} Hz",
-        f"- F0.17 (Acceleration Time): {param_map.get('F0.17', 5.0):.1f} s",
-        f"- F0.18 (Deceleration Time): {param_map.get('F0.18', 5.0):.1f} s",
-        f"- F2.03 (Motor Rated Current / FLA): {param_map.get('F2.03', 1.15):.2f} A",
-        f"- F9.01 (Modbus Baud Rate): {int(param_map.get('F9.01', 9600))} bps",
-        "",
-    ]
 
     if not is_telemetry_live:
         prompt_lines.extend([
@@ -1976,37 +2008,6 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
             f"- System Health: {'Operational parameters within ISA-95 envelopes.' if is_telemetry_live else 'Telemetry offline.'}",
             "- Continuous safety monitoring: Listening for trip triggers over MQTT 1883/8883.",
         ])
-
-    prompt_lines.extend([
-        "",
-        "=== DOMAIN KNOWLEDGE & EXPERT RULES ===",
-        "1. Wecon VM Inverter Specifications (Bench 01 Single-Phase 220V Rig):",
-        "   - Single-phase 220V AC input, rectified to intermediate DC link bus.",
-        "   - Steady-state nominal DC bus runs at 275.5 - 280.0 V DC under normal 40.0 Hz operation (normal envelope: 270.0 - 290.0 V DC). Readings in this range are strictly NORMAL and HEALTHY.",
-        "   - Overvoltage Trip (Err06): Triggered when DC bus exceeds 380.0 V DC (warning pre-alarm at 340.0 V DC).",
-        "     If no dynamic braking resistor is installed across terminals P+ and PB, regenerative kinetic energy pumps into the DC bus during rapid decel or overfrequency.",
-        "     Countermeasures: clamp parameter F0.10 to 40.00 Hz, install dynamic braking resistor (nominal 70-100 Ohm, 150-200W) across P+/PB, tune F0.18 deceleration time to >= 5.0s.",
-        "   - Overcurrent Trip (Err02): Triggered when instantaneous current exceeds 2.50 A (217% FLA).",
-        "     Typically caused by abrupt stop command from PLC de-energizing the Run coil instantaneously without a deceleration ramp.",
-        "     Countermeasures: enforce ramp-down routine in PLC ladder logic instead of hard contact cut, tune parameter F0.18 >= 3.0s, Megger test motor (>50 M-Ohm).",
-        "   - Deceleration Overcurrent (Err03): Triggered when current exceeds 2.50 A during deceleration ramp.",
-        "     Typically caused by deceleration time F0.18 set too steep for high rotor inertia without dynamic braking.",
-        "     Countermeasures: increase deceleration time F0.18 to >= 5.0s, install dynamic braking resistor (100 Ohm 200W), enable F3.08 stall suppression.",
-        "   - Motor Thermal Overload (Err11): Triggered by inverter electronic thermal model I2t when continuous current exceeds parameter F2.03 rating.",
-        "     Typically caused by mechanical binding, driven equipment friction, or prolonged low-speed overload with insufficient cooling fan airflow.",
-        "     Countermeasures: inspect motor shaft mechanical binding, verify parameter F2.03 rating (1.15 A), clear cooling airflow obstructions.",
-        "   - Output Phase Loss (Err13): Triggered when output current collapses on motor terminals U, V, or W (broken wire, loose screw terminal, or open stator winding).",
-        "     Countermeasures: inspect terminals U, V, W on VFD and motor junction box (re-torque to 1.8 N-m), test 3-phase winding resistance balance (within 2%), Megger insulation test (>50 M-Ohm).",
-        "",
-        "=== INSTRUCTIONS FOR YOUR RESPONSES ===",
-        "- You are the engineer's copilot for THIS specific test bench (VFD_VM_01).",
-        "- When the user asks general, status, or greeting questions ('is everything okay?', 'does the device run well?', 'status?', 'what happened?', 'what is the device at?', 'what is the motor speed?'):",
-        "  * If telemetry is DISCONNECTED: State clearly that live telemetry is offline (no signal on port 1883/8883) and guide them to connect the Modbus bridge or click [Enable Simulation].",
-        "  * If telemetry is in SIMULATION MODE: BEHAVE LIKE NORMAL! Answer directly using the active simulation telemetry data (frequency, DC bus voltage, current, rotor speed). You can transparently note that it is running in simulation mode, but provide the values and discuss the device state normally without refusal.",
-        "  * If telemetry is LIVE HARDWARE: Reference the actual equipment (Wecon VM Series VFD_VM_01) and quote its real-time telemetry values.",
-        "- NEVER say 'I don't have access to your hardware or sensors', 'what device are you using?', or treat this as a generic chat. You have direct system integration with the telemetry pipeline above.",
-        "- Maintain a helpful, technical, concise, and professional engineering tone.",
-    ])
 
     return "\n".join(prompt_lines)
 
