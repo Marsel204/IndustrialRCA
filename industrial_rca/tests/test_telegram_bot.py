@@ -450,3 +450,90 @@ def test_bot_handle_clear():
     async_test(_run())
 
 
+def test_telegram_copilot_dynamic_envelope_physical_vs_sim():
+    """Verifies that Telegram Copilot adapts DC bus nominal & trip limit dynamically (380V physical vs 220V sim)."""
+    async def _run():
+        service = TelegramBotService(token="mock_token_123")
+        service.client.send_message = AsyncMock(return_value={"message_id": 101})
+
+        # 1. Test Physical Rig (v_dc = 290.0 V)
+        mock_api = MagicMock()
+        mock_ds = MagicMock()
+        mock_ds.chat_completion.return_value = {"content": "System running normally at 290V."}
+        mock_tsdb = MagicMock()
+        mock_tsdb.get_latest.return_value = {
+            "f_out": 40.0,
+            "v_dc": 290.0,
+            "current": 1.15,
+            "rpm": 1200.0,
+            "fault_code": 0,
+        }
+        mock_api.deepseek_client = mock_ds
+        mock_api.GLOBAL_TSDB = mock_tsdb
+        mock_api.LATEST_HIL_INCIDENT = {}
+        service.set_api_context(mock_api)
+
+        await service.handle_conversational_query(chat_id=12345, user_query="is the machine running okay?")
+        call_messages = mock_ds.chat_completion.call_args[0][0]
+        sys_prompt = call_messages[0]["content"]
+        assert "DC Bus Voltage: 290.0 V (Nominal 270.0-290.0V, Trip Limit: 380V)" in sys_prompt
+
+        # 2. Test Simulation Rig (v_dc = 182.0 V)
+        mock_tsdb.get_latest.return_value["v_dc"] = 182.0
+        await service.handle_conversational_query(chat_id=12345, user_query="is the machine running okay?")
+        call_messages_sim = mock_ds.chat_completion.call_args[0][0]
+        sys_prompt_sim = call_messages_sim[0]["content"]
+        assert "DC Bus Voltage: 182.0 V (Nominal 200.0-214.0V, Trip Limit: 220V)" in sys_prompt_sim
+
+    async_test(_run())
+
+
+def test_chart_generator_physical_rig_dynamic_scaling():
+    """Verifies that waveform generation scales dynamically to 380V trip threshold for physical rig (v_dc > 240V)."""
+    import pandas as pd
+    from industrial_rca.bot.chart_generator import generate_trip_waveform
+
+    # Physical rig data (290V DC bus)
+    df_phys = pd.DataFrame({
+        "timestamp": range(10),
+        "f_out": [40.0] * 10,
+        "v_dc": [290.0] * 10,
+        "current": [1.15] * 10,
+        "rpm": [1200.0] * 10,
+    })
+    img_bytes = generate_trip_waveform(df_phys, fault_code=0)
+    assert len(img_bytes) > 1000
+    assert img_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+
+    # Simulation data (182V DC bus)
+    df_sim = pd.DataFrame({
+        "timestamp": range(10),
+        "f_out": [40.0] * 10,
+        "v_dc": [182.0] * 10,
+        "current": [1.15] * 10,
+        "rpm": [1200.0] * 10,
+    })
+    img_bytes_sim = generate_trip_waveform(df_sim, fault_code=0)
+    assert len(img_bytes_sim) > 1000
+
+
+def test_get_dc_bus_chart_envelope():
+    """Verifies that DC bus chart envelope scales to 380V for physical rig (>240V) and 220V for sim."""
+    from industrial_rca.bot.chart_generator import get_dc_bus_chart_envelope
+
+    # Physical rig: max_v = 290.0V
+    v_trip, v_max_disp, ticks, labels = get_dc_bus_chart_envelope(290.0)
+    assert v_trip == 380.0
+    assert v_max_disp >= 380.0
+    assert 380 in ticks
+    assert "380 V" in labels
+
+    # Simulation rig: max_v = 182.0V
+    v_trip_sim, v_max_disp_sim, ticks_sim, labels_sim = get_dc_bus_chart_envelope(182.0)
+    assert v_trip_sim == 220.0
+    assert 220 in ticks_sim
+    assert "220 V" in labels_sim
+
+
+
+

@@ -601,6 +601,11 @@ class TelegramBotService:
 
         fault_info = get_vfd_fault_info(fault_code) if fault_code else {}
 
+        # Domain envelope check for physical 220V rig vs simulation
+        is_physical_rig = (v_dc > 240.0)
+        v_trip = 380.0 if is_physical_rig else 220.0
+        v_nom = "270.0-290.0V" if is_physical_rig else "200.0-214.0V"
+
         # ── 1. STATIC PREFIX (Invariant for DeepSeek server-side KV-cache reuse) ──
         # ── 2. DYNAMIC SUFFIX (Appended at the end) ──
         system_prompt = (
@@ -622,7 +627,7 @@ class TelegramBotService:
             f"5. Keep responses concise (under 120 words), friendly, and professional.\n\n"
             f"=== CURRENT ASSET TELEMETRY & INCIDENT STATE (DYNAMIC) ===\n"
             f"• Output Frequency: {f_out:.1f} Hz\n"
-            f"• DC Bus Voltage: {v_dc:.1f} V (Nominal ~200-214V, Trip Limit: 220V)\n"
+            f"• DC Bus Voltage: {v_dc:.1f} V (Nominal {v_nom}, Trip Limit: {v_trip:.0f}V)\n"
             f"• Motor Line Current: {current:.2f} A (Nominal FLA: 1.15A, High Trip Limit: 2.50A)\n"
             f"• Motor Speed: {rpm:.0f} RPM\n"
             f"• Active Fault Code: {fault_code} ({fault_info.get('name', 'None')})\n"

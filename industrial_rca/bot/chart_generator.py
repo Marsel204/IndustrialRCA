@@ -6,7 +6,7 @@ matching the React ECharts web application UI.
 
 import io
 import time
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Tuple
 import numpy as np
 import pandas as pd
 
@@ -71,6 +71,24 @@ def _extract_dataframe(telemetry_data: Union[pd.DataFrame, Dict[str, Any], List[
     return df
 
 
+def get_dc_bus_chart_envelope(max_v: float) -> Tuple[float, float, List[int], List[str]]:
+    """
+    Returns (v_trip, v_max_disp, y_ticks, y_labels) based on physical vs simulation voltage.
+    - Physical 220V AC input rig: DC bus nominal is ~270-290V DC, trip threshold is 380V DC.
+    - Simulation datasets: DC bus baseline is 182-206V DC, trip threshold is 220V DC.
+    """
+    is_physical = (max_v > 240.0)
+    v_trip = 380.0 if is_physical else 220.0
+    v_max_disp = max((420.0 if is_physical else 230.0), max_v * 1.08)
+    if is_physical:
+        ticks = [0, 100, 200, 300, 380]
+        labels = ["0 V", "100 V", "200 V", "300 V", "380 V"]
+    else:
+        ticks = [0, 50, 100, 150, 200, 220]
+        labels = ["0 V", "50 V", "100 V", "150 V", "200 V", "220 V"]
+    return v_trip, v_max_disp, ticks, labels
+
+
 def generate_trip_waveform(
     telemetry_data: Union[pd.DataFrame, Dict[str, Any], Any],
     fault_code: Optional[int] = None,
@@ -81,7 +99,7 @@ def generate_trip_waveform(
     Renders a 2x2 modern industrial dashboard image matching the React web UI.
     Includes:
     - [0, 0] f_out · VFD Inverter Output Frequency (Hz) with 40.00 Hz trip line
-    - [0, 1] v_dc · DC Bus Voltage (V DC) with 195.0 V trip line
+    - [0, 1] v_dc · DC Bus Voltage (V DC) with dynamic trip line (380V physical / 220V sim)
     - [1, 0] I_out · Motor Phase Current (Amperes) with 2.50 A trip line
     - [1, 1] RPM · Induction Motor Speed (RPM) with 1450 RPM trip line
     """
@@ -166,13 +184,15 @@ def generate_trip_waveform(
     y_v = df["v_dc"].values
     ax_v.plot(t, y_v, color=COLOR_VOLT, linewidth=2.4, label="v_dc")
     ax_v.fill_between(t, 0, y_v, color=COLOR_VOLT, alpha=0.12)
-    # Threshold 195.0 V
-    ax_v.axhline(195.0, color=COLOR_RED, linestyle="--", linewidth=1.6)
-    ax_v.text(x_max, 197.5, "195.0 V", color=COLOR_RED, fontweight="bold", fontsize=9, ha="right", va="bottom", bbox=label_box)
-    v_max_disp = max(230.0, float(np.max(y_v)) * 1.08)
+    # Dynamic DC bus trip threshold & scaling (380V physical / 220V sim)
+    max_v = float(np.max(y_v)) if len(y_v) > 0 else 0.0
+    v_trip, v_max_disp, v_ticks, v_labels = get_dc_bus_chart_envelope(max_v)
+    ax_v.axhline(v_trip, color=COLOR_RED, linestyle="--", linewidth=1.6)
+    offset_y = 6.0 if max_v > 240.0 else 2.5
+    ax_v.text(x_max, v_trip + offset_y, f"{v_trip:.1f} V", color=COLOR_RED, fontweight="bold", fontsize=9, ha="right", va="bottom", bbox=label_box)
     ax_v.set_ylim(0, v_max_disp)
-    ax_v.set_yticks([0, 50, 100, 150, 200, 225])
-    ax_v.set_yticklabels(["0 V", "50 V", "100 V", "150 V", "200 V", "225 V"])
+    ax_v.set_yticks(v_ticks)
+    ax_v.set_yticklabels(v_labels)
 
     # 3. Motor Current Card
     ax_i = fig.add_subplot(gs[1, 0])
