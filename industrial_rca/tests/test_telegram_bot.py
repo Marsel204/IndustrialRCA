@@ -568,6 +568,7 @@ def test_bot_handle_status_six_channels():
         assert "95.0 V AC" in text
         assert "0.00 A" in text
         assert "597 RPM" in text
+        assert "(Sync: 600 RPM)" in text
         assert "1.9%" in text
         assert "0.00 kW" in text
 
@@ -610,6 +611,7 @@ def test_bot_copilot_prompt_six_channels():
         assert "AC Output Voltage: 95.0 V AC" in sys_prompt
         assert "Motor Line Current: 0.00 A" in sys_prompt
         assert "Motor Speed: 597 RPM" in sys_prompt
+        assert "Sync: 600 RPM" in sys_prompt
         assert "1.9%" in sys_prompt
         assert "0.00 kW" in sys_prompt
 

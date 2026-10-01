@@ -506,7 +506,7 @@ class DeepSeekClient:
                 "- **2. DC Bus Voltage (`v_dc`):** 285.0 V (Nominal: 270.0 – 290.0 V, Trip limit: 380.0 V)\n"
                 "- **3. AC Output Voltage (`v_out`):** 184.0 V AC (Rated: 220.0 V AC)\n"
                 "- **4. Motor Current (`current`):** 1.15 A (Nominal FLA: 1.15 A, Trip limit: 2.50 A)\n"
-                "- **5. Rotor Speed (`rpm`):** 1199 RPM (Sync: 1,450 RPM)\n"
+                "- **5. Rotor Speed (`rpm`):** 1198 RPM (Sync: 1,200 RPM)\n"
                 "- **6. Torque & Power (`torque`/`power`):** 5.0% load · 0.05 kW (Rated: 100% / 0.75 kW)\n"
                 "- **Trip Status:** None (Fault code: 0)\n\n"
                 "The system is currently operating nominal edge monitoring over MQTT 1883 / Modbus RS-485. All 6 SCADA parameters are healthy."

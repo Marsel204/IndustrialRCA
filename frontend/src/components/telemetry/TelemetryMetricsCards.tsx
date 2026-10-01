@@ -177,7 +177,7 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
             </div>
             <div className="text-[10px] font-mono text-slate-500 mt-1 flex justify-between">
               <span>rpm</span>
-              <span>Sync: 1,450 RPM</span>
+              <span>Sync: {(frequencyHz > 0 ? Math.round(frequencyHz * 30) : 1500).toLocaleString()} RPM</span>
             </div>
           </div>
 

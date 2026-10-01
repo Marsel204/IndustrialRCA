@@ -743,6 +743,10 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
   // 11. VFD Motor RPM Chart
   const vfdRpmOption = useMemo(() => {
     const data = series['rpm'] || [];
+    const freqData = series['f_out'] || [];
+    const lastFreq = freqData.length > 0 ? freqData[freqData.length - 1] : 40.0;
+    const syncRpm = lastFreq > 0 ? Math.round(lastFreq * 30) : 1200;
+    const maxRpm = Math.max(1800, syncRpm + 200);
     return {
       ...baseChartTheme,
       grid: { top: 12, right: 15, bottom: 22, left: 48 },
@@ -755,7 +759,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
       yAxis: {
         type: 'value',
         min: 0,
-        max: 1800,
+        max: maxRpm,
         axisLabel: { formatter: '{value}', fontSize: 10, color: '#334155' },
         splitLine: { lineStyle: { color: '#F1F5F9' } },
       },
@@ -780,10 +784,10 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
             symbol: 'none',
             data: [
               {
-                yAxis: 1450.0,
+                yAxis: syncRpm,
                 name: '4-Pole Sync Speed',
                 lineStyle: { color: '#D97706', type: 'dashed', width: 1.5 },
-                label: { formatter: 'Sync 1450', position: 'insideEndTop', color: '#D97706', fontSize: 10, fontWeight: 'bold' },
+                label: { formatter: `Sync ${syncRpm}`, position: 'insideEndTop', color: '#D97706', fontSize: 10, fontWeight: 'bold' },
               },
             ],
           },
@@ -1136,7 +1140,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
                 </span>
               </div>
               <div className="text-[10px] font-mono text-slate-400">
-                Sync: 1,450 RPM
+                Sync: {(currentFOut > 0 ? Math.round(currentFOut * 30) : 1500).toLocaleString()} RPM
               </div>
             </div>
             <div className="h-[190px] w-full">
