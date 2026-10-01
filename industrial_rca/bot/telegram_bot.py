@@ -346,9 +346,13 @@ class TelegramBotService:
     async def handle_status(self, chat_id: Union[int, str], message_id: Optional[int] = None):
         """Handles /status command: returns live telemetry metrics."""
         f_out = 40.0
+        f_target = 40.0
         v_dc = 182.0
+        v_out = 184.0
         current = 1.20
         rpm = 1200.0
+        torque = 5.0
+        power = 0.05
         fault_code = 0
         status_badge = "🟢 NORMAL / RUNNING"
 
@@ -359,9 +363,13 @@ class TelegramBotService:
                 latest = tsdb.get_latest(EQUIPMENT_ID)
                 if isinstance(latest, dict):
                     f_out = _to_float(latest.get("f_out"), f_out)
+                    f_target = _to_float(latest.get("f_target"), f_out)
                     v_dc = _to_float(latest.get("v_dc"), v_dc)
+                    v_out = _to_float(latest.get("v_out"), v_out)
                     current = _to_float(latest.get("current"), current)
                     rpm = _to_float(latest.get("rpm"), rpm)
+                    torque = _to_float(latest.get("torque"), torque)
+                    power = _to_float(latest.get("power"), power)
                     fault_code = _to_int(latest.get("fault_code"), 0)
 
             # Check latest incident
@@ -378,12 +386,14 @@ class TelegramBotService:
         fault_name = fault_info.get("name", "None")
 
         text = (
-            f"📊 <b>TELEMETRY STATUS: {EQUIPMENT_ID}</b>\n\n"
+            f"📊 <b>TELEMETRY STATUS: {EQUIPMENT_ID} (6 Channels)</b>\n\n"
             f"• <b>Operational State:</b> {status_badge}\n"
-            f"• <b>Output Frequency:</b> <code>{f_out:.1f} Hz</code>\n"
-            f"• <b>DC Bus Voltage:</b> <code>{v_dc:.1f} V</code>\n"
-            f"• <b>Motor Current:</b> <code>{current:.2f} A</code>\n"
-            f"• <b>Motor Speed:</b> <code>{rpm:.0f} RPM</code>\n"
+            f"• <b>1. Frequency:</b> <code>{f_out:.2f} Hz</code> (Set: <code>{f_target:.1f} Hz</code>)\n"
+            f"• <b>2. DC Bus Voltage:</b> <code>{v_dc:.1f} V DC</code>\n"
+            f"• <b>3. Output Voltage:</b> <code>{v_out:.1f} V AC</code> (Rated: 220V)\n"
+            f"• <b>4. Phase Current:</b> <code>{current:.2f} A</code> (FLA: 1.15A, Trip: 2.50A)\n"
+            f"• <b>5. Motor Speed:</b> <code>{rpm:.0f} RPM</code> (Sync: 1,450 RPM)\n"
+            f"• <b>6. Torque & Power:</b> <code>{torque:.1f}%</code> · <code>{power:.2f} kW</code>\n"
             f"• <b>Active Fault Code:</b> <code>{fault_code} ({fault_name})</code>\n"
             f"• <b>Last Updated:</b> {time.strftime('%H:%M:%S UTC')}"
         )
@@ -543,8 +553,9 @@ class TelegramBotService:
 
             status_desc = f"Fault Err0{fault_code}" if fault_code else "Nominal Operating State"
             caption = (
-                f"📈 <b>Telemetry Dashboard Snapshot: {asset_id}</b>\n"
+                f"📈 <b>Telemetry Dashboard Snapshot (6 Channels): {asset_id}</b>\n"
                 f"• <b>Status:</b> {status_desc}\n"
+                f"• <b>Channels:</b> Frequency, DC Bus, AC Voltage, Current, Speed, Torque & Power\n"
                 f"• <b>Generated:</b> {time.strftime('%H:%M:%S UTC')} • Modern SCADA view"
             )
             keyboard = TelegramClient.build_inline_keyboard([
@@ -566,7 +577,7 @@ class TelegramBotService:
     async def handle_conversational_query(self, chat_id: Union[int, str], user_query: str):
         """
         Handles freeform user queries using DeepSeek AI Copilot,
-        grounded in live telemetry, ISA-95 asset topology, and WECON manuals.
+        grounded in live telemetry (6 channels), ISA-95 asset topology, and WECON manuals.
         """
         cid = str(chat_id)
         if cid not in self.chat_memory:
@@ -575,8 +586,16 @@ class TelegramBotService:
         # Check if user explicitly asks for chart/plot
         wants_chart = any(term in user_query.lower() for term in ["chart", "plot", "graph", "trend", "waveform", "waveforms"])
 
-        # Construct domain context
-        f_out, v_dc, current, rpm, fault_code = 40.0, 182.0, 1.2, 1200.0, 0
+        # Construct domain context across all 6 telemetry channels
+        f_out = 40.0
+        f_target = 40.0
+        v_dc = 182.0
+        v_out = 184.0
+        current = 1.20
+        rpm = 1200.0
+        torque = 5.0
+        power = 0.05
+        fault_code = 0
         active_incident_summary = "None (System is operating normally)."
 
         if self._api_context:
@@ -585,9 +604,13 @@ class TelegramBotService:
                 latest = tsdb.get_latest(EQUIPMENT_ID)
                 if isinstance(latest, dict):
                     f_out = _to_float(latest.get("f_out"), f_out)
+                    f_target = _to_float(latest.get("f_target"), f_out)
                     v_dc = _to_float(latest.get("v_dc"), v_dc)
+                    v_out = _to_float(latest.get("v_out"), v_out)
                     current = _to_float(latest.get("current"), current)
                     rpm = _to_float(latest.get("rpm"), rpm)
+                    torque = _to_float(latest.get("torque"), torque)
+                    power = _to_float(latest.get("power"), power)
                     fault_code = _to_int(latest.get("fault_code"), 0)
 
             latest_hil = getattr(self._api_context, "LATEST_HIL_INCIDENT", {})
@@ -612,6 +635,13 @@ class TelegramBotService:
             f"You are the Senior SCADA & Reliability Engineer AI Copilot on Telegram for {EQUIPMENT_NAME} ({EQUIPMENT_ID}).\n"
             f"Assist plant operators with concise, technically accurate, reassuring, and conversational answers.\n\n"
             f"DOMAIN REFERENCE:\n"
+            f"• Continuous Monitored SCADA Telemetry (6 Channels):\n"
+            f"  1. Inverter Output Frequency (f_out, setpoint f_target; operational ceiling: 40.00 Hz)\n"
+            f"  2. DC Bus Link Voltage (v_dc; nominal ~270-290V on 220V grid, trip threshold 380V)\n"
+            f"  3. Inverter AC Output Voltage (v_out; nominal ~184V at 40Hz, rated 220V)\n"
+            f"  4. Stator Phase Current (I_out; rated FLA 1.15A, high trip limit 2.50A)\n"
+            f"  5. Rotor Shaft Speed (RPM; 4-pole synchronous speed 1,450 RPM)\n"
+            f"  6. Mechanical Torque (torque % of rated) & Active Power (power kW; rated 100% / 0.75kW)\n"
             f"• WECON VM Inverter specifications & fault mechanisms:\n"
             f"  - Err02 (Overcurrent acceleration): Motor instantaneous current spikes past 2.50A; enforce PLC ramp-down, check motor insulation (>50 M-Ohm).\n"
             f"  - Err03 (Overcurrent deceleration): High rotational inertia during decel; tune parameter F0.18 >= 5.0s, install dynamic braking resistor (100 Ohm 200W).\n"
@@ -626,10 +656,12 @@ class TelegramBotService:
             f"4. ACTIONABLE: Conclude with a brief 1-sentence operational takeaway.\n"
             f"5. Keep responses concise (under 120 words), friendly, and professional.\n\n"
             f"=== CURRENT ASSET TELEMETRY & INCIDENT STATE (DYNAMIC) ===\n"
-            f"• Output Frequency: {f_out:.1f} Hz\n"
-            f"• DC Bus Voltage: {v_dc:.1f} V (Nominal {v_nom}, Trip Limit: {v_trip:.0f}V)\n"
-            f"• Motor Line Current: {current:.2f} A (Nominal FLA: 1.15A, High Trip Limit: 2.50A)\n"
-            f"• Motor Speed: {rpm:.0f} RPM\n"
+            f"• 1. Output Frequency: {f_out:.2f} Hz (Setpoint: {f_target:.1f} Hz)\n"
+            f"• 2. DC Bus Voltage: {v_dc:.1f} V (Nominal {v_nom}, Trip Limit: {v_trip:.0f}V)\n"
+            f"• 3. AC Output Voltage: {v_out:.1f} V AC (Nominal 184V @ 40Hz, Rated 220V)\n"
+            f"• 4. Motor Line Current: {current:.2f} A (Nominal FLA: 1.15A, High Trip Limit: 2.50A)\n"
+            f"• 5. Motor Speed: {rpm:.0f} RPM (Sync: 1,450 RPM)\n"
+            f"• 6. Torque & Active Power: {torque:.1f}% load · {power:.2f} kW (Rated: 100% / 0.75kW)\n"
             f"• Active Fault Code: {fault_code} ({fault_info.get('name', 'None')})\n"
             f"• Incident State: {active_incident_summary}"
         )
@@ -664,7 +696,7 @@ class TelegramBotService:
             )
         except Exception as e:
             logger.warning(f"Copilot query failed: {e}")
-            reply_text = f"⚙️ <b>Copilot Diagnostic</b>:\nCurrent Status: V_dc={v_dc:.1f}V, F_out={f_out:.1f}Hz, Current={current:.2f}A, Fault Code={fault_code}.\n(Detailed LLM reasoning offline: {str(e)})"
+            reply_text = f"⚙️ <b>Copilot Diagnostic (6 Channels)</b>:\nCurrent Status: V_dc={v_dc:.1f}V, V_out={v_out:.1f}V, F_out={f_out:.2f}Hz, Current={current:.2f}A, Speed={rpm:.0f}RPM, Torque={torque:.1f}%, Power={power:.2f}kW, Fault Code={fault_code}.\n(Detailed LLM reasoning offline: {str(e)})"
 
         # Update sliding memory
         self.chat_memory[cid].append({"role": "user", "content": user_query})

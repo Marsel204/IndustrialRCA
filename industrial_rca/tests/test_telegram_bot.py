@@ -535,5 +535,111 @@ def test_get_dc_bus_chart_envelope():
     assert "220 V" in labels_sim
 
 
+def test_bot_handle_status_six_channels():
+    """Verifies that handle_status displays all 6 SCADA telemetry channels matching the web dashboard."""
+    async def _run():
+        service = TelegramBotService(token="mock_token_123")
+        service.client.send_message = AsyncMock(return_value={"message_id": 102})
+
+        mock_api = MagicMock()
+        mock_tsdb = MagicMock()
+        mock_tsdb.get_latest.return_value = {
+            "f_out": 20.0,
+            "f_target": 20.0,
+            "v_dc": 286.1,
+            "v_out": 95.0,
+            "current": 0.0,
+            "rpm": 597.0,
+            "torque": 1.9,
+            "power": 0.0,
+            "fault_code": 0,
+        }
+        mock_api.GLOBAL_TSDB = mock_tsdb
+        mock_api.LATEST_HIL_INCIDENT = {}
+        service.set_api_context(mock_api)
+
+        await service.handle_status(chat_id=12345)
+        service.client.send_message.assert_called_once()
+        text = service.client.send_message.call_args[0][1]
+
+        # Verify all 6 telemetry parameters are explicitly present in status message
+        assert "20.00 Hz" in text
+        assert "286.1 V" in text
+        assert "95.0 V AC" in text
+        assert "0.00 A" in text
+        assert "597 RPM" in text
+        assert "1.9%" in text
+        assert "0.00 kW" in text
+
+    async_test(_run())
+
+
+def test_bot_copilot_prompt_six_channels():
+    """Verifies that Telegram Copilot system prompt dynamically incorporates all 6 telemetry channels."""
+    async def _run():
+        service = TelegramBotService(token="mock_token_123")
+        service.client.send_message = AsyncMock(return_value={"message_id": 103})
+
+        mock_api = MagicMock()
+        mock_ds = MagicMock()
+        mock_ds.chat_completion.return_value = {"content": "Machine is running steady at 20 Hz."}
+        mock_tsdb = MagicMock()
+        mock_tsdb.get_latest.return_value = {
+            "f_out": 20.0,
+            "f_target": 20.0,
+            "v_dc": 286.1,
+            "v_out": 95.0,
+            "current": 0.0,
+            "rpm": 597.0,
+            "torque": 1.9,
+            "power": 0.0,
+            "fault_code": 0,
+        }
+        mock_api.deepseek_client = mock_ds
+        mock_api.GLOBAL_TSDB = mock_tsdb
+        mock_api.LATEST_HIL_INCIDENT = {}
+        service.set_api_context(mock_api)
+
+        await service.handle_conversational_query(chat_id=12345, user_query="what is the power and torque right now?")
+        call_messages = mock_ds.chat_completion.call_args[0][0]
+        sys_prompt = call_messages[0]["content"]
+
+        # Check that dynamic suffix includes all 6 channels
+        assert "Output Frequency: 20.00 Hz" in sys_prompt or "Output Frequency: 20.0 Hz" in sys_prompt
+        assert "DC Bus Voltage: 286.1 V" in sys_prompt
+        assert "AC Output Voltage: 95.0 V AC" in sys_prompt
+        assert "Motor Line Current: 0.00 A" in sys_prompt
+        assert "Motor Speed: 597 RPM" in sys_prompt
+        assert "1.9%" in sys_prompt
+        assert "0.00 kW" in sys_prompt
+
+    async_test(_run())
+
+
+def test_chart_generator_six_channels():
+    """Verifies that waveform generation renders a full 6-channel dashboard including v_out, torque & power."""
+    import pandas as pd
+    from industrial_rca.bot.chart_generator import generate_trip_waveform, _extract_dataframe
+
+    # Partial dataframe missing some channels
+    raw_df = pd.DataFrame({
+        "timestamp": range(20),
+        "f_out": [20.0] * 20,
+        "v_dc": [286.1] * 20,
+        "current": [0.0] * 20,
+        "rpm": [597.0] * 20,
+    })
+    filled_df = _extract_dataframe(raw_df)
+    assert "v_out" in filled_df.columns
+    assert "torque" in filled_df.columns
+    assert "power" in filled_df.columns
+
+    # Render full 6-channel waveform graphic
+    img_bytes = generate_trip_waveform(filled_df, fault_code=0)
+    assert len(img_bytes) > 5000
+    assert img_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+
 
 

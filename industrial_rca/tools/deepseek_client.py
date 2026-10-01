@@ -501,30 +501,32 @@ class DeepSeekClient:
             or "status" in latest_query
         ):
             content = (
-                "**Wecon VM VFD (VFD_VM_01) System Status: NOMINAL**\n\n"
-                "- **Output Frequency (`f_out`):** 40.00 Hz (Nominal envelope: 38.0 – 42.0 Hz)\n"
-                "- **DC Bus Voltage (`v_dc`):** 208.0 V (Nominal envelope: 200.0 – 214.0 V, Alarm: 215.0 V, Trip limit: 220.0 V)\n"
-                "- **Motor Current (`current`):** 1.15 A (Nominal envelope: 0.8 – 1.8 A, Trip limit: 2.50 A)\n"
-                "- **Rotor Speed (`rpm`):** 1199 RPM\n"
+                "**Wecon VM VFD (VFD_VM_01) System Status: NOMINAL (6 Channels)**\n\n"
+                "- **1. Output Frequency (`f_out`):** 40.00 Hz (Setpoint: 40.0 Hz, Envelope: 38.0 – 42.0 Hz)\n"
+                "- **2. DC Bus Voltage (`v_dc`):** 285.0 V (Nominal: 270.0 – 290.0 V, Trip limit: 380.0 V)\n"
+                "- **3. AC Output Voltage (`v_out`):** 184.0 V AC (Rated: 220.0 V AC)\n"
+                "- **4. Motor Current (`current`):** 1.15 A (Nominal FLA: 1.15 A, Trip limit: 2.50 A)\n"
+                "- **5. Rotor Speed (`rpm`):** 1199 RPM (Sync: 1,450 RPM)\n"
+                "- **6. Torque & Power (`torque`/`power`):** 5.0% load · 0.05 kW (Rated: 100% / 0.75 kW)\n"
                 "- **Trip Status:** None (Fault code: 0)\n\n"
-                "The system is currently operating nominal edge monitoring over MQTT 1883 / Modbus RS-485. All parameters are healthy."
+                "The system is currently operating nominal edge monitoring over MQTT 1883 / Modbus RS-485. All 6 SCADA parameters are healthy."
             )
-            reasoning = "Verified live 1 Hz Modbus registers against ISA-95 operational limits. All values nominal."
+            reasoning = "Verified live 1 Hz Modbus registers across all 6 telemetry channels against ISA-95 operational limits. All values nominal."
 
         # ── 8. Default Industrial Diagnostic Fallback ──────────────────────
         else:
             content = (
-                "**Wecon VM VFD Diagnostic Copilot:**\n\n"
+                "**Wecon VM VFD Diagnostic Copilot (6 Channels Monitored):**\n\n"
                 "I am actively monitoring asset **VFD_VM_01** (Wecon VM Series VFD & Induction Motor Test Bench).\n\n"
-                "- **Active Scenario:** Monitoring 1 Hz Modbus stream (`f_out`, `v_dc`, `current`, `rpm`, `fault_code`).\n"
-                "- **Calibrated Safety Limits:** DC Bus Overvoltage trip at **220.0 V** (`Err06`), Motor Current trip at **2.50 A** (`Err02`).\n\n"
+                "- **Active SCADA Channels:** 1 Hz stream (`f_out`, `v_dc`, `v_out`, `current`, `rpm`, `torque` & `power`).\n"
+                "- **Calibrated Safety Limits:** DC Bus Overvoltage trip at **380.0 V** (`Err06`), Motor Current trip at **2.50 A** (`Err02`).\n\n"
                 "You can ask me about:\n"
-                "- *\"Why does DC bus reach >220V at 50 Hz and trip Err06 above 220V?\"*\n"
+                "- *\"Why does DC bus reach overvoltage and trip Err06?\"*\n"
                 "- *\"What caused the instantaneous Err02 current spike on PLC stop?\"*\n"
                 "- *\"What braking resistor is needed on terminals P+/PB?\"*\n"
                 "- *\"How does increasing parameter F0.18 prevent regeneration trips?\"*"
             )
-            reasoning = "Evaluated user query against industrial VFD knowledge base and current rig state."
+            reasoning = "Evaluated user query against industrial VFD knowledge base and current rig state across 6 channels."
 
         return {
             "success": True,
