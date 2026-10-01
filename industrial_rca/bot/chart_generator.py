@@ -118,7 +118,7 @@ def generate_trip_waveform(
     - [0, 1] v_dc · DC Bus Voltage (V DC) with dynamic trip line (380V physical / 220V sim)
     - [1, 0] v_out · Inverter AC Output Voltage (V AC) with 184V nominal & 220V rated lines
     - [1, 1] I_out · Motor Phase Current (Amperes) with 2.50 A trip line & 1.15 A FLA
-    - [2, 0] RPM · Induction Motor Speed (RPM) with dynamic sync speed line (Ns = 30 * f)
+    - [2, 0] RPM · Induction Motor Speed (RPM) with 1450 RPM sync line
     - [2, 1] τ & P · Motor Mechanical Torque (%) & Active Power (kW) dual-axis
     """
     # Extract metadata fault code if available
@@ -256,22 +256,13 @@ def generate_trip_waveform(
     y_rpm = df["rpm"].values if "rpm" in df.columns else df["f_out"].values * 29.0
     ax_rpm.plot(t, y_rpm, color=COLOR_RPM, linewidth=2.4, label="rpm")
     ax_rpm.fill_between(t, 0, y_rpm, color=COLOR_RPM, alpha=0.12)
-    # Dynamic 4-Pole Synchronous Speed Ns = 120 * f / 4 = 30 * f
-    avg_f = float(np.mean(y_f)) if len(y_f) > 0 and np.mean(y_f) > 1.0 else 50.0
-    sync_rpm = avg_f * 30.0
-    ax_rpm.axhline(sync_rpm, color="#D97706", linestyle="--", linewidth=1.6)
-    ax_rpm.text(x_max, sync_rpm + (sync_rpm * 0.02), f"Sync {int(round(sync_rpm)):,} RPM", color="#D97706", fontweight="bold", fontsize=9, ha="right", va="bottom", bbox=label_box)
-    rpm_max_disp = max(sync_rpm * 1.25, float(np.max(y_rpm)) * 1.15, 600.0)
+    # Threshold 1450 RPM
+    ax_rpm.axhline(1450.0, color="#D97706", linestyle="--", linewidth=1.6)
+    ax_rpm.text(x_max, 1475.0, "Sync 1,450 RPM", color="#D97706", fontweight="bold", fontsize=9, ha="right", va="bottom", bbox=label_box)
+    rpm_max_disp = max(1850.0, float(np.max(y_rpm)) * 1.1)
     ax_rpm.set_ylim(0, rpm_max_disp)
-    if rpm_max_disp <= 900:
-        ax_rpm.set_yticks([0, 200, 400, 600, 800])
-        ax_rpm.set_yticklabels(["0", "200", "400", "600", "800"])
-    elif rpm_max_disp <= 1500:
-        ax_rpm.set_yticks([0, 300, 600, 900, 1200, 1500])
-        ax_rpm.set_yticklabels(["0", "300", "600", "900", "1,200", "1,500"])
-    else:
-        ax_rpm.set_yticks([0, 300, 600, 900, 1200, 1500, 1800])
-        ax_rpm.set_yticklabels(["0", "300", "600", "900", "1,200", "1,500", "1,800"])
+    ax_rpm.set_yticks([0, 300, 600, 900, 1200, 1500, 1800])
+    ax_rpm.set_yticklabels(["0", "300", "600", "900", "1,200", "1,500", "1,800"])
 
     # 6. Torque & Active Power Card (Dual Axis)
     ax_tp = fig.add_subplot(gs[2, 1])

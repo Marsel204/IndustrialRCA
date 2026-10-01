@@ -384,7 +384,6 @@ class TelegramBotService:
 
         fault_info = get_vfd_fault_info(fault_code) if fault_code else {}
         fault_name = fault_info.get("name", "None")
-        sync_rpm = max(0.0, f_out * 30.0) if f_out > 0 else 1500.0
 
         text = (
             f"📊 <b>TELEMETRY STATUS: {EQUIPMENT_ID} (6 Channels)</b>\n\n"
@@ -393,7 +392,7 @@ class TelegramBotService:
             f"• <b>2. DC Bus Voltage:</b> <code>{v_dc:.1f} V DC</code>\n"
             f"• <b>3. Output Voltage:</b> <code>{v_out:.1f} V AC</code> (Rated: 220V)\n"
             f"• <b>4. Phase Current:</b> <code>{current:.2f} A</code> (FLA: 1.15A, Trip: 2.50A)\n"
-            f"• <b>5. Motor Speed:</b> <code>{rpm:.0f} RPM</code> (Sync: {sync_rpm:,.0f} RPM)\n"
+            f"• <b>5. Motor Speed:</b> <code>{rpm:.0f} RPM</code> (Sync: 1,450 RPM)\n"
             f"• <b>6. Torque & Power:</b> <code>{torque:.1f}%</code> · <code>{power:.2f} kW</code>\n"
             f"• <b>Active Fault Code:</b> <code>{fault_code} ({fault_name})</code>\n"
             f"• <b>Last Updated:</b> {time.strftime('%H:%M:%S UTC')}"
@@ -629,7 +628,6 @@ class TelegramBotService:
         is_physical_rig = (v_dc > 240.0)
         v_trip = 380.0 if is_physical_rig else 220.0
         v_nom = "270.0-290.0V" if is_physical_rig else "200.0-214.0V"
-        sync_rpm = max(0.0, f_out * 30.0) if f_out > 0 else 1500.0
 
         # ── 1. STATIC PREFIX (Invariant for DeepSeek server-side KV-cache reuse) ──
         # ── 2. DYNAMIC SUFFIX (Appended at the end) ──
@@ -642,7 +640,7 @@ class TelegramBotService:
             f"  2. DC Bus Link Voltage (v_dc; nominal ~270-290V on 220V grid, trip threshold 380V)\n"
             f"  3. Inverter AC Output Voltage (v_out; nominal ~184V at 40Hz, rated 220V)\n"
             f"  4. Stator Phase Current (I_out; rated FLA 1.15A, high trip limit 2.50A)\n"
-            f"  5. Rotor Shaft Speed (RPM; 4-pole synchronous speed Ns = 30 * f Hz, e.g. 600 RPM at 20 Hz, 1200 RPM at 40 Hz)\n"
+            f"  5. Rotor Shaft Speed (RPM; 4-pole synchronous speed 1,450 RPM)\n"
             f"  6. Mechanical Torque (torque % of rated) & Active Power (power kW; rated 100% / 0.75kW)\n"
             f"• WECON VM Inverter specifications & fault mechanisms:\n"
             f"  - Err02 (Overcurrent acceleration): Motor instantaneous current spikes past 2.50A; enforce PLC ramp-down, check motor insulation (>50 M-Ohm).\n"
@@ -662,7 +660,7 @@ class TelegramBotService:
             f"• 2. DC Bus Voltage: {v_dc:.1f} V (Nominal {v_nom}, Trip Limit: {v_trip:.0f}V)\n"
             f"• 3. AC Output Voltage: {v_out:.1f} V AC (Nominal 184V @ 40Hz, Rated 220V)\n"
             f"• 4. Motor Line Current: {current:.2f} A (Nominal FLA: 1.15A, High Trip Limit: 2.50A)\n"
-            f"• 5. Motor Speed: {rpm:.0f} RPM (Sync: {sync_rpm:,.0f} RPM)\n"
+            f"• 5. Motor Speed: {rpm:.0f} RPM (Sync: 1,450 RPM)\n"
             f"• 6. Torque & Active Power: {torque:.1f}% load · {power:.2f} kW (Rated: 100% / 0.75kW)\n"
             f"• Active Fault Code: {fault_code} ({fault_info.get('name', 'None')})\n"
             f"• Incident State: {active_incident_summary}"

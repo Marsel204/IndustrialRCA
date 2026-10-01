@@ -1931,7 +1931,6 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
             "",
         ])
     elif is_sim:
-        sync_rpm = max(0.0, f_out * 30.0) if f_out > 0 else 1500.0
         prompt_lines.extend([
             "=== 🧪 TELEMETRY CONNECTION STATUS: SIMULATION MODE ACTIVE 🧪 ===",
             "- Connection State: SIMULATION ACTIVE (User explicitly enabled simulation)",
@@ -1941,7 +1940,7 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
             f"- Frequency Target / Setpoint: {f_target:.2f} Hz",
             f"- DC Bus Voltage: {v_dc:.1f} V (Calibrated intermediate DC link)",
             f"- Motor Output Current: {current:.2f} A",
-            f"- Rotor Speed: {rpm:.1f} RPM (Synchronous: {sync_rpm:,.0f} RPM)",
+            f"- Rotor Speed: {rpm:.1f} RPM (Synchronous: 1450 RPM)",
             "",
             "*** MANDATORY DIRECTIVES FOR SIMULATION MODE ***",
             "1. BEHAVE LIKE NORMAL: You have full access to the active simulated telemetry above. Treat these readings as the active operating data of the Wecon VFD bench.",
@@ -1953,7 +1952,6 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
             "",
         ])
     else:
-        sync_rpm = max(0.0, f_out * 30.0) if f_out > 0 else 1500.0
         prompt_lines.extend([
             "=== ✅ TELEMETRY CONNECTION STATUS: LIVE RIG STREAMING (MQTT 1883/8883) ===",
             "- Connection State: LIVE HARDWARE CONNECTED (1 Hz Modbus RTU over MQTT)",
@@ -1965,7 +1963,7 @@ def build_copilot_system_prompt(thread_id: Optional[str] = None) -> str:
             f"- Motor Output Current: {current:.2f} A (Nominal FLA: {param_map.get('F2.03', 1.15):.2f} A, Trip Limit: 2.50 A)",
             f"- Output Torque: {torque:.1f}",
             f"- Power: {power:.2f} kW",
-            f"- Rotor Speed: {rpm:.1f} RPM (Synchronous: {sync_rpm:,.0f} RPM)",
+            f"- Rotor Speed: {rpm:.1f} RPM (Synchronous: 1450 RPM)",
             "",
             "=== PHYSICAL BENCH SETUP & MOTOR STATE ===",
         ])
