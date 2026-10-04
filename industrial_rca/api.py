@@ -1229,7 +1229,7 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
     raw_v_bus = _unpack(metric.get("v_bus", v_dc))
 
     # Detect and persist any parameter updates passed in MQTT metric payload
-    param_keys = ("f0.02", "f0.03", "f0.10", "f0.17", "f0.18", "f2.03", "f9.01", "decel", "accel")
+    param_keys = ("f0.02", "f0.03", "f0.10", "f0.17", "f0.18", "f1.00", "f2.03", "f9.01", "decel", "accel")
     for mk, mv in metric.items():
         low_mk = mk.lower().replace("_", ".")
         for pk in param_keys:

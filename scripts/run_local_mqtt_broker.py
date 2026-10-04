@@ -95,7 +95,7 @@ async def _custom_broadcast(self, session, topic, data, force_qos=None):
                 if low in ("0", "normal", "none", "ok"):
                     payload_dict = {"reset": True, "fault_code": 0, "topic": topic}
                 elif low in ("2", "02", "err02", "error02"):
-                    payload_dict = {"fault_code": 2, "fault_description": "Overcurrent during deceleration (Err02)", "topic": topic}
+                    payload_dict = {"fault_code": 2, "fault_description": "Overcurrent during acceleration (Err02)", "topic": topic}
                 elif low in ("6", "06", "err06", "error06"):
                     payload_dict = {"fault_code": 6, "fault_description": "Overvoltage during operation / Overfrequency (Err06)", "topic": topic}
                 elif low in ("3", "03", "err03"):
@@ -115,7 +115,7 @@ async def _custom_broadcast(self, session, topic, data, force_qos=None):
                         payload_dict = {"fault_description": trimmed, "topic": topic}
             # If payload explicitly states an error string like "err02", "err06", "err13" regardless of topic
             elif low in ("err02", "error02"):
-                payload_dict = {"fault_code": 2, "fault_description": "Overcurrent during deceleration (Err02)", "topic": topic}
+                payload_dict = {"fault_code": 2, "fault_description": "Overcurrent during acceleration (Err02)", "topic": topic}
             elif low in ("err06", "error06"):
                 payload_dict = {"fault_code": 6, "fault_description": "Overvoltage during operation / Overfrequency (Err06)", "topic": topic}
             elif low in ("err03", "error03"):
