@@ -332,6 +332,10 @@ export interface LiveMetric {
   incident_id?: string;
   fault_description?: string;
   source?: string;
+  has_active_trip?: boolean;
+  has_incident?: boolean;
+  incident_cleared?: boolean;
+  pipeline_status?: string;
   mqtt_connected?: boolean;
   is_simulated?: boolean;
   telemetry_connected?: boolean;

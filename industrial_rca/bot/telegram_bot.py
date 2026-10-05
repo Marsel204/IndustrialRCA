@@ -280,6 +280,29 @@ class TelegramBotService:
             except Exception as e:
                 logger.error(f"Failed to push RCA complete to chat {chat_id}: {e}")
 
+    async def notify_recovery_alert(
+        self,
+        asset_id: str = "VFD_VM_01",
+        f_out: float = 40.0,
+        rpm: float = 1200.0,
+    ):
+        """Notifies subscribers when equipment recovers and resumes nominal operation."""
+        if not self.client or not self.subscribers:
+            return
+        text = (
+            f"✅ <b>[EQUIPMENT RECOVERY] Machine Back to Normal</b>\n\n"
+            f"• <b>Asset ID:</b> <code>{asset_id}</code>\n"
+            f"• <b>Status:</b> 🟢 NOMINAL RUNNING\n"
+            f"• <b>Frequency:</b> <code>{f_out:.2f} Hz</code>\n"
+            f"• <b>Rotor Speed:</b> <code>{rpm:.1f} RPM</code>\n"
+            f"• <b>Trip Cleared:</b> Active hardware fault has cleared. Nominal edge monitoring resumed."
+        )
+        for chat_id in list(self.subscribers):
+            try:
+                await self.client.send_message(chat_id=chat_id, text=text)
+            except Exception as e:
+                logger.error(f"Failed to push recovery alert to chat {chat_id}: {e}")
+
     # ── Command & Callback Handlers ───────────────────────────────────
 
     async def handle_start(self, chat_id: Union[int, str], user_first_name: str):

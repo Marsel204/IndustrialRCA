@@ -203,13 +203,22 @@ _LIVE_STREAM_SUBSCRIBERS: List[asyncio.Queue] = []
 _LIVE_STREAM_LOCK = threading.Lock()
 
 
+def _safe_queue_put(q: asyncio.Queue, item: Any):
+    """Safely enqueues items into an asyncio queue from sync or async threads."""
+    try:
+        loop = getattr(q, "_loop", None)
+        if loop and loop.is_running():
+            loop.call_soon_threadsafe(q.put_nowait, item)
+        else:
+            q.put_nowait(item)
+    except Exception:
+        pass
+
+
 def _notify_hil_subscribers(event_data: Dict[str, Any]):
     with _SUBSCRIBER_LOCK:
         for q in _HIL_EVENT_SUBSCRIBERS:
-            try:
-                q.put_nowait(event_data)
-            except Exception:
-                pass
+            _safe_queue_put(q, event_data)
 
     # Forward alerts to Telegram Bot
     if telegram_bot_service and telegram_bot_service.subscribers:
@@ -230,6 +239,13 @@ def _notify_hil_subscribers(event_data: Dict[str, Any]):
                     dataset_id=ds_id,
                     graph_values=LATEST_HIL_INCIDENT.get("graph_result"),
                 ))
+            elif ev == "hil_incident_cleared":
+                if hasattr(telegram_bot_service, "notify_recovery_alert"):
+                    _safe_async_run(telegram_bot_service.notify_recovery_alert(
+                        asset_id=event_data.get("asset_id", "VFD_VM_01"),
+                        f_out=float(event_data.get("f_out", 40.0)),
+                        rpm=float(event_data.get("rpm", 1200.0)),
+                    ))
         except Exception as e:
             logger.warning(f"Telegram notification dispatch error: {e}")
 
@@ -237,10 +253,7 @@ def _notify_hil_subscribers(event_data: Dict[str, Any]):
 def _broadcast_live_metric(metric_data: Dict[str, Any]):
     with _LIVE_STREAM_LOCK:
         for q in _LIVE_STREAM_SUBSCRIBERS:
-            try:
-                q.put_nowait(metric_data)
-            except Exception:
-                pass
+            _safe_queue_put(q, metric_data)
 
 
 # ── Request / Response Models ─────────────────────────────────────────
@@ -726,8 +739,11 @@ def get_telemetry_health():
         "status": "ONLINE",
         "service": "Industrial RCA Ingestion Middleware",
         "timestamp": time.time(),
+        "has_incident": bool(LATEST_HIL_INCIDENT.get("has_incident")),
         "latest_incident": LATEST_HIL_INCIDENT.get("incident_data"),
+        "latest_hil_incident": LATEST_HIL_INCIDENT.get("incident_data"),
         "pipeline_status": LATEST_HIL_INCIDENT.get("pipeline_status"),
+        "hil_status": LATEST_HIL_INCIDENT.get("pipeline_status"),
     }
 
 
@@ -883,6 +899,11 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
             for _ in GLOBAL_RCA_GRAPH.stream(init_state, config=config):
                 pass
             snapshot = GLOBAL_RCA_GRAPH.get_state(config)
+            # If the incident was already cleared while graph was running, do not re-latch
+            if not LATEST_HIL_INCIDENT.get("has_incident") or LATEST_HIL_INCIDENT.get("pipeline_status") == "READY":
+                logger.info(f"RCA graph completed for thread {thread_id}, but incident was already cleared. Discarding result.")
+                return
+
             LATEST_HIL_INCIDENT["graph_result"] = snapshot.values if snapshot else None
             LATEST_HIL_INCIDENT["pipeline_status"] = "ANALYSIS_COMPLETE"
             _notify_hil_subscribers({
@@ -893,7 +914,8 @@ def ingest_incident(incident: IncidentPayload, background_tasks: BackgroundTasks
                 "status": "ANALYSIS_COMPLETE",
             })
         except Exception as e:
-            LATEST_HIL_INCIDENT["pipeline_status"] = f"ERROR: {e}"
+            if LATEST_HIL_INCIDENT.get("has_incident"):
+                LATEST_HIL_INCIDENT["pipeline_status"] = f"ERROR: {e}"
 
     background_tasks.add_task(_run_graph)
 
@@ -914,7 +936,7 @@ def get_latest_incident():
 
 
 @api_app.post("/api/v1/telemetry/incident/clear")
-def clear_incident():
+def clear_incident(asset_id: str = "VFD_VM_01"):
     """
     Clears the active hardware incident, restores nominal monitoring,
     and resets the TSDB trip triggers so the bench can monitor normally or trip again.
@@ -932,15 +954,52 @@ def clear_incident():
         _SIMULATION_STATE["fault_injected"] = False
         _SIMULATION_STATE["phase"] = "NORMAL"
 
+    latest_pt = GLOBAL_TSDB.get_latest(asset_id) or {}
+    f_out = float(latest_pt.get("f_out", 40.0))
+    rpm = float(latest_pt.get("rpm", 1200.0))
+    now = time.time()
+
     _notify_hil_subscribers({
         "event": "hil_incident_cleared",
+        "asset_id": asset_id,
         "status": "READY",
-        "timestamp": time.time(),
+        "has_active_trip": False,
+        "has_incident": False,
+        "fault_code": 0,
+        "f_out": f_out,
+        "rpm": rpm,
+        "timestamp": now,
+        "message": "Incident cleared. Telemetry monitoring resumed nominal state.",
     })
+
+    # Broadcast recovery live metric so 1 Hz telemetry clients immediately synchronize
+    recovery_metric = {
+        "asset_id": asset_id,
+        "f_out": f_out,
+        "f_target": float(latest_pt.get("f_target", 40.0)),
+        "f_in": float(latest_pt.get("f_in", 40.0)),
+        "v_dc": float(latest_pt.get("v_dc", 276.0)),
+        "v_bus": float(latest_pt.get("v_bus", 276.0)),
+        "v_out": float(latest_pt.get("v_out", 184.0)),
+        "current": float(latest_pt.get("current", 0.02)),
+        "rpm": rpm,
+        "torque": float(latest_pt.get("torque", 0.0)),
+        "power": float(latest_pt.get("power", 0.0)),
+        "fault_code": 0,
+        "status": "RUNNING",
+        "has_active_trip": False,
+        "has_incident": False,
+        "incident_cleared": True,
+        "pipeline_status": "READY",
+        "timestamp": now,
+        "source": "auto_recovery",
+    }
+    _broadcast_live_metric(recovery_metric)
 
     return {
         "status": "INCIDENT_CLEARED",
         "message": "Active hardware incident cleared. System restored to real-time nominal monitoring.",
+        "latest_incident": LATEST_HIL_INCIDENT,
     }
 
 
@@ -1245,6 +1304,9 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
     status = "TRIPPED" if fault_code > 0 else "RUNNING"
     asset_id = str(metric.get("asset_id", "VFD_VM_01"))
 
+    has_trip = fault_code > 0
+    is_nominal_running = (fault_code == 0) and (f_out > 0.5 or rpm > 10.0 or metric.get("reset") or status == "RUNNING")
+
     normalized = {
         "asset_id": asset_id,
         "f_out": f_out,
@@ -1284,11 +1346,16 @@ def feed_live_telemetry(metric: Dict[str, Any], background_tasks: BackgroundTask
             ingest_incident(inc, background_tasks)
         except Exception as e:
             logger.warning(f"Auto-trip dispatch error: {e}")
-    elif fault_code == 0 and (f_out > 0.5 or rpm > 10.0 or metric.get("reset")):
+    elif is_nominal_running:
         # Auto-clear active incident when equipment recovers and runs nominally with fault_code == 0
-        if LATEST_HIL_INCIDENT.get("has_incident"):
+        if LATEST_HIL_INCIDENT.get("has_incident") or LATEST_HIL_INCIDENT.get("pipeline_status") != "READY" or getattr(GLOBAL_TSDB, "_last_fault_code", 0) > 0:
             logger.info("Equipment healthy and running (fault_code=0). Auto-clearing active incident.")
-            clear_incident()
+            clear_incident(asset_id=asset_id)
+
+    normalized["has_active_trip"] = has_trip
+    normalized["has_incident"] = LATEST_HIL_INCIDENT.get("has_incident", False)
+    normalized["incident_cleared"] = not has_trip and not LATEST_HIL_INCIDENT.get("has_incident", False)
+    normalized["pipeline_status"] = LATEST_HIL_INCIDENT.get("pipeline_status", "READY")
 
     # 3. Update active tools & broadcast live metric to connected SSE frontend clients
     influx_tool.update_latest(normalized)
