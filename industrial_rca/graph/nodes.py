@@ -351,7 +351,7 @@ def test_hypothesis_worker(worker_input: HypothesisWorkerInput) -> Dict[str, Any
             proposed_actions = []
 
     elif hyp_id == "H_VFD_ERR02":
-        # Forced Sudden Deceleration Overcurrent (WECON VM Err02)
+        # Overcurrent during Acceleration (WECON VM Err02)
         curr_max = curr_profile.get("max", 0.0)
         metrics["curr_max"] = curr_max
         metrics["fault_code"] = active_fc

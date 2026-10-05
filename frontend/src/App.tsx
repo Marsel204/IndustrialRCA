@@ -73,6 +73,8 @@ export function App() {
   activeThreadIdRef.current = activeThreadId;
   const latestIncidentRef = useRef<LatestIncident | null>(latestIncident);
   latestIncidentRef.current = latestIncident;
+  const rcaStateRef = useRef<RCAState | null>(rcaState);
+  rcaStateRef.current = rcaState;
 
   // Initialize and load base data in parallel
   const loadInitialData = useCallback(async () => {
@@ -339,7 +341,36 @@ export function App() {
             incident_data: null,
             pipeline_status: 'READY',
           });
-          setRcaState(null);
+          const newThread = `rca-live-${Date.now()}`;
+          setActiveThreadId(newThread);
+          setRcaState({
+            thread_id: newThread,
+            pipeline_status: 'MONITORING',
+            current_step: 1,
+            is_paused_at_hitl: false,
+            has_active_trip: false,
+            fault_code: 0,
+            detected_anomalies: [],
+            tag_profiles: {},
+            hypothesis_results: [],
+            winning_hypothesis: null,
+            falsification_summary: [],
+            fmea_classification: {},
+            causal_chain_5_whys: [],
+            root_cause_asset: 'VFD_VM_01',
+            root_cause_description:
+              'Continuous real-time telemetry from Wecon VM VFD is nominal. Listening for hardware trip trigger over MQTT / PLC D-variable.',
+            human_review_required: false,
+            human_review_payload: null,
+            human_review_decision: null,
+            incident_report_8d: null,
+            sap_work_order: null,
+            execution_logs: [
+              '[LIVE_MONITOR] System restored to nominal operation. Active trip cleared.',
+              '[LIVE_MONITOR] Listening for physical trip trigger on MQTT 1883/8883...',
+            ],
+            deepseek_evaluation: null,
+          });
           setActiveScenarioId('live_stream');
           setInspectorTab('telemetry');
           fetchTelemetry('live_stream').then(setTelemetry).catch(console.warn);
@@ -353,7 +384,7 @@ export function App() {
     return () => unsubscribe();
   }, []);
 
-  // Periodic health check to update MQTT connection and simulation status
+  // Periodic health check to update MQTT connection, simulation status & reconcile cleared incidents
   useEffect(() => {
     const timer = setInterval(async () => {
       try {
@@ -364,6 +395,57 @@ export function App() {
         if (health?.is_simulated !== undefined) setIsSimulated(Boolean(health.is_simulated));
         if (health?.simulation_scenario) setSimulationScenario(health.simulation_scenario);
         if (health?.simulation_phase) setSimulationPhase(health.simulation_phase);
+
+        // Auto-reconcile cleared incidents from backend
+        const backendHasIncident = Boolean(
+          health?.has_incident ||
+          health?.latest_hil_incident ||
+          health?.latest_incident
+        );
+        if (!backendHasIncident && (health?.hil_status === 'READY' || health?.pipeline_status === 'READY')) {
+          if (
+            latestIncidentRef.current?.has_incident ||
+            rcaStateRef.current?.has_active_trip ||
+            (rcaStateRef.current?.fault_code && rcaStateRef.current.fault_code > 0)
+          ) {
+            setLatestIncident({
+              has_incident: false,
+              incident_data: null,
+              pipeline_status: 'READY',
+            });
+            const newThread = `rca-live-${Date.now()}`;
+            setActiveThreadId(newThread);
+            setRcaState({
+              thread_id: newThread,
+              pipeline_status: 'MONITORING',
+              current_step: 1,
+              is_paused_at_hitl: false,
+              has_active_trip: false,
+              fault_code: 0,
+              detected_anomalies: [],
+              tag_profiles: {},
+              hypothesis_results: [],
+              winning_hypothesis: null,
+              falsification_summary: [],
+              fmea_classification: {},
+              causal_chain_5_whys: [],
+              root_cause_asset: 'VFD_VM_01',
+              root_cause_description:
+                'Continuous real-time telemetry from Wecon VM VFD is nominal. Listening for hardware trip trigger over MQTT / PLC D-variable.',
+              human_review_required: false,
+              human_review_payload: null,
+              human_review_decision: null,
+              incident_report_8d: null,
+              sap_work_order: null,
+              execution_logs: [
+                '[LIVE_MONITOR] System restored to nominal operation. Active trip cleared.',
+                '[LIVE_MONITOR] Listening for physical trip trigger on MQTT 1883/8883...',
+              ],
+              deepseek_evaluation: null,
+            });
+            setActiveScenarioId('live_stream');
+          }
+        }
       } catch {
         setApiOnline(false);
       }
@@ -371,13 +453,63 @@ export function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Listen to live telemetry metrics for realtime simulation countdown & phase updates
+  // Listen to live telemetry metrics for realtime simulation countdown, phase updates & auto-recovery
   useEffect(() => {
     const unsub = subscribeLiveTelemetryStream((metric) => {
       if (metric.is_simulated !== undefined) setIsSimulated(Boolean(metric.is_simulated));
       if (metric.simulation_scenario) setSimulationScenario(metric.simulation_scenario);
       if (metric.simulation_phase) setSimulationPhase(metric.simulation_phase);
       if (metric.simulation_countdown !== undefined) setSimulationCountdown(metric.simulation_countdown);
+
+      // Auto-recovery: When physical hardware or simulation returns to nominal running
+      const isNominalRecovered =
+        (metric.has_active_trip === false && metric.fault_code === 0) ||
+        (metric.status === 'RUNNING' && metric.fault_code === 0 && (metric.f_out > 0.5 || metric.rpm > 10.0));
+
+      const isCurrentStateTripped = Boolean(
+        latestIncidentRef.current?.has_incident ||
+        rcaStateRef.current?.has_active_trip ||
+        (rcaStateRef.current?.fault_code && rcaStateRef.current.fault_code > 0)
+      );
+
+      if (isNominalRecovered && isCurrentStateTripped) {
+        setLatestIncident({
+          has_incident: false,
+          incident_data: null,
+          pipeline_status: 'READY',
+        });
+        const newThread = `rca-live-${Date.now()}`;
+        setActiveThreadId(newThread);
+        setRcaState({
+          thread_id: newThread,
+          pipeline_status: 'MONITORING',
+          current_step: 1,
+          is_paused_at_hitl: false,
+          has_active_trip: false,
+          fault_code: 0,
+          detected_anomalies: [],
+          tag_profiles: {},
+          hypothesis_results: [],
+          winning_hypothesis: null,
+          falsification_summary: [],
+          fmea_classification: {},
+          causal_chain_5_whys: [],
+          root_cause_asset: 'VFD_VM_01',
+          root_cause_description:
+            'Continuous real-time telemetry from Wecon VM VFD is nominal. Listening for hardware trip trigger over MQTT / PLC D-variable.',
+          human_review_required: false,
+          human_review_payload: null,
+          human_review_decision: null,
+          incident_report_8d: null,
+          sap_work_order: null,
+          execution_logs: [
+            '[LIVE_MONITOR] System restored to nominal operation. Active trip cleared.',
+            '[LIVE_MONITOR] Listening for physical trip trigger on MQTT 1883/8883...',
+          ],
+          deepseek_evaluation: null,
+        });
+        setActiveScenarioId('live_stream');
+      }
     });
     return () => unsub();
   }, []);

@@ -236,4 +236,78 @@ def test_embedded_tsdb_parameters_persistence(tmp_path):
     assert updated["F0.18"]["desc"] == "Trip Injection Decel"
 
 
+def test_embedded_tsdb_debounce_transient_fault_glitch(tmp_path):
+    """
+    Verify that transient 1-2 frame fault glitches during motor restart
+    (e.g., momentary fault_code = 2 before reaching nominal speed)
+    are filtered out and do NOT trigger spurious RCA trips.
+    """
+    db_file = tmp_path / "test_tsdb.db"
+    tsdb = EmbeddedTSDB(db_path=str(db_file), memory_capacity=100, min_consecutive_frames=3)
+
+    # Frame 1: Transient fault_code 2 -> Pending (count=1), should return None
+    assert tsdb.check_trip_trigger({"fault_code": 2}) is None
+
+    # Frame 2: Transient fault_code 2 persists -> Pending (count=2), should return None
+    assert tsdb.check_trip_trigger({"fault_code": 2}) is None
+
+    # Frame 3: System clears and motor accelerates nominally (fault_code=0) -> Glitch cleared!
+    assert tsdb.check_trip_trigger({"fault_code": 0, "f_out": 40.0}) is None
+
+    # Frame 4: Steady nominal running -> No trip
+    assert tsdb.check_trip_trigger({"fault_code": 0, "f_out": 40.0}) is None
+
+
+def test_embedded_tsdb_sustained_fault_triggers_after_debounce(tmp_path):
+    """
+    Verify that sustained faults (persisting for >= min_consecutive_frames)
+    correctly trigger the RCA incident.
+    """
+    db_file = tmp_path / "test_tsdb.db"
+    tsdb = EmbeddedTSDB(db_path=str(db_file), memory_capacity=100, min_consecutive_frames=3)
+
+    # Frame 1: Fault code 2 appears -> Pending (count=1)
+    assert tsdb.check_trip_trigger({"fault_code": 2}) is None
+
+    # Frame 2: Fault code 2 persists -> Pending (count=2)
+    assert tsdb.check_trip_trigger({"fault_code": 2}) is None
+
+    # Frame 3: Fault code 2 sustained -> TRIGGERED!
+    assert tsdb.check_trip_trigger({"fault_code": 2}) == 2
+
+    # Frame 4: Duplicate fault code while latched -> Debounced (None)
+    assert tsdb.check_trip_trigger({"fault_code": 2}) is None
+
+    # Frame 5: Reset / clear fault
+    assert tsdb.check_trip_trigger({"fault_code": 0}) is None
+
+
+def test_embedded_tsdb_transition_glitch_from_previous_fault(tmp_path):
+    """
+    Verify the exact user scenario:
+    System tripped on Err13 (latched), user resets and starts motor,
+    producing a momentary 2-frame Err02 transition glitch before running nominal.
+    Err02 must NOT trigger.
+    """
+    db_file = tmp_path / "test_tsdb.db"
+    tsdb = EmbeddedTSDB(db_path=str(db_file), memory_capacity=100, min_consecutive_frames=3)
+
+    # 1. System is tripped on Err13 (Output Phase Loss) for 3+ frames
+    assert tsdb.check_trip_trigger({"fault_code": 13}) is None
+    assert tsdb.check_trip_trigger({"fault_code": 13}) is None
+    assert tsdb.check_trip_trigger({"fault_code": 13}) == 13
+
+    # 2. User commands reset and restart:
+    # 2-second momentary glitch where drive reports 2 before accelerating
+    assert tsdb.check_trip_trigger({"fault_code": 2}) is None
+    assert tsdb.check_trip_trigger({"fault_code": 2}) is None
+
+    # 3. Next frame is normal running (fault_code: 0, f_out: 40.0)
+    assert tsdb.check_trip_trigger({"fault_code": 0, "f_out": 40.0}) is None
+
+    # Err02 was completely suppressed!
+    assert tsdb._last_fault_code == 0
+
+
+
 

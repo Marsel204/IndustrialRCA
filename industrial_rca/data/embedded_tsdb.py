@@ -34,11 +34,16 @@ class EmbeddedTSDB:
         self,
         db_path: Optional[str] = None,
         memory_capacity: int = 3600,
+        min_consecutive_frames: int = 1,
     ):
         self.memory_capacity = memory_capacity
+        self.min_consecutive_frames = max(1, int(min_consecutive_frames))
         self._buffer: deque = deque(maxlen=memory_capacity)
         self._lock = threading.RLock()
         self._last_trip_time: float = 0.0
+        self._last_fault_code: int = 0
+        self._pending_fault_code: int = 0
+        self._pending_fault_count: int = 0
 
         # Default Wecon VM VFD parameter set
         self._parameters: Dict[str, Dict[str, Any]] = {
@@ -47,6 +52,7 @@ class EmbeddedTSDB:
             "F0.10": {"value": 40.0, "desc": "Max Operating Frequency Clamp (Hz)", "name": "Max Frequency"},
             "F0.17": {"value": 5.0, "desc": "Acceleration Time (s)", "name": "Acceleration Time"},
             "F0.18": {"value": 5.0, "desc": "Deceleration Time (s)", "name": "Deceleration Time"},
+            "F1.00": {"value": 2.0, "desc": "Start Mode (0: Direct, 1: DC Brake, 2: Speed Tracking)", "name": "Start Mode"},
             "F2.03": {"value": 1.15, "desc": "Motor Rated Current (A)", "name": "Motor Rated Current"},
             "F9.01": {"value": 3.0, "desc": "Modbus Baud Rate (9600 bps)", "name": "Baud Rate"},
         }
@@ -342,11 +348,13 @@ class EmbeddedTSDB:
             "last_seen_ts": float(df["timestamp"].max()),
         }
 
-    def check_trip_trigger(self, metric: Dict[str, Any]) -> Optional[int]:
+    def check_trip_trigger(self, metric: Dict[str, Any], min_consecutive_frames: Optional[int] = None) -> Optional[int]:
         """
         Evaluates whether an incoming metric triggers an emergency trip.
         Checks explicit fault codes, DC bus overvoltage (>195.0 V), or decel overcurrent (>2.50 A).
-        Prevents redundant cascading triggers within a 15-second debounce window.
+        Filters out transient glitches during motor startup/reset by requiring confirmation
+        across min_consecutive_frames (default instance threshold).
+        Prevents redundant cascading triggers while fault remains latched.
         """
         fault_code = int(metric.get("fault_code", 0) or 0)
         if fault_code == 0:
@@ -360,21 +368,37 @@ class EmbeddedTSDB:
                     except (ValueError, TypeError):
                         pass
 
-        last_code = getattr(self, "_last_fault_code", 0)
+        threshold = self.min_consecutive_frames if min_consecutive_frames is None else max(1, int(min_consecutive_frames))
 
-        # Reset latch when equipment is healthy and fault is cleared
-        if fault_code == 0:
-            self._last_fault_code = 0
+        with self._lock:
+            # Equipment is healthy / normal operation -> reset pending glitch counters & latch
+            if fault_code == 0:
+                self._last_fault_code = 0
+                self._pending_fault_code = 0
+                self._pending_fault_count = 0
+                return None
+
+            # Already triggered and latched for this exact fault_code -> debounce duplicates
+            if fault_code == self._last_fault_code:
+                return None
+
+            # New candidate fault code or continuation of pending candidate
+            if fault_code != self._pending_fault_code:
+                self._pending_fault_code = fault_code
+                self._pending_fault_count = 1
+            else:
+                self._pending_fault_count += 1
+
+            # Check if pending fault has persisted for at least the required threshold frames
+            if self._pending_fault_count >= threshold:
+                now = time.time()
+                self._last_trip_time = now
+                self._last_fault_code = fault_code
+                self._pending_fault_code = 0
+                self._pending_fault_count = 0
+                return fault_code
+
             return None
-
-        # Rising-edge trigger: only fire once when transitioning from healthy (0) to fault, or changing fault code
-        if fault_code > 0 and fault_code != last_code:
-            now = time.time()
-            self._last_trip_time = now
-            self._last_fault_code = fault_code
-            return fault_code
-
-        return None
 
     def _enrich_rca_tags(self, df: pd.DataFrame):
         """Enriches raw VFD parameters with standard ISA-95 boiler feed pump tags."""
@@ -430,6 +454,8 @@ class EmbeddedTSDB:
         with self._lock:
             self._last_trip_time = 0.0
             self._last_fault_code = 0
+            self._pending_fault_code = 0
+            self._pending_fault_count = 0
 
     def clear(self):
         """Clears memory buffer and SQLite table for tests and resets."""
@@ -437,6 +463,8 @@ class EmbeddedTSDB:
             self._buffer.clear()
             self._last_trip_time = 0.0
             self._last_fault_code = 0
+            self._pending_fault_code = 0
+            self._pending_fault_count = 0
         try:
             with sqlite3.connect(self.db_path, timeout=1.0) as conn:
                 conn.execute("DELETE FROM vfd_telemetry;")
@@ -445,5 +473,6 @@ class EmbeddedTSDB:
             pass
 
 
-# Global Singleton Embedded TSDB instance
-GLOBAL_TSDB = EmbeddedTSDB()
+# Global Singleton Embedded TSDB instance with 3-frame (~2s) debounce filter to suppress startup transients
+GLOBAL_TSDB = EmbeddedTSDB(min_consecutive_frames=3)
+

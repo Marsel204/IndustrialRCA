@@ -54,9 +54,9 @@ ISO_14224_TAXONOMY: Dict[str, Dict[str, Any]] = {
         "iso_code": "ISO-14224-DR-ELC-OVV",
     },
     "VFD_ACCEL_OVERCURRENT": {
-        "failure_mode": "CUR (Instantaneous overcurrent / Forced sudden stop current spike)",
-        "failure_mechanism": "Forced sudden deceleration via PLC On/Off button / lack of controlled ramp",
-        "detection_method": "Output current surge (Reg 3002H) upon stop command and VFD Trip Code 2 (Err02)",
+        "failure_mode": "CUR (Acceleration overcurrent / Instantaneous inrush spike)",
+        "failure_mechanism": "Direct start into freewheeling rotor without speed tracking (F1.00) / aggressive acceleration ramp (F0.17)",
+        "detection_method": "Output phase current surge (Reg 3002H) during startup/acceleration and VFD Trip Code 2 (Err02)",
         "iso_code": "ISO-14224-DR-ELC-OCI",
     },
     "VFD_DECEL_OVERCURRENT": {
@@ -238,6 +238,7 @@ WECON_VM_VFD_SPEC: Dict[str, Any] = {
         "F0.10": {"name": "Max Operating Frequency", "default_hz": 40.0},
         "F0.17": {"name": "Acceleration Time", "default_s": 5.0},
         "F0.18": {"name": "Deceleration Time", "default_s": 5.0, "trip_injection_s": 0.1},
+        "F1.00": {"name": "Start Mode", "setting": 2, "desc": "0: Direct start, 1: DC braking first, 2: Speed tracking restart"},
         "F2.03": {"name": "Motor Rated Current", "default_a": 1.15, "trip_injection_a": 0.3},
         "F9.00": {"name": "Slave Address", "setting": 1},
         "F9.01": {"name": "Baud Rate", "setting": 3, "desc": "9600 bps"},
@@ -245,7 +246,7 @@ WECON_VM_VFD_SPEC: Dict[str, Any] = {
     },
     "fault_codes": {
         0: "Normal Operation (No Active Fault)",
-        2: "Forced Decel Overcurrent (Err02)",
+        2: "Overcurrent during acceleration (Err02)",
         3: "Deceleration Overcurrent (Err03)",
         6: "Overfrequency Overvoltage (Err06)",
         11: "Motor Thermal Overload (Err11)",

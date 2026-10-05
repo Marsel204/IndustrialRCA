@@ -173,7 +173,16 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     setExpandedChatCoT((prev) => ({ ...prev, [msgId]: !prev[msgId] }));
   };
 
-  const faultCode =
+  const isRigNominalRunning = Boolean(
+    liveMetric &&
+    liveMetric.telemetry_connected !== false &&
+    liveMetric.status === 'RUNNING' &&
+    liveMetric.fault_code === 0 &&
+    (liveMetric.f_out > 0.5 || liveMetric.rpm > 10.0) &&
+    !latestIncident?.has_incident
+  );
+
+  const rawFaultCode =
     (latestIncident?.has_incident ? latestIncident?.incident_data?.fault_code : null) ||
     rcaState?.fault_code ||
     latestIncident?.incident_data?.fault_code ||
@@ -183,10 +192,14 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
      rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR11' || rcaState?.winning_hypothesis?.name?.includes('Err11') ? 11 :
      rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR13' || rcaState?.winning_hypothesis?.name?.includes('Err13') ? 13 :
      (rcaState?.has_active_trip ? (latestIncident?.incident_data?.fault_code || 2) : 0));
+
+  const faultCode = isRigNominalRunning ? 0 : rawFaultCode;
+
   const isIncidentActive = Boolean(
-    latestIncident?.has_incident ||
-    rcaState?.has_active_trip ||
-    faultCode > 0
+    !isRigNominalRunning &&
+    (latestIncident?.has_incident ||
+     rcaState?.has_active_trip ||
+     faultCode > 0)
   );
 
   // Build Diagnostic Tool Executions from rcaState
