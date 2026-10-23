@@ -21,21 +21,14 @@ export const ReviewSignOffModal: React.FC<ReviewSignOffModalProps> = ({
   onSubmitReview,
 }) => {
   const [decision, setDecision] = useState<'approve' | 'reject' | 'override'>('approve');
-  const [reviewerName, setReviewerName] = useState<string>(
-    'J. Reynolds (Machinery Reliability Specialist)'
-  );
-  const [digitalSignature, setDigitalSignature] = useState<string>('J. Reynolds, PE #84920');
-  const [notes, setNotes] = useState<string>(
-    'Verified via multi-sensor physical convergence and ISA-95 upstream topology tracing. ' +
-    'Suction strainer STR-301A differential pressure breached 1.85 bar due to deferred PM WM-2026-0831. ' +
-    'Resulting NPSHa starvation triggered severe acoustic cavitation (48.9% broadband ratio in 2-8 kHz FFT), ' +
-    'wiping the DE sleeve bearing lubrication film. Corrective overhaul authorized.'
-  );
+  const [reviewerName, setReviewerName] = useState<string>('');
+  const [digitalSignature, setDigitalSignature] = useState<string>('');
+  const [notes, setNotes] = useState<string>('');
   const [overrideRootCause, setOverrideRootCause] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!isOpen) return null;
+  if (!isOpen || !rcaState?.is_paused_at_hitl) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,7 +66,7 @@ export const ReviewSignOffModal: React.FC<ReviewSignOffModalProps> = ({
                 Review & Authorize Action
               </h2>
               <p className="text-xs text-slate-500">
-                HITL Gate: Human authorization required for SAP PM01 & 8D release
+                HITL Gate: Human authorization required for local PM01 & 8D draft creation
               </p>
             </div>
           </div>
@@ -102,12 +95,12 @@ export const ReviewSignOffModal: React.FC<ReviewSignOffModalProps> = ({
             <div className="flex justify-between items-center text-slate-600">
               <span>Diagnosed Root Cause:</span>
               <strong className="text-teal-700">
-                {rcaState?.winning_hypothesis?.name || 'NPSH Starvation via Blinded Strainer STR-301A'}
+                {rcaState?.winning_hypothesis?.name || 'No supported diagnosis'}
               </strong>
             </div>
             <div className="flex justify-between items-center text-slate-600">
-              <span>Deliverables Generated:</span>
-              <span className="text-blue-700 font-semibold">1 SAP Work Order (PM01) + 8D Incident Report</span>
+              <span>After authorization:</span>
+              <span className="text-blue-700 font-semibold">Local PM01 draft + 8D incident report</span>
             </div>
           </div>
 

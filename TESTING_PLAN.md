@@ -1,3 +1,5 @@
+> Historical documentation of the original scripted demo. For the adaptive implementation and current verification, see [README](README.md) and [the refactor report](docs/agentic-refactor-report.md).
+
 # Comprehensive Testing & Verification Plan for IndustrialRCA
 
 **Project:** Industrial Root Cause Analysis (RCA) System  

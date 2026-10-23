@@ -67,7 +67,7 @@ def get_api_key_status() -> Dict[str, Any]:
         "base_url": base_url,
         "model": model,
         "is_live": has_key,
-        "status": "ONLINE" if has_key else "SIMULATION",
+        "status": "CONFIGURED" if has_key else "UNAVAILABLE",
         "env_path": str(env_path),
         "env_exists": env_path.exists(),
     }
@@ -123,7 +123,7 @@ def save_api_key(
 def delete_api_key() -> Dict[str, Any]:
     """
     Removes DEEPSEEK_API_KEY from .env, clears os.environ, and reverts
-    all active clients to deterministic simulation mode.
+    all active clients to an unavailable state.
     """
     env_path = get_env_path()
     if env_path.exists():
@@ -131,14 +131,14 @@ def delete_api_key() -> Dict[str, Any]:
 
     os.environ.pop("DEEPSEEK_API_KEY", None)
 
-    # Reconfigure active clients to mock/simulation mode
+    # Disable provider access until a valid key is configured
     reconfigure_all_deepseek_clients(api_key="")
 
-    logger.info(f"Removed DEEPSEEK_API_KEY from {env_path} and reset clients to simulation mode.")
+    logger.info(f"Removed DEEPSEEK_API_KEY from {env_path} and disabled provider clients.")
 
     status = get_api_key_status()
     status["success"] = True
-    status["message"] = "API key removed from .env. System running in deterministic simulation mode."
+    status["message"] = "API key removed. AI investigation is unavailable until a valid key is configured."
     return status
 
 

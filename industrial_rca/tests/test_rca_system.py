@@ -33,6 +33,7 @@ from industrial_rca.tools.telemetry_analytics import (
 from industrial_rca.tools.topology_tracer import AssetTopologyTracer
 from industrial_rca.tools.cmms_connector import CMMSConnector
 from industrial_rca.graph.workflow import create_rca_graph
+from industrial_rca.tests.support_decisions import MeasuredDecisionClient
 
 
 def test_telemetry_generator():
@@ -185,11 +186,13 @@ def test_cmms_connector_work_order_generation():
 
     sap = wo["sap_work_order"]
     assert sap["order_type"] == "PM01"
-    assert sap["functional_location"] == "FLOC: PLNT-B01-VFD-BENCH01"
-    assert sap["equipment_id"] == "10049201"
-    assert len(sap["operations"]) == 5
-    assert len(sap["materials_required"]) >= 4
-    assert sap["total_estimated_hours"] > 0
+    assert sap["functional_location"] is None
+    assert sap["equipment_id"] == "VFD_VM_01"
+    assert len(sap["operations"]) == 2
+    assert sap["operations"][0]["description"] == "Install dynamic braking resistor"
+    assert sap["materials_required"] == []
+    assert sap["system_status"] == "LOCAL_DRAFT"
+    assert sap["total_estimated_hours"] is None
 
 
 def test_langgraph_baseline_normal_no_false_alarms():
@@ -204,12 +207,12 @@ def test_langgraph_baseline_normal_no_false_alarms():
 
     assert final_state.values.get("has_active_trip") is False
     assert final_state.values.get("pipeline_status") == "NORMAL_STABLE"
-    assert "incident_report_8d" not in final_state.values
+    assert final_state.values.get("incident_report_8d") is None
 
 
 def test_langgraph_fault_investigation_hitl_approval():
     """Verify fault investigation, parallel hypothesis testing, HITL interrupt, and resume approval."""
-    graph = create_rca_graph()
+    graph = create_rca_graph(decision_client=MeasuredDecisionClient())
     fault_ds = generate_fault_scenario()
     ds_id = TelemetryStore.register(fault_ds, "pytest_fault_trip")
     config = {"configurable": {"thread_id": "pytest-fault-thread"}}
@@ -222,9 +225,10 @@ def test_langgraph_fault_investigation_hitl_approval():
     assert len(paused_state.tasks[0].interrupts) > 0
 
     payload = paused_state.tasks[0].interrupts[0].value
-    assert payload["winning_hypothesis"] == "Overfrequency Deceleration Overvoltage (WECON VM Err06)"
-    assert payload["root_cause_asset"] == "PLC_LX_01"
-    assert len(payload["causal_chain_5_whys"]) == 5
+    assert payload["winning_hypothesis"] == "Observed channel transient"
+    assert payload["root_cause_asset"] == EQUIPMENT_ID
+    assert payload["causal_chain_5_whys"] == []
+    assert payload["missing_evidence"]
 
     # Step 2: Resume with engineer approval
     decision = {
@@ -238,12 +242,12 @@ def test_langgraph_fault_investigation_hitl_approval():
     assert final_state.values.get("pipeline_status") == "COMPLETED"
     assert "incident_report_8d" in final_state.values
     assert "sap_work_order" in final_state.values
-    assert final_state.values["incident_report_8d"]["d4_root_cause_analysis"]["root_cause_asset"] == "PLC_LX_01"
+    assert final_state.values["incident_report_8d"]["d4_root_cause_analysis"]["root_cause_asset"] == EQUIPMENT_ID
 
 
 def test_langgraph_fault_investigation_hitl_rejection():
     """Verify fault investigation handles engineer rejection cleanly without work order emission."""
-    graph = create_rca_graph()
+    graph = create_rca_graph(decision_client=MeasuredDecisionClient())
     fault_ds = generate_fault_scenario()
     ds_id = TelemetryStore.register(fault_ds, "pytest_fault_reject")
     config = {"configurable": {"thread_id": "pytest-fault-reject-thread"}}
@@ -261,4 +265,4 @@ def test_langgraph_fault_investigation_hitl_rejection():
     final_state = graph.get_state(config)
 
     assert final_state.values.get("pipeline_status") == "REJECTED"
-    assert "sap_work_order" not in final_state.values
+    assert final_state.values.get("sap_work_order") is None

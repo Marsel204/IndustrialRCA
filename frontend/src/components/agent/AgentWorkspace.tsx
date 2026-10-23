@@ -90,7 +90,7 @@ const MarkdownContent: React.FC<{ content: string }> = ({ content }) => {
             );
           },
           blockquote: ({ ...props }) => (
-            <blockquote className="border-l-3 border-teal-500 bg-teal-50/50 px-3 py-2 my-2.5 rounded-r text-xs text-teal-900" {...props} />
+            <blockquote className="border-l border-teal-500 bg-teal-50/50 px-3 py-2 my-2.5 rounded-r text-xs text-teal-900" {...props} />
           ),
           hr: ({ ...props }) => (
             <hr className="my-3 border-slate-200" {...props} />
@@ -182,16 +182,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     !latestIncident?.has_incident
   );
 
-  const rawFaultCode =
-    (latestIncident?.has_incident ? latestIncident?.incident_data?.fault_code : null) ||
-    rcaState?.fault_code ||
-    latestIncident?.incident_data?.fault_code ||
-    (rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR02' || rcaState?.winning_hypothesis?.name?.includes('Err02') ? 2 :
-     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR06' || rcaState?.winning_hypothesis?.name?.includes('Err06') ? 6 :
-     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR03' || rcaState?.winning_hypothesis?.name?.includes('Err03') ? 3 :
-     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR11' || rcaState?.winning_hypothesis?.name?.includes('Err11') ? 11 :
-     rcaState?.winning_hypothesis?.hypothesis_id === 'H_VFD_ERR13' || rcaState?.winning_hypothesis?.name?.includes('Err13') ? 13 :
-     (rcaState?.has_active_trip ? (latestIncident?.incident_data?.fault_code || 2) : 0));
+  const rawFaultCode = latestIncident?.incident_data?.fault_code ?? rcaState?.fault_code ?? 0;
 
   const faultCode = isRigNominalRunning ? 0 : rawFaultCode;
 
@@ -202,309 +193,21 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
      faultCode > 0)
   );
 
-  // Build Diagnostic Tool Executions from rcaState
-  const autonomousTools: ToolExecutionItem[] = useMemo(() => {
-    const assetId = rcaState?.root_cause_asset || 'VFD_VM_01';
-    const faultStr = faultCode > 0 ? (faultCode >= 10 ? `Err${faultCode}` : `Err0${faultCode}`) : 'Nominal';
-    const winningHypo = rcaState?.winning_hypothesis;
+  // Render only tools actually executed by the backend investigation.
+  const autonomousTools: ToolExecutionItem[] = useMemo(() =>
+    (rcaState?.agent_observations || []).map((observation): ToolExecutionItem => ({
+      id: observation.observation_id,
+      name: observation.tool,
+      args: observation.arguments,
+      status: observation.error ? 'failed' : 'completed',
+      duration_ms: observation.elapsed_ms,
+      summary: observation.error || `${observation.source_type} observation`,
+      output_details: JSON.stringify(observation.result ?? observation.error ?? 'No result', null, 2),
+      inspector_tab: observation.tool === 'trace_topology' ? 'topology' : 'hypotheses',
+      tab_label: 'Inspect evidence',
+    })), [rcaState?.agent_observations]);
 
-    if (!isIncidentActive) {
-      return [
-        {
-          id: 'tool-stream',
-          name: 'LiveTelemetryMonitor',
-          command: `LiveTelemetryMonitor --asset ${assetId} --protocol Modbus_RTU --rate 1Hz`,
-          args: {
-            asset: assetId,
-            channels: ['f_out', 'v_dc', 'current', 'rpm', 'fault_code'],
-            buffer_window: '60s',
-            status: 'HEALTHY',
-          },
-          status: 'completed',
-          duration_ms: 64,
-          summary: `on ${assetId} (1 Hz Modbus stream: 40.00 Hz, 182.0 V, 1.15 A nominal)`,
-          output_details: {
-            f_out_hz: 40.0,
-            v_dc_volts: 182.0,
-            motor_current_amps: 1.15,
-            rpm: 1199.0,
-            fault_code: 0,
-            trip_status: 'NONE (Nominal Operation)',
-          },
-          logs: [
-            `[LiveTelemetryMonitor] Ingesting Modbus RTU telemetry for ${assetId}...`,
-            '[LiveTelemetryMonitor] 1 Hz buffer synchronized. All sensor channels nominal.',
-          ],
-          inspector_tab: 'telemetry',
-          tab_label: 'Inspect Telemetry',
-        },
-        {
-          id: 'tool-limits',
-          name: 'OperationalEnvelopeValidator',
-          command: `OperationalEnvelopeValidator --asset ${assetId} --standard ISA95`,
-          args: {
-            v_dc_trip_limit: 195.0,
-            current_trip_limit: 2.50,
-            f_out_ceiling_hz: 40.00,
-          },
-          status: 'completed',
-          duration_ms: 82,
-          summary: `evaluating ISA-95 operational envelope (all values within safe margins)`,
-          output_details: {
-            v_dc_margin_volts: '+13.0 V below trip threshold',
-            current_margin_amps: '+1.35 A below trip threshold',
-            health_score_pct: 100,
-          },
-          logs: [
-            '[OperationalEnvelopeValidator] Checking DC bus voltage (182.0V < 195.0V ceiling) -> PASS.',
-            '[OperationalEnvelopeValidator] Checking motor stator current (1.15A < 2.50A trip) -> PASS.',
-            '[OperationalEnvelopeValidator] Operational envelope nominal.',
-          ],
-          inspector_tab: 'hypotheses',
-          tab_label: 'View Hypotheses',
-        },
-        {
-          id: 'tool-watchdog',
-          name: 'HealthWatchdog',
-          command: `HealthWatchdog --subscribe MQTT://1883 --topic factory/bench01/vfd/telemetry`,
-          args: {
-            mqtt_broker: '1883',
-            trip_register: '700BH',
-            trip_condition: 'Reg 700BH > 0',
-          },
-          status: 'completed',
-          duration_ms: 45,
-          summary: `listening for trip trigger events on MQTT / PLC D-variable`,
-          output_details: {
-            connection: 'ESTABLISHED',
-            trip_listener: 'ACTIVE',
-            standby_mode: 'AUTONOMOUS_RCA_READY',
-          },
-          logs: [
-            '[HealthWatchdog] Connected to Mosquitto MQTT broker.',
-            '[HealthWatchdog] Listening on factory/bench01/vfd/telemetry. Trip triggers armed.',
-          ],
-          inspector_tab: 'telemetry',
-          tab_label: 'Inspect Status',
-        },
-      ];
-    }
-
-    return [
-      {
-        id: 'tool-cpd',
-        name: 'ChangePointDetector',
-        command: `ChangePointDetector --asset ${assetId} --window 10s --tags [v_dc,current,f_out]`,
-        args: {
-          asset: assetId,
-          monitored_tags: ['v_dc', 'current', 'f_out', 'rpm'],
-          detection_algorithm: 'Pelt (Pruned Exact Linear Time)',
-          penalty: 'BIC (Bayesian Information Criterion)',
-        },
-        status: isPipelineRunning ? 'running' : 'completed',
-        duration_ms: 284,
-        summary: `on ${assetId} (${
-          faultCode === 2
-            ? 'abrupt stop transient: current peak 3.85A'
-            : faultCode === 3
-            ? 'deceleration ramp transient: current surge 2.75A'
-            : faultCode === 11
-            ? 'sustained thermal overload: current 2.45A'
-            : 'transient shift: DC bus 182V → 202.5V, current peak 2.62A'
-        })`,
-        output_details: {
-          changepoints_detected: rcaState?.detected_anomalies?.length || 2,
-          critical_event:
-            faultCode === 2
-              ? 'Instantaneous motor stall current peak (3.85A > 2.50A trip setpoint)'
-              : faultCode === 3
-              ? 'Deceleration ramp current surge (2.75A > 2.50A trip threshold)'
-              : faultCode === 11
-              ? 'Sustained thermal overload current (2.45A > 2.00A thermal threshold)'
-              : 'DC bus overvoltage escalation (202.5V > 195.0V trip threshold)',
-          timestamp: 't = 14.200s relative to baseline',
-          status: 'PRIMARY_TRIGGER_VALIDATED',
-        },
-        logs: [
-          `[ChangePointDetector] Loading high-resolution 100Hz buffer for ${assetId}...`,
-          '[ChangePointDetector] Computed L2-norm cost matrix across 4 channels.',
-          `[ChangePointDetector] Changepoint confirmed at sample #1420 (anomaly score: 0.942).`,
-          faultCode === 2
-            ? `[ChangePointDetector] Operational ceiling breached: motor current surged past 2.50A trip limit.`
-            : faultCode === 3
-            ? `[ChangePointDetector] Decel ramp limit breached: current surged to 2.75A during ramp.`
-            : faultCode === 11
-            ? `[ChangePointDetector] Continuous thermal limit breached: motor drawn 2.45A sustained.`
-            : `[ChangePointDetector] Operational ceiling breached: DC bus reached threshold.`,
-        ],
-        inspector_tab: 'telemetry',
-        tab_label: 'Inspect Telemetry',
-      },
-      {
-        id: 'tool-topo',
-        name: 'TopologyTracer',
-        command: `TopologyTracer --source PLC_LX_01 --target ${assetId} --depth 2`,
-        args: {
-          target: assetId,
-          upstream_controller: 'PLC_LX_01',
-          protocol: 'Modbus RTU / RS485 (19200 baud, 8-E-1)',
-          isa95_hierarchy: ['Enterprise', 'Site_01', 'Area_VFD', 'Cell_01', assetId],
-        },
-        status: isPipelineRunning ? 'running' : 'completed',
-        duration_ms: 142,
-        summary: `on PLC_LX_01 → ${assetId}`,
-        output_details: {
-          upstream_nodes: ['PLC_LX_01', 'Mains_Supply_230V', 'Braking_Unit_P_PB'],
-          downstream_nodes: ['Induction_Motor_M01', 'Shaft_Encoder_E01'],
-          path_verification: 'Confirmed: Braking resistor terminal P+/PB unpopulated.',
-        },
-        logs: [
-          `[TopologyTracer] Traversing ISA-95 Equipment Graph for ${assetId}...`,
-          '[TopologyTracer] Verified physical link: PLC_LX_01 D-variable register D100 → VFD Run Command.',
-          '[TopologyTracer] Checked auxiliary circuit: Terminals P+ and PB open circuit.',
-        ],
-        inspector_tab: 'topology',
-        tab_label: 'View Topology',
-      },
-      {
-        id: 'tool-fmea',
-        name: 'FMEAEngine',
-        command: `FMEAEngine --evaluate [Err02,Err06,Err03,Err11,Err13] --dataset ${rcaState?.thread_id || 'active'}`,
-        args: {
-          fault_observed: faultStr,
-          candidate_hypotheses: ['H_VFD_ERR06', 'H_VFD_ERR02', 'H_VFD_ERR03', 'H_VFD_ERR11', 'H_VFD_ERR13'],
-          methodology: 'Deterministic Multi-Hypothesis Falsification (MIL-STD-1629A)',
-        },
-        status: isPipelineRunning ? 'running' : 'completed',
-        duration_ms: 512,
-        summary: `evaluating VFD failure modes (Err02, Err06, Err03, Err11, Err13)`,
-        output_details: {
-          winning_hypothesis:
-            winningHypo?.name ||
-            (faultCode === 2
-              ? 'Forced Sudden Deceleration Overcurrent (WECON VM Err02)'
-              : faultCode === 3
-              ? 'Deceleration Ramp Overcurrent (WECON VM Err03)'
-              : faultCode === 11
-              ? 'Motor Thermal Overload (WECON VM Err11)'
-              : faultCode === 13
-              ? 'Output Phase Loss (WECON VM Err13)'
-              : 'Overfrequency Deceleration Overvoltage (WECON VM Err06)'),
-          confidence: winningHypo?.confidence
-            ? `${(winningHypo.confidence * 100).toFixed(0)}%`
-            : '98%',
-          refuted_hypotheses:
-            faultCode === 2
-              ? [
-                  'H_VFD_ERR06: Decel Overvoltage (Refuted: trip was Err02 overcurrent)',
-                  'H_VFD_ERR03: Decel Ramp OC (Refuted: trip was instantaneous abrupt stop)',
-                  'H_VFD_ERR11: Motor Overheat (Refuted: current within thermal rating)',
-                ]
-              : faultCode === 3
-              ? [
-                  'H_VFD_ERR06: Decel Overvoltage (Refuted: trip was Err03 decel ramp overcurrent)',
-                  'H_VFD_ERR02: Sudden Decel Stop (Refuted: trip occurred during controlled ramp)',
-                  'H_VFD_ERR11: Motor Overheat (Refuted: winding temp within tolerance)',
-                ]
-              : faultCode === 11
-              ? [
-                  'H_VFD_ERR06: Decel Overvoltage (Refuted: trip was Err11 thermal overload)',
-                  'H_VFD_ERR02: Sudden Decel Stop (Refuted: no abrupt deceleration command)',
-                  'H_VFD_ERR03: Decel Ramp OC (Refuted: trip was thermal accumulation, not ramp surge)',
-                ]
-              : faultCode === 13
-              ? [
-                  'H_VFD_ERR06: Decel Overvoltage (Refuted: trip was Err13 output phase loss)',
-                  'H_VFD_ERR02: Sudden Decel Stop (Refuted: phase current collapsed to 0A)',
-                  'H_VFD_ERR11: Motor Overheat (Refuted: no continuous thermal overload)',
-                ]
-              : [
-                  'H_VFD_ERR02: Sudden Decel Overcurrent (Refuted: peak current below threshold)',
-                  'H_VFD_ERR03: Decel Ramp OC (Refuted: DC bus voltage exceeded 195V ceiling)',
-                  'H_VFD_ERR11: Motor Overheat (Refuted: PT100 nominal)',
-                ],
-          mechanism:
-            faultCode === 2
-              ? 'Kinetic back-EMF discharge surge from spinning induction rotor upon abrupt PLC stop'
-              : faultCode === 3
-              ? 'Deceleration ramp time F0.18 too short for high load inertia, causing excessive regenerative energy and overcurrent'
-              : faultCode === 11
-              ? 'Continuous mechanical overload exceeding rated motor full-load current (2.0A), triggering electronic thermal relay'
-              : faultCode === 13
-              ? 'Open circuit, loose screw, or broken stator lead on output terminals U, V, or W interrupting 3-phase current continuity'
-              : 'Regenerative kinetic energy dump into DC bus capacitors without dynamic dissipation',
-        },
-        logs: [
-          '[FMEAEngine] Ingesting fault symptoms and boundary criteria...',
-          faultCode === 2
-            ? '[FMEAEngine] Testing H_VFD_ERR02: Instantaneous stop surge > 2.50A -> CONFIRMED (p=0.98).'
-            : faultCode === 3
-            ? '[FMEAEngine] Testing H_VFD_ERR03: Decel ramp current surge > 2.50A -> CONFIRMED (p=0.98).'
-            : faultCode === 11
-            ? '[FMEAEngine] Testing H_VFD_ERR11: Sustained current > 2.00A thermal threshold -> CONFIRMED (p=0.98).'
-            : faultCode === 13
-            ? '[FMEAEngine] Testing H_VFD_ERR13: Phase current collapse to 0.00A and shaft stall -> CONFIRMED (p=0.98).'
-            : '[FMEAEngine] Testing H_VFD_ERR06: DC bus > 195V during rapid decel / 50Hz ramp -> CONFIRMED (p=0.98).',
-          '[FMEAEngine] FMEA matrix convergence achieved.',
-        ],
-        inspector_tab: 'hypotheses',
-        tab_label: 'View Hypotheses',
-      },
-      {
-        id: 'tool-cmms',
-        name: 'CMMSConnector',
-        command:
-          'CMMSConnector --action create_order --template SAP_PM01 --standard ISO14224',
-        args: {
-          system: 'SAP S/4HANA Plant Maintenance',
-          order_type: 'PM01 (Corrective Maintenance)',
-          equipment: assetId,
-          priority: '1 - Emergency Immediate Shutdown',
-        },
-        status: isPipelineRunning ? 'running' : 'completed',
-        duration_ms: 195,
-        summary: `verifying work order WO-VFD-2026-0042 & Global 8D deliverable`,
-        output_details: {
-          work_order_id: rcaState?.sap_work_order?.order_number || 'WO-VFD-2026-0042',
-          notification:
-            rcaState?.sap_work_order?.notification_number || 'NOTIF-2026-0089',
-          actions_required:
-            faultCode === 2
-              ? [
-                  'Implement controlled deceleration ramp in PLC ladder logic before cutting run signal',
-                  'Tune Wecon VM parameter F0.18 (Decel time) from 0.5s to 3.0s',
-                  'Install dynamic braking resistor on terminals P+ and PB (100 Ohm, 200W)',
-                ]
-              : faultCode === 3
-              ? [
-                  'Increase deceleration time parameter F0.18 from 0.5s to 3.5s to reduce regenerative current',
-                  'Enable overcurrent stall prevention during deceleration (Parameter F3.00 = 1)',
-                  'Install external dynamic braking resistor on terminals P+ and PB (100 Ohm, 200W)',
-                ]
-              : faultCode === 11
-              ? [
-                  'Inspect driven mechanical equipment for mechanical binding, bearing wear, or load jamming',
-                  'Verify motor cooling fan clearance and ensure ambient ventilation airflow is unobstructed',
-                  'Calibrate motor electronic thermal overload protection parameter F1.07 to motor nameplate FLA',
-                ]
-              : [
-                  'Install external dynamic braking resistor on terminals P+ and PB (100 Ohm, 200W)',
-                  'Tune Wecon VM parameter F0.18 (Decel time) from 0.5s to 3.0s',
-                  'Verify parameter F0.10 voltage clamp configuration',
-                ],
-        },
-        logs: [
-          '[CMMSConnector] Connecting to SAP PM REST API endpoint...',
-          '[CMMSConnector] Drafted Order WO-VFD-2026-0042 in System Status: CRTD.',
-          '[CMMSConnector] Linked Global 8D Root Cause Report with ISO 14224 failure taxonomy.',
-        ],
-        inspector_tab: 'deliverables',
-        tab_label: 'View Deliverables',
-      },
-    ];
-  }, [rcaState, isPipelineRunning]);
-
-  // Handle follow-up chat with simulated agent tool calling and live reasoning
+  // Follow-up chat explains current context; no client-side tool executions are invented.
   const handleSendChat = (promptText?: string) => {
     const text = promptText || inputPrompt;
     if (!text.trim() || isStreaming) return;
@@ -523,116 +226,8 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
     setCurrentReasoning('');
     setCurrentContent('');
 
-    // Generate contextual simulated tool calls based on user query
-    const lower = text.toLowerCase();
     const chatTools: ToolExecutionItem[] = [];
-
-    if (
-      lower.includes('dc bus') ||
-      lower.includes('207v') ||
-      lower.includes('voltage') ||
-      lower.includes('v_dc')
-    ) {
-      chatTools.push({
-        id: `chat-tool-${Date.now()}-1`,
-        name: 'QueryTelemetry',
-        command: `QueryTelemetry --sensor v_dc --asset VFD_VM_01 --window 30s`,
-        args: { sensor: 'v_dc', asset: 'VFD_VM_01', aggregate: 'max_and_std' },
-        status: 'completed',
-        duration_ms: 120,
-        summary: `on VFD_VM_01 (v_dc range: 181.8V to 206.9V)`,
-        output_details: { peak_v_dc: 206.9, trip_threshold: 195.0, duration_over_limit_ms: 410 },
-        logs: [
-          '[QueryTelemetry] Retrieved 300 data points from TSDB.',
-          '[QueryTelemetry] Peak DC bus recorded at 50.00 Hz: 206.9V.',
-        ],
-        inspector_tab: 'telemetry',
-        tab_label: 'Inspect Telemetry',
-      });
-    }
-
-    if (
-      lower.includes('braking') ||
-      lower.includes('resistor') ||
-      lower.includes('p+/pb') ||
-      lower.includes('f0.18') ||
-      lower.includes('parameter')
-    ) {
-      chatTools.push({
-        id: `chat-tool-${Date.now()}-2`,
-        name: 'CheckOEMManual',
-        command: `CheckOEMManual --model Wecon_VM --section "Braking Resistor & F0.18"`,
-        args: {
-          manual: 'Wecon VM Series User Manual Rev 3.2',
-          section: 'Dynamic Braking Specification',
-        },
-        status: 'completed',
-        duration_ms: 165,
-        summary: `for Wecon VM (P+/PB recommended: 100Ω 200W, min 75Ω)`,
-        output_details: {
-          recommended_resistance: '100 Ohm',
-          min_resistance: '75 Ohm',
-          param_f0_18_default: '5.0s',
-        },
-        logs: [
-          '[CheckOEMManual] Matched section 4.3: Braking Resistor Selection.',
-          '[CheckOEMManual] Overvoltage stall prevention requires F0.10=1.',
-        ],
-        inspector_tab: 'hypotheses',
-        tab_label: 'View Hypotheses',
-      });
-    }
-
-    if (lower.includes('err02') || lower.includes('current') || lower.includes('stall')) {
-      chatTools.push({
-        id: `chat-tool-${Date.now()}-3`,
-        name: 'AnalyzeCurrentTransient',
-        command: `AnalyzeCurrentTransient --sensor current --threshold 2.5A`,
-        args: { sensor: 'current', threshold_amps: 2.5, event: 'Forced Stop' },
-        status: 'completed',
-        duration_ms: 140,
-        summary: `on Motor Current (spike 2.62A during immediate 0Hz step)`,
-        output_details: { peak_current: 2.62, trip_setpoint: 2.50, di_trigger: 'PLC_LX_01 DI Stop Command' },
-        logs: [
-          '[AnalyzeCurrentTransient] Rapid decel caused back-EMF opposing stator field.',
-          '[AnalyzeCurrentTransient] Current trip Err02 triggered in 12ms.',
-        ],
-        inspector_tab: 'telemetry',
-        tab_label: 'Inspect Telemetry',
-      });
-    }
-
-    // Greetings, pleasantries, and casual conversational remarks do not require diagnostic tool calls
-    const cleanedText = lower.replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    const isGreetingOrCasual =
-      /^(hi|hello|hey|heya|howdy|hola|yo|greetings|good\s+(morning|afternoon|evening|day|night))(\s+(copilot|there|team|bot|assistant|rca|friend))?$/i.test(
-        cleanedText
-      ) ||
-      /^(thanks|thank\s+you|thx|cheers|bye|goodbye|cya|see\s+you)$/i.test(cleanedText) ||
-      /^(who\s+are\s+you|what\s+can\s+you\s+do|what\s+are\s+you|help|how\s+are\s+you|how\s+are\s+you\s+doing|hows\s+it\s+going|whats\s+up|sup)$/i.test(
-        cleanedText
-      );
-
-    if (chatTools.length === 0 && !isGreetingOrCasual && cleanedText.length > 0) {
-      chatTools.push({
-        id: `chat-tool-${Date.now()}-def`,
-        name: 'SearchDiagnosticKB',
-        command: `SearchDiagnosticKB --query "${text.slice(0, 40)}"`,
-        args: { query: text, domain: 'Industrial VFD Root Cause Analysis' },
-        status: 'completed',
-        duration_ms: 95,
-        summary: `searching ISO 14224 & OEM knowledge base`,
-        output_details: {
-          matches_found: 3,
-          top_match: 'Wecon VM Dynamic Braking and Deceleration Profile',
-        },
-        logs: ['[SearchDiagnosticKB] Searched 42 technical manuals and 8D incident histories.'],
-        inspector_tab: 'hypotheses',
-        tab_label: 'View Hypotheses',
-      });
-    }
-
-    setActiveStreamingTools(chatTools);
+    setActiveStreamingTools([]);
 
     const assistantMsgId = `asst-${Date.now()}`;
     let accumulatedContent = '';
@@ -659,7 +254,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           {
             id: assistantMsgId,
             role: 'assistant',
-            content: accumulatedContent || 'Diagnosis confirmed by DeepSeek Copilot.',
+            content: accumulatedContent || 'The model returned no answer. Please try again.',
             reasoning_content: accumulatedReasoning || undefined,
             elapsed_time_sec: elapsedSec,
             tools: chatTools,
@@ -680,8 +275,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
             id: assistantMsgId,
             role: 'assistant',
             content:
-              accumulatedContent ||
-              `Diagnosis verified from deterministic FMEA convergence. (Notice: ${err.message})`,
+              `${accumulatedContent ? accumulatedContent + '\n\n' : ''}Copilot unavailable: ${err.message}. Check the API settings and try again.`,
             reasoning_content: accumulatedReasoning || undefined,
             elapsed_time_sec: elapsedSec,
             tools: chatTools,
@@ -728,73 +322,19 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
   const currentA = liveMetric && isTelemetryConnected ? liveMetric.current.toFixed(2) : '0.00';
   const currentRpm = liveMetric && isTelemetryConnected ? liveMetric.rpm.toFixed(0) : '0';
 
-  const defaultThinking = isIncidentActive
-    ? (faultCode === 2
-        ? "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
-          "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
-          "3. Trip setpoint evaluated: Motor stator current breached 2.50 A threshold (reached 3.85 A on forced stop).\n" +
-          "4. Evaluated failure hypotheses: H_VFD_ERR02 (Forced Decel Overcurrent) CONFIRMED; H_VFD_ERR06 REFUTED.\n" +
-          "5. OEM corrective action: Implement controlled deceleration ramp in PLC ladder logic and tune parameter F0.18."
-        : faultCode === 3
-        ? "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
-          "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
-          "3. Trip setpoint evaluated: Deceleration ramp current breached 2.50 A trip threshold (reached 2.75 A).\n" +
-          "4. Evaluated failure hypotheses: H_VFD_ERR03 (Decel Ramp Overcurrent) CONFIRMED; H_VFD_ERR06/02 REFUTED.\n" +
-          "5. OEM corrective action: Increase deceleration time F0.18 to 3.5s and activate overcurrent stall prevention."
-        : faultCode === 11
-        ? "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
-          "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
-          "3. Trip setpoint evaluated: Motor stator current exceeded 2.00 A continuous thermal rating (drawing 2.45 A sustained).\n" +
-          "4. Evaluated failure hypotheses: H_VFD_ERR11 (Motor Thermal Overload) CONFIRMED; transient faults REFUTED.\n" +
-          "5. OEM corrective action: Inspect mechanical load for binding, ensure cooling airflow, and verify F1.07 setpoint."
-        : faultCode === 13
-        ? "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
-          "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
-          "3. Trip setpoint evaluated: Motor line current collapsed to 0.00 A and rotor speed stalled to 0 RPM.\n" +
-          "4. Evaluated failure hypotheses: H_VFD_ERR13 (Output Phase Loss) CONFIRMED; transient faults REFUTED.\n" +
-          "5. OEM corrective action: Inspect terminals U, V, W, re-torque screws to 1.8 N-m, and test stator winding balance."
-        : "1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n" +
-          "2. Operating envelope: 40.00 Hz nominal, 182.0 V DC bus nominal, 1.15 A current, 1199 RPM.\n" +
-          "3. Trip setpoint evaluated: DC bus limit at 195.0 V DC (reaches ~207V at 50 Hz), current limit at 2.50 A.\n" +
-          "4. Evaluated failure hypotheses: H_VFD_ERR06 (Overfrequency > 40 Hz) and H_VFD_ERR02 (Forced Decel Stop).\n" +
-          "5. OEM corrective action: Install dynamic braking resistor on terminals P+/PB and tune parameter F0.18.")
-    : (isTelemetryConnected
-        ? `1. Ingested live Wecon HMI telemetry buffer via embedded TSDB on asset VFD_VM_01.\n` +
-          `2. Operating envelope: ${currentF} Hz nominal, ${currentVdc} V DC bus nominal, ${currentA} A current, ${currentRpm} RPM.\n` +
-          `3. Continuous safety verification: DC bus (${currentVdc} V < 195.0 V ceiling), current (${currentA} A < 2.50 A trip).\n` +
-          `4. All health diagnostics green. Zero hardware trip codes active.\n` +
-          `5. System operating nominal edge monitoring. Ready for hardware trip triggers.`
-        : "1. Telemetry Link Status: DISCONNECTED / OFFLINE (Port 1883 / Modbus RTU).\n" +
-          "2. Ingestion Status: No active telemetry packets received from Wecon VFD bench.\n" +
-          "3. Sensor Monitoring: Channel readings are 0.0 (Data feed offline).\n" +
-          "4. Action Required: Start physical Modbus bridge or click 'Enable Simulation' in the header to simulate test data.");
-
+  const defaultThinking = rcaState?.execution_logs?.join('\n') || 'No investigation has run.';
   const isPaused = rcaState?.is_paused_at_hitl || false;
   const isFinalized = rcaState?.pipeline_status === 'COMPLETED';
-  const isStateResolved =
-    rcaState?.pipeline_status === 'CAUSAL_TRACE_COMPLETED' ||
-    rcaState?.pipeline_status === 'ANALYSIS_COMPLETE' ||
-    rcaState?.pipeline_status === 'COMPLETED' ||
-    rcaState?.pipeline_status === 'AWAITING_REVIEW';
+  const isStateResolved = ['CAUSAL_TRACE_COMPLETED', 'ANALYSIS_COMPLETE', 'COMPLETED', 'AWAITING_REVIEW', 'INCONCLUSIVE', 'REJECTED', 'NORMAL_STABLE'].includes(rcaState?.pipeline_status || '');
   const isPipelineActive = isPipelineRunning && !isStateResolved;
-
-  const displayedThinking =
-    rcaState?.deepseek_evaluation?.reasoning_content ||
-    rcaState?.deepseek_evaluation?.content ||
-    defaultThinking;
-
-  const displayedDiagnosis = isIncidentActive
-    ? rcaState?.root_cause_description ||
-      (faultCode === 2
-        ? 'Operator actuated PLC On/Off stop button via PLC D-variable register, cutting the run command instantaneously without a controlled deceleration ramp routine (F0.18 too steep and braking resistor absent), inducing a 3.85 A kinetic back-EMF overcurrent surge that tripped the drive on Err02.'
-        : faultCode === 3
-        ? 'Drive commanded a deceleration ramp with parameter F0.18 set too fast (0.5s) for the high load inertia, generating excessive regenerative current and causing motor stator current to surge to 2.75 A (breaching 2.50 A trip threshold), tripping the drive on Err03 (Deceleration Ramp Overcurrent).'
-        : faultCode === 11
-        ? 'Motor operated continuously under sustained mechanical overload, drawing 2.45 A (exceeding continuous thermal rating of 2.00 A) for longer than the calibrated thermal inverse-time threshold, tripping the VFD on Err11 (Motor Thermal Overload).'
-        : 'Output frequency setpoint was ramped past the 40.00 Hz operational ceiling toward 50.00 Hz, causing DC bus voltage to escalate to 202.5 V (breaching the calibrated 195.0 V trip limit) because Wecon VM parameter F0.10 was unclamped and dynamic braking resistor terminals P+/PB were unpopulated.')
-    : (isTelemetryConnected
-        ? `Continuous real-time telemetry from Wecon VM VFD (VFD_VM_01) is nominal. Output frequency (${currentF} Hz), DC bus voltage (${currentVdc} V), and motor current (${currentA} A) remain within calibrated ISA-95 envelopes. Listening for hardware trip trigger over MQTT / PLC D-variable.`
-        : 'Live telemetry stream from Wecon VM VFD (VFD_VM_01) is currently DISCONNECTED. No live sensor packets received from MQTT broker (port 1883). Connect physical hardware bridge or click "Enable Simulation" in the navigation bar.');
+  const displayedThinking = defaultThinking;
+  const displayedDiagnosis = rcaState?.pipeline_status === 'INCONCLUSIVE'
+    ? `Investigation inconclusive. ${(rcaState.missing_evidence || []).join(' ')}`
+    : rcaState?.root_cause_description || (isIncidentActive
+      ? 'Investigation pending. No supported diagnosis is available.'
+      : isTelemetryConnected
+        ? `Latest readings: ${currentF} Hz, ${currentVdc} V DC, ${currentA} A, ${currentRpm} RPM. See configured limits and source details in telemetry.`
+        : 'Telemetry is offline. Connect the gateway or enable simulation to collect data.');
 
   return (
     <div className="flex flex-col h-full bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden text-slate-800 font-sans">
@@ -847,7 +387,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
           ) : (
             <span className="flex items-center space-x-1.5 text-[11px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>Nominal Monitoring</span>
+              <span>Monitoring</span>
             </span>
           )}
         </div>
@@ -896,7 +436,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                   <div className="flex items-center space-x-2">
                     <Brain className="w-3.5 h-3.5 text-purple-600" />
                     <span className="font-semibold text-slate-700 group-hover:text-purple-900">
-                      Thought for 1.8s
+                      Investigation trace
                     </span>
                     <span className="text-slate-400 font-normal">
                       ({displayedThinking.split('\n').length} diagnostic steps)
@@ -1060,15 +600,15 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                     {isIncidentActive
                       ? rcaState?.winning_hypothesis
                         ? `${(rcaState.winning_hypothesis.confidence * 100).toFixed(0)}% Confidence`
-                        : '98% Confidence'
-                      : '100% Health Score'}
+                        : 'Unresolved'
+                      : 'Monitoring'}
                   </span>
                 </div>
                 <MarkdownContent content={displayedDiagnosis} />
               </div>
 
               {/* Action / Review Card: 8D Report + SAP Work Order */}
-              {isIncidentActive ? (
+              {(isPaused || isFinalized) ? (
                 <div className="p-3 bg-teal-50/40 border border-teal-200/80 rounded-lg flex items-center justify-between gap-3 shadow-2xs">
                   <div className="flex items-center space-x-2.5 min-w-0">
                     <div className="w-8 h-8 rounded-md bg-teal-100/70 border border-teal-200 flex items-center justify-center text-teal-700 flex-shrink-0">
@@ -1076,11 +616,11 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs font-mono font-bold text-teal-900 truncate">
-                        1 SAP Work Order (PM01) + 8D Report generated
+                        {isFinalized ? 'Local PM01 draft and 8D report generated' : 'Diagnosis ready for human review'}
                       </div>
                       <div className="text-[11px] text-teal-700/80 font-sans truncate">
                         {isFinalized
-                          ? `Authorized by ${rcaState?.incident_report_8d?.d8_sign_off?.reviewed_by || 'Lead Reliability Engineer'} · Deliverables Released`
+                          ? `Authorized by ${rcaState?.incident_report_8d?.d8_sign_off?.reviewed_by || 'Lead Reliability Engineer'} · Local drafts created`
                           : isPaused
                           ? 'Awaiting Lead Reliability Engineer digital signature sign-off'
                           : 'Awaiting Lead Reliability Engineer digital signature sign-off'}
@@ -1090,9 +630,10 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
 
                   <button
                     onClick={onOpenReviewModal}
-                    className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white text-xs font-mono font-bold rounded-md shadow-2xs flex items-center space-x-1.5 transition-colors cursor-pointer flex-shrink-0"
+                    disabled={!isPaused}
+                    className="disabled:opacity-50 disabled:cursor-not-allowed px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white text-xs font-mono font-bold rounded-md shadow-2xs flex items-center space-x-1.5 transition-colors cursor-pointer flex-shrink-0"
                   >
-                    <span>Review & Authorize</span>
+                    <span>{isFinalized ? 'Reviewed' : 'Review & Authorize'}</span>
                   </button>
                 </div>
               ) : (
@@ -1113,7 +654,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                       <div className={`text-xs font-mono font-bold truncate ${
                         isTelemetryConnected ? 'text-emerald-900' : 'text-slate-800'
                       }`}>
-                        {isTelemetryConnected ? 'System Nominal · Zero Active Incidents' : 'Telemetry Link Disconnected'}
+                        {isIncidentActive ? 'No maintenance artifacts available' : isTelemetryConnected ? 'Telemetry monitoring' : 'Telemetry Link Disconnected'}
                       </div>
                       <div className={`text-[11px] font-sans truncate ${
                         isTelemetryConnected ? 'text-emerald-700/80' : 'text-slate-500'
@@ -1129,7 +670,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                       ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
                       : 'bg-slate-200 text-slate-700 border-slate-300'
                   }`}>
-                    {isTelemetryConnected ? 'Nominal' : 'Offline'}
+                    {isIncidentActive ? 'Unresolved' : isTelemetryConnected ? 'Monitoring' : 'Offline'}
                   </span>
                 </div>
               )}
@@ -1183,7 +724,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
                           <div className="flex items-center space-x-2">
                             <Brain className="w-3.5 h-3.5 text-purple-600" />
                             <span className="font-semibold text-slate-700 group-hover:text-purple-900">
-                              Thought for {msg.elapsed_time_sec || '1.2'}s
+                              Response time {msg.elapsed_time_sec ?? '—'}s
                             </span>
                           </div>
                           {isCoTMsgExpanded ? (
@@ -1375,7 +916,7 @@ export const AgentWorkspace: React.FC<AgentWorkspaceProps> = ({
               }`}
             />
             <span>
-              Engine: {apiKeyStatus?.has_key ? 'Live DeepSeek API' : 'Deterministic Simulation Mode'}
+              Engine: {apiKeyStatus?.has_key ? 'DeepSeek configured' : 'AI unavailable · configure a key'}
             </span>
           </div>
           {onOpenApiKeyModal && (

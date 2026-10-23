@@ -106,7 +106,7 @@ export const ArtifactInspector: React.FC<ArtifactInspectorProps> = ({
         </div>
 
         <div className={currentTab === 'topology' ? 'block' : 'hidden'}>
-          <TopologyTab topology={topology} />
+          <TopologyTab topology={topology} rcaState={rcaState} />
         </div>
 
         <div className={currentTab === 'hypotheses' ? 'flex-1 flex flex-col min-h-full' : 'hidden'}>

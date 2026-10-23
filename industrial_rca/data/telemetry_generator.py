@@ -183,54 +183,22 @@ def generate_vfd_dataset(
             from industrial_rca.tools.influx_tool import InfluxDBTelemetryTool
             df = InfluxDBTelemetryTool().get_live_telemetry(limit=duration_sec)
 
-        # Standardize required columns
-        for col, default in [
-            ("f_out", 40.0),
-            ("f_target", 40.0),
-            ("current", 0.0),
-            ("v_dc", 182.0),
-            ("v_out", 220.0),
-            ("rpm", 1199.0),
-            ("torque", 2.2),
-            ("power", 0.0),
-            ("fault_code", 0),
-        ]:
-            if col not in df.columns:
-                df[col] = default
-
-        if "timestamp_sec" not in df.columns:
+        if "timestamp_sec" not in df.columns and not df.empty:
             df["timestamp_sec"] = np.arange(len(df))
-
-        # Maintain legacy tag aliases for backward compatibility with existing tests/inspectors
-        if "PT-30101" not in df.columns:
-            df["PT-30101"] = 2.40
-        if "DPS-30101" not in df.columns:
-            df["DPS-30101"] = 0.12
-        if "VI-301-R" not in df.columns:
-            df["VI-301-R"] = 1.80
-        if "TI-301-DE" not in df.columns:
-            df["TI-301-DE"] = 48.50
-        if "IT-30101" not in df.columns:
-            df["IT-30101"] = df["current"] * 60.0
-
-        t_wf_norm, sig_norm = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
-        t_wf_cav, sig_cav = generate_high_frequency_vibration(is_cavitating=False, seed=seed)
-
-        has_trip = bool((df["fault_code"].max() or 0) > 0)
-
+        simulated = bool(df.attrs.get("is_simulated", False))
+        codes = pd.to_numeric(df.get("fault_code", pd.Series(dtype=float)), errors="coerce").dropna()
+        fault_code = int(codes.iloc[-1]) if len(codes) else 0
         return TelemetryDataset(
-            scenario_name="Wecon VFD Live Telemetry (Physical HMI / MQTT)",
+            scenario_name="Simulated live telemetry" if simulated else "Live telemetry buffer",
             df_1hz=df,
             metadata={
-                "asset_id": VFD_EQUIPMENT_ID,
-                "duration_sec": len(df),
-                "condition": "HARDWARE_FAULT_TRIP" if has_trip else "LIVE_STREAM",
-                "anomaly_expected": bool(has_trip),
-                "scenario": "live_stream",
-                "fault_code": int(df["fault_code"].max()),
+                "is_simulated": simulated,
+                "source_type": "simulated" if simulated else "measured" if not df.empty else "unavailable",
+                "asset_id": VFD_EQUIPMENT_ID, "duration_sec": len(df),
+                "condition": "HARDWARE_FAULT_TRIP" if fault_code else "LIVE_STREAM",
+                "anomaly_expected": bool(fault_code), "scenario": "live_stream", "fault_code": fault_code,
             },
-            normal_waveform={"t": t_wf_norm, "signal": sig_norm},
-            fault_waveform={"t": t_wf_cav, "signal": sig_cav},
+            normal_waveform={}, fault_waveform={},
         )
 
     elif scenario in ("nominal", "exp_nominal"):
@@ -270,6 +238,8 @@ def generate_vfd_dataset(
             scenario_name="Wecon VM VFD 40 Hz Nominal Baseline",
             df_1hz=df,
             metadata={
+                "is_simulated": True,
+                "source_type": "simulated",
                 "asset_id": VFD_EQUIPMENT_ID,
                 "duration_sec": duration_sec,
                 "condition": "HEALTHY",
@@ -331,6 +301,8 @@ def generate_vfd_dataset(
             scenario_name="Experiment 1: Forced Sudden Decel Trip (Err02)",
             df_1hz=df,
             metadata={
+                "is_simulated": True,
+                "source_type": "simulated",
                 "asset_id": VFD_EQUIPMENT_ID,
                 "duration_sec": duration_sec,
                 "condition": "HARDWARE_FAULT_TRIP",
@@ -406,6 +378,8 @@ def generate_vfd_dataset(
             scenario_name="Experiment 2: Overfrequency Excursion Trip (Err06)",
             df_1hz=df,
             metadata={
+                "is_simulated": True,
+                "source_type": "simulated",
                 "asset_id": VFD_EQUIPMENT_ID,
                 "duration_sec": duration_sec,
                 "condition": "HARDWARE_FAULT_TRIP",
@@ -471,6 +445,8 @@ def generate_vfd_dataset(
             scenario_name="Output Phase Loss Trip (Err13)",
             df_1hz=df,
             metadata={
+                "is_simulated": True,
+                "source_type": "simulated",
                 "asset_id": VFD_EQUIPMENT_ID,
                 "duration_sec": duration_sec,
                 "condition": "HARDWARE_FAULT_TRIP",

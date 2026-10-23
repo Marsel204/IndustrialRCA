@@ -1,3 +1,5 @@
+> Historical documentation of the original scripted demo. For the adaptive implementation and current verification, see [README](README.md) and [the refactor report](docs/agentic-refactor-report.md).
+
 # Industrial RCA System: Architecture Rewrite Walkthrough
 **Modern Light Agent-First Split Workspace + React 19 + TypeScript + FastAPI/SSE Architecture**
 

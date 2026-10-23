@@ -4,9 +4,9 @@ Provides mock integration with Enterprise EAM/CMMS (SAP PM / IBM Maximo).
 Exposes maintenance history, oil analysis logs, and generates SAP PM01 Corrective Work Orders.
 """
 
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone
-import random
+from datetime import UTC, datetime
+from typing import Any
+from uuid import uuid4
 
 
 class CMMSConnector:
@@ -55,11 +55,14 @@ class CMMSConnector:
             "P-301A": [],
         }
 
-    def query_maintenance_history(self, asset_id: str) -> List[Dict[str, Any]]:
+    def query_maintenance_history(self, asset_id: str) -> list[dict[str, Any]]:
         """Query past work orders and maintenance logs for an asset."""
-        return self._maintenance_history.get(asset_id, self._maintenance_history.get("VFD_VM_01", []))
+        return [
+            dict(record, source_type="simulated")
+            for record in self._maintenance_history.get(asset_id, [])
+        ]
 
-    def query_lube_oil_analysis(self, asset_id: str = "VFD_VM_01") -> Dict[str, Any]:
+    def query_lube_oil_analysis(self, asset_id: str = "VFD_VM_01") -> dict[str, Any]:
         """Query motor bearing lubrication / electrical health check."""
         return {
             "asset_id": asset_id,
@@ -77,87 +80,44 @@ class CMMSConnector:
         incident_id: str,
         failure_mode: str,
         root_cause_summary: str,
-        corrective_actions: List[str],
+        corrective_actions: list[str],
         priority: str = "1 - Emergency / Immediate Outage",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Emits a structured SAP PM01 Corrective Maintenance Work Order compliant with SAP S/4HANA PM schema.
         """
-        order_num = f"4009{random.randint(20000, 99999)}"
-        notification_num = f"1008{random.randint(10000, 99999)}"
-        timestamp_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
-
         operations = [
             {
-                "operation_number": "0010",
-                "work_center": "ELEC-01",
-                "duration_hours": 1.0,
-                "description": "Lock-Out/Tag-Out (LOTO) & DC Bus Safe Discharge Verification",
-                "details": f"Open main circuit breaker CB_01. Measure DC link voltage on terminals + and - with calibrated DMM; verify V_dc < 24.0V before servicing.",
-            },
-            {
-                "operation_number": "0020",
-                "work_center": "ELEC-01",
-                "duration_hours": 2.0,
-                "description": "Dynamic Braking Resistor Inspection & Installation (P+/PB)",
-                "details": "Inspect braking transistor chopper. Install 70-Ohm 150W ceramic dynamic braking resistor across terminals P+ and PB to dissipate regenerative decel energy.",
-            },
-            {
-                "operation_number": "0030",
-                "work_center": "AUTO-01",
-                "duration_hours": 1.5,
-                "description": "Inverter & PLC Parameter Reprogramming",
-                "details": "Program deceleration ramp parameter F0.18 to controlled 5.0s (prevent rapid stop current spike). Set max frequency clamp F0.10 <= 40.00 Hz and enable DC overvoltage stall prevention F3.08.",
-            },
-            {
-                "operation_number": "0040",
-                "work_center": "ELEC-01",
-                "duration_hours": 1.5,
-                "description": "Induction Motor Megger & Phase Balance Testing",
-                "details": "Perform 500V DC megger test on motor phases U, V, W to PE (>50 M-Ohm required). Measure phase-to-phase resistance balance (<1% unbalance).",
-            },
-            {
-                "operation_number": "0050",
-                "work_center": "OPS-01",
-                "duration_hours": 1.5,
-                "description": "Step-Speed Commissioning & Decel Load Sign-Off",
-                "details": "Energize drive, step speed across 10 Hz, 25 Hz, 40 Hz. Verify DC bus voltage remains within 170.0V - 190.0V envelope during controlled stop without trip.",
-            },
+                "operation_number": f"{index * 10:04d}",
+                "work_center": "To be assigned",
+                "duration_hours": None,
+                "description": action,
+                "details": action,
+            }
+            for index, action in enumerate(corrective_actions, start=1)
         ]
-
-        bill_of_materials = [
-            {"material_id": "MAT-VFD-BRK70", "description": "70-Ohm 150W Wirewound Dynamic Braking Resistor Unit", "quantity": 1, "unit": "EA"},
-            {"material_id": "MAT-CBL-4C25", "description": "4-Core 2.5mm2 Shielded VFD Inverter Motor Cable", "quantity": 5, "unit": "M"},
-            {"material_id": "MAT-BRK-MCCB16", "description": "16A 2-Pole Molded Case Circuit Breaker (MCCB)", "quantity": 1, "unit": "EA"},
-            {"material_id": "MAT-COMM-RS485", "description": "Shielded Twisted Pair RS-485 Modbus RTU Comm Cable", "quantity": 2, "unit": "M"},
-        ]
-
         return {
             "sap_work_order": {
-                "order_number": order_num,
+                "order_number": f"DRAFT-{uuid4().hex[:12]}",
                 "order_type": "PM01",
-                "order_category": "Corrective Maintenance",
-                "notification_number": notification_num,
-                "functional_location": "FLOC: PLNT-B01-VFD-BENCH01",
-                "equipment_id": "10049201",
-                "equipment_name": f"{asset_id} Wecon VM Series Inverter & Motor Bench",
-                "planning_plant": "1000 (Electrical Test Lab)",
-                "planner_group": "E01 (Power Electronics & Drives)",
-                "cost_center": "CC-ELEC-01",
-                "created_on": timestamp_now,
+                "order_category": "Corrective Maintenance Draft",
+                "notification_number": None,
+                "functional_location": None,
+                "equipment_id": asset_id,
+                "equipment_name": asset_id,
+                "planning_plant": None,
+                "planner_group": None,
+                "cost_center": None,
+                "created_on": datetime.now(UTC).isoformat(),
                 "priority": priority,
-                "breakdown_indicator": "X (True)",
-                "system_status": "CRTD REL (Created & Released)",
+                "system_status": "LOCAL_DRAFT",
+                "external_submission": False,
                 "failure_mode_iso14224": failure_mode,
                 "incident_reference": incident_id,
-                "short_text": f"RCA Remediation: {asset_id} Drive Trip Recovery & Parameter Optimization",
-                "long_text": (
-                    f"Root Cause: {root_cause_summary}\n"
-                    f"Action Required: Install dynamic braking resistor on terminals P+/PB, adjust parameter F0.18 "
-                    f"to controlled ramp, clamp max frequency F0.10 <= 40.0 Hz, and verify under step-speed commissioning."
-                ),
+                "short_text": f"Reviewed investigation: {asset_id}",
+                "long_text": root_cause_summary,
                 "operations": operations,
-                "materials_required": bill_of_materials,
-                "total_estimated_hours": sum(op["duration_hours"] for op in operations),
+                "materials_required": [],
+                "total_estimated_hours": None,
             }
         }

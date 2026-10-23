@@ -605,11 +605,11 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
                 },
               },
               {
-                yAxis: 380.0,
+                yAxis: telemetry?.operational_limits?.v_dc?.trip_high,
                 name: 'Err06 Trip Threshold',
                 lineStyle: { color: '#DC2626', type: 'dashed', width: 2 },
                 label: {
-                  formatter: 'Trip 380V',
+                  formatter: `Configured trip ${telemetry?.operational_limits?.v_dc?.trip_high ?? 'unavailable'} V`,
                   position: 'insideEndTop',
                   color: '#DC2626',
                   fontSize: 10,
@@ -622,7 +622,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
         },
       ],
     };
-  }, [baseChartTheme, series, timestamps]);
+  }, [baseChartTheme, series, timestamps, telemetry?.operational_limits?.v_dc?.trip_high]);
 
   // 9. VFD AC Output Voltage Chart (v_out)
   const vfdVoutOption = useMemo(() => {
@@ -876,38 +876,25 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
   const _serTorque = series['torque']?.[series['torque'].length - 1];
   const _serPower = series['power']?.[series['power'].length - 1];
 
-  const currentFOut = isTelemetryConnected
-    ? (((_lmFOut !== null && _lmFOut !== 0) ? _lmFOut : (_serFOut ?? _lmFOut)) ?? 40.0)
-    : 0.0;
-  const currentVDc  = isTelemetryConnected
-    ? (((_lmVDc  !== null && _lmVDc  !== 0) ? _lmVDc  : (_serVDc  ?? _lmVDc )) ?? 182.0)
-    : 0.0;
-  const currentVOut = isTelemetryConnected
-    ? (((_lmVOut !== null && _lmVOut !== 0) ? _lmVOut : (_serVOut ?? _lmVOut)) ?? 184.0)
-    : 0.0;
-  const currentAmp  = isTelemetryConnected
-    ? (_lmAmp  !== null ? _lmAmp  : (_serAmp  ?? 0.0))
-    : 0.0;
-  const currentRpm  = isTelemetryConnected
-    ? (((_lmRpm  !== null && _lmRpm  !== 0) ? _lmRpm  : (_serRpm  ?? _lmRpm )) ?? 1199.0)
-    : 0.0;
-  const currentTorque = isTelemetryConnected
-    ? (_lmTorque !== null ? _lmTorque : (_serTorque ?? 28.0))
-    : 0.0;
-  const currentPower = isTelemetryConnected
-    ? (_lmPower !== null ? _lmPower : (_serPower ?? 0.0))
-    : 0.0;
+  const currentFOut = isTelemetryConnected ? (_lmFOut ?? _serFOut ?? Number.NaN) : Number.NaN;
+  const currentVDc = isTelemetryConnected ? (_lmVDc ?? _serVDc ?? Number.NaN) : Number.NaN;
+  const currentVOut = isTelemetryConnected ? (_lmVOut ?? _serVOut ?? Number.NaN) : Number.NaN;
+  const currentAmp = isTelemetryConnected ? (_lmAmp ?? _serAmp ?? Number.NaN) : Number.NaN;
+  const currentRpm = isTelemetryConnected ? (_lmRpm ?? _serRpm ?? Number.NaN) : Number.NaN;
+  const currentTorque = isTelemetryConnected ? (_lmTorque ?? _serTorque ?? Number.NaN) : Number.NaN;
+  const currentPower = isTelemetryConnected ? (_lmPower ?? _serPower ?? Number.NaN) : Number.NaN;
   const currentStatus = isLiveStream
     ? (liveMetric ? liveMetric.status : (isTelemetryConnected ? 'RUNNING' : 'OFFLINE'))
     : ((series['fault_code']?.[series['fault_code'].length - 1] || 0) > 0 ? 'TRIPPED' : 'RUNNING');
 
-  const latestTi = series['TI-301-DE']?.[series['TI-301-DE'].length - 1] ?? 48.5;
-  const latestVi = series['VI-301-R']?.[series['VI-301-R'].length - 1] ?? 1.80;
-  const latestDps = series['DPS-30101']?.[series['DPS-30101'].length - 1] ?? 0.12;
-  const latestPt = series['PT-30101']?.[series['PT-30101'].length - 1] ?? 2.40;
+  const latestTi = series['TI-301-DE']?.[series['TI-301-DE'].length - 1] ?? Number.NaN;
+  const latestVi = series['VI-301-R']?.[series['VI-301-R'].length - 1] ?? Number.NaN;
+  const latestDps = series['DPS-30101']?.[series['DPS-30101'].length - 1] ?? Number.NaN;
+  const latestPt = series['PT-30101']?.[series['PT-30101'].length - 1] ?? Number.NaN;
   const freqStatus = !isTelemetryConnected
     ? 'OFFLINE'
-    : currentFOut > 42
+    : !Number.isFinite(currentFOut) ? 'UNAVAILABLE'
+    : currentFOut > (telemetry?.operational_limits?.f_out?.alarm_high ?? Infinity)
     ? 'WARNING'
     : 'NOMINAL';
 
@@ -926,7 +913,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
                 <span>⚠️ TELEMETRY OFFLINE · NO LIVE HARDWARE PACKETS DETECTED</span>
               </div>
               <div className="text-[11px] text-amber-800">
-                Awaiting 1 Hz Modbus RTU packets on MQTT port 1883. Metrics show 0.0 until hardware connects or simulation is enabled.
+                Awaiting 1 Hz Modbus RTU packets on MQTT port 1883. Measurements are unavailable until hardware connects or simulation is enabled.
               </div>
             </div>
           </div>
@@ -950,6 +937,8 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
         currentAmp={currentAmp}
         currentRpm={currentRpm}
         currentStatus={currentStatus}
+        dcBusTrip={telemetry?.operational_limits?.v_dc?.trip_high}
+        dcBusAlarm={telemetry?.operational_limits?.v_dc?.alarm_high}
         targetFrequencyHz={liveMetric?.f_in ?? liveMetric?.f_target ?? currentFOut}
         voltageVout={currentVOut}
         torqueFeedback={currentTorque}
@@ -1055,7 +1044,7 @@ export const TelemetryAnalyticsTab: React.FC<TelemetryAnalyticsTabProps> = ({
                 </span>
               </div>
               <div className="text-[10px] font-mono text-slate-400">
-                Nom ~276V · <span className="text-rose-600 font-semibold">Trip 380V</span>
+                Configured trip: <span className="text-rose-600 font-semibold">{telemetry?.operational_limits?.v_dc?.trip_high ?? 'Unavailable'} V</span>
               </div>
             </div>
             <div className="h-[190px] w-full">

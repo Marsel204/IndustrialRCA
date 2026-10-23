@@ -33,7 +33,7 @@ def test_get_api_key_settings_unconfigured(temp_env_file):
     assert data["has_key"] is False
     assert data["masked_key"] == ""
     assert data["provider"] == "DeepSeek"
-    assert data["status"] == "SIMULATION"
+    assert data["status"] == "UNAVAILABLE"
 
 
 def test_save_and_get_api_key_settings(temp_env_file):
@@ -52,7 +52,7 @@ def test_save_and_get_api_key_settings(temp_env_file):
     assert data["has_key"] is True
     assert data["masked_key"] == "sk-12***5678"
     assert data["is_live"] is True
-    assert data["status"] == "ONLINE"
+    assert data["status"] == "CONFIGURED"
 
     # Verify .env file was written
     assert temp_env_file.exists()
@@ -88,7 +88,7 @@ def test_delete_api_key_settings(temp_env_file):
     del_data = del_res.json()
     assert del_data["success"] is True
     assert del_data["has_key"] is False
-    assert del_data["status"] == "SIMULATION"
+    assert del_data["status"] == "UNAVAILABLE"
 
     # Verify key was removed from file and os.environ
     assert "DEEPSEEK_API_KEY" not in os.environ

@@ -71,15 +71,11 @@ def test_influx_tool_graceful_fallback():
     """Verify that InfluxDBTelemetryTool defaults to OFFLINE and only simulates when explicitly enabled."""
     tool = InfluxDBTelemetryTool(url="http://127.0.0.1:9999")  # Non-existent port
 
-    # 1. Default: simulation is disabled, returns OFFLINE with 0.0 values
+    # Offline datasets have no observations; transport status remains explicit.
     assert tool.is_simulation_enabled() is False
     df_offline = tool.get_live_telemetry(limit=50)
     assert isinstance(df_offline, pd.DataFrame)
-    assert len(df_offline) == 50
-    assert (df_offline["f_out"] == 0.0).all()
-    assert (df_offline["status"] == "OFFLINE").all()
-    assert "torque" in df_offline.columns
-    assert "power" in df_offline.columns
+    assert df_offline.empty
 
     metric_offline = tool.get_latest_metrics()
     assert metric_offline["status"] == "OFFLINE"
@@ -143,7 +139,8 @@ def test_generate_vfd_dataset_scenarios():
     # 4. Live Stream
     ds_live = generate_vfd_dataset(scenario="live_stream", duration_sec=60)
     assert ds_live.metadata["scenario"] == "live_stream"
-    assert len(ds_live.df_1hz) == 60
+    assert ds_live.df_1hz.empty
+    assert ds_live.metadata["source_type"] == "unavailable"
 
 
 def test_api_scenarios_includes_live_stream(client):
@@ -194,11 +191,10 @@ def test_api_live_stream_telemetry_series(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["dataset_id"] == "live_stream"
-    assert "f_out" in data["series"]
-    assert "v_dc" in data["series"]
-    assert "current" in data["series"]
-    assert "rpm" in data["series"]
-    assert "PT-30101" in data["series"]
+    assert data["sample_count"] == 0
+    assert data["timestamps"] == []
+    assert data["series"] == {}
+    assert data["metadata"]["source_type"] == "unavailable"
 
 
 def test_api_incident_broadcast(client):

@@ -22,7 +22,7 @@ const STEPS = [
   { step: 2, label: 'Anomaly', icon: Search, desc: 'Change-Point', tab: 'telemetry' },
   { step: 3, label: 'Hypotheses', icon: Lightbulb, desc: 'ISO 14224 FMEA', tab: 'hypotheses' },
   { step: 4, label: 'Falsify', icon: Cpu, desc: 'Evidence Filter', tab: 'hypotheses' },
-  { step: 5, label: '5-Whys', icon: GitMerge, desc: 'Topology Trace', tab: 'topology' },
+  { step: 5, label: 'Causal links', icon: GitMerge, desc: 'Topology Trace', tab: 'topology' },
   { step: 6, label: 'HITL Gate', icon: ShieldCheck, desc: 'Authorization', tab: 'hitl' },
   { step: 7, label: 'Deliverables', icon: FileCheck2, desc: '8D & SAP PM01', tab: 'deliverables' },
 ];
@@ -42,7 +42,7 @@ export const PipelineStepper: React.FC<PipelineStepperProps> = ({
           <div className="flex items-center space-x-2">
             <GitMerge className="w-3.5 h-3.5 text-blue-600" />
             <span className="font-mono text-[11px] font-bold text-slate-800 uppercase tracking-wider">
-              LangGraph 7-Step Diagnostic Plan
+              Investigation progress
             </span>
             <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
               Step {currentStep}/7
@@ -66,7 +66,7 @@ export const PipelineStepper: React.FC<PipelineStepperProps> = ({
           {STEPS.map((s, idx) => {
             const Icon = s.icon;
             const isCompleted = currentStep > s.step || (currentStep === 7 && s.step === 7);
-            const isActive = currentStep === s.step;
+            const isActive = currentStep === s.step && !['INCONCLUSIVE', 'REJECTED', 'NORMAL_STABLE'].includes(pipelineStatus);
 
             return (
               <React.Fragment key={s.step}>
@@ -125,7 +125,7 @@ export const PipelineStepper: React.FC<PipelineStepperProps> = ({
           {STEPS.map((s, idx) => {
             const Icon = s.icon;
             const isCompleted = currentStep > s.step || (currentStep === 7 && s.step === 7);
-            const isActive = currentStep === s.step;
+            const isActive = currentStep === s.step && !['INCONCLUSIVE', 'REJECTED', 'NORMAL_STABLE'].includes(pipelineStatus);
 
             return (
               <React.Fragment key={s.step}>

@@ -1,0 +1,21 @@
+{
+  "source_commit": "ce0a99be1f8e89f32a137a1dba8fec1b966bf730",
+  "snapshot_sha256": "b6bee5e9c8ccd6213cde7cf32ec5a2e56ba598fe2255b977b8831102c7f4644f",
+  "files": {
+    "AGENTIC_REFACTOR_PROPOSAL.md": "2a4a790cf903552bc84ab945cb4dc52fb637f5e6850bdfa806bdc1426173bf8a",
+    "proposal_tests/conftest.py": "ae7d210c7209cdb7b2c90f587cf022bbbb3052db429c1fac4fef8b20dfd8bf1d",
+    "proposal_tests/environment.txt": "69ed749eaa5c29dd4a2b4ba6265c4076060de4e0507147f3470349d01433cfb6",
+    "proposal_tests/test_adaptive_investigation.py": "330d3143993aa9d7204148cf86a4333323c6edeaeca8201562956e41b8fcccd0",
+    "proposal_tests/test_evidence_integrity.py": "e39dac5e6e329bab332b34d77be73af074ef29ab7820b12010fc698c8345a4b1"
+  },
+  "original_suite": {
+    "passed": 107,
+    "warnings": 2,
+    "elapsed_seconds": 25.05
+  },
+  "proposal_suite": {
+    "expected_failures": 25,
+    "elapsed_seconds": 3.62
+  },
+  "implementation_started": false
+}

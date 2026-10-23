@@ -260,7 +260,7 @@ WECON_VM_VFD_SPEC: Dict[str, Any] = {
 
 def get_oem_spec(asset_id: str = "VFD_VM_01") -> Any:
     """Retrieve OEM specifications for the specified asset."""
-    if asset_id in ("VFD_VM_01", "VFD", "P-301A"):
+    if asset_id in ("VFD_VM_01", "VFD"):
         return WECON_VM_VFD_SPEC
     raise ValueError(f"Unknown asset_id: {asset_id}. Currently supported: VFD_VM_01")
 

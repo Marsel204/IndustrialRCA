@@ -6,6 +6,8 @@ interface TelemetryMetricsCardsProps {
   frequencyHz: number;
   freqStatus: string;
   voltageVdc: number;
+  dcBusTrip?: number;
+  dcBusAlarm?: number;
   currentAmp: number;
   currentRpm: number;
   currentStatus: string;
@@ -24,18 +26,21 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
   frequencyHz,
   freqStatus,
   voltageVdc,
+  dcBusTrip = Number.NaN,
+  dcBusAlarm = Number.NaN,
   currentAmp,
   currentRpm,
   currentStatus,
   targetFrequencyHz,
-  voltageVout = 184.0,
-  torqueFeedback = 0.0,
-  powerKw = 0.0,
+  voltageVout = Number.NaN,
+  torqueFeedback = Number.NaN,
+  powerKw = Number.NaN,
   latestTi,
   latestVi,
   latestDps,
   latestPt,
 }) => {
+  const format = (value: number, digits = 1) => Number.isFinite(value) ? value.toFixed(digits) : '—';
   return (
     <div className={`grid gap-3 ${isVfdAsset ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-6' : 'grid-cols-2 lg:grid-cols-4'}`}>
       {isVfdAsset ? (
@@ -60,13 +65,13 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
               </span>
             </div>
             <div className="text-xl font-mono font-bold text-slate-900">
-              {frequencyHz.toFixed(2)}{' '}
+              {format(frequencyHz, 2)}{' '}
               <span className="text-xs font-normal text-slate-500">Hz</span>
             </div>
             <div className="text-[10px] font-mono text-slate-500 mt-1 flex justify-between">
               <span>f_out</span>
               <span className="text-blue-600 font-semibold">
-                Set: {targetFrequencyHz ? targetFrequencyHz.toFixed(1) : frequencyHz.toFixed(1)} Hz
+                Set: {format(targetFrequencyHz ?? Number.NaN)} Hz
               </span>
             </div>
           </div>
@@ -80,25 +85,25 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
               </span>
               <span
                 className={`px-1.5 py-0.5 text-[9px] font-mono rounded font-semibold ${
-                  voltageVdc >= 380.0
+                  voltageVdc >= dcBusTrip
                     ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                    : voltageVdc >= 320.0
+                    : voltageVdc >= dcBusAlarm
                     ? 'bg-amber-50 text-amber-700 border border-amber-200'
                     : voltageVdc >= 220.0
                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                     : 'bg-slate-100 text-slate-600 border border-slate-200'
                 }`}
               >
-                {voltageVdc >= 380.0 ? 'OVERVOLT' : voltageVdc >= 320.0 ? 'WARNING' : 'NOMINAL'}
+                {!Number.isFinite(voltageVdc) ? 'UNAVAILABLE' : voltageVdc >= dcBusTrip ? 'OVERVOLT' : voltageVdc >= dcBusAlarm ? 'WARNING' : 'MEASURED'}
               </span>
             </div>
             <div className="text-xl font-mono font-bold text-slate-900">
-              {voltageVdc.toFixed(1)}{' '}
+              {format(voltageVdc, 1)}{' '}
               <span className="text-xs font-normal text-slate-500">V DC</span>
             </div>
             <div className="text-[10px] font-mono text-slate-500 mt-1 flex justify-between">
               <span>v_dc</span>
-              <span>Nom: ~276V</span>
+              <span>Configured trip: {format(dcBusTrip)} V</span>
             </div>
           </div>
 
@@ -114,7 +119,7 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
               </span>
             </div>
             <div className="text-xl font-mono font-bold text-slate-900">
-              {voltageVout.toFixed(1)}{' '}
+              {format(voltageVout, 1)}{' '}
               <span className="text-xs font-normal text-slate-500">V AC</span>
             </div>
             <div className="text-[10px] font-mono text-slate-500 mt-1 flex justify-between">
@@ -139,11 +144,11 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
                     : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                 }`}
               >
-                {currentAmp >= 2.5 ? 'OVERLOAD' : 'NOMINAL'}
+                {!Number.isFinite(currentAmp) ? 'UNAVAILABLE' : currentAmp >= 2.5 ? 'OVERLOAD' : 'MEASURED'}
               </span>
             </div>
             <div className="text-xl font-mono font-bold text-slate-900">
-              {currentAmp.toFixed(2)}{' '}
+              {format(currentAmp, 2)}{' '}
               <span className="text-xs font-normal text-slate-500">A</span>
             </div>
             <div className="text-[10px] font-mono text-slate-500 mt-1 flex justify-between">
@@ -172,7 +177,7 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
               </span>
             </div>
             <div className="text-xl font-mono font-bold text-slate-900">
-              {Math.round(currentRpm).toLocaleString()}{' '}
+              {format(currentRpm, 0)}{' '}
               <span className="text-xs font-normal text-slate-500">RPM</span>
             </div>
             <div className="text-[10px] font-mono text-slate-500 mt-1 flex justify-between">
@@ -193,9 +198,9 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
               </span>
             </div>
             <div className="text-xl font-mono font-bold text-slate-900 flex items-baseline gap-1">
-              {Number(torqueFeedback).toFixed(1)} <span className="text-xs font-normal text-slate-500">%</span>
+              {format(Number(torqueFeedback), 1)} <span className="text-xs font-normal text-slate-500">%</span>
               <span className="text-xs text-slate-400 mx-0.5">·</span>
-              <span className="text-sm font-semibold text-amber-700">{Number(powerKw).toFixed(2)} kW</span>
+              <span className="text-sm font-semibold text-amber-700">{format(Number(powerKw), 2)} kW</span>
             </div>
             <div className="text-[10px] font-mono text-slate-500 mt-1 flex justify-between">
               <span>τ / P</span>
@@ -225,7 +230,7 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
               </span>
             </div>
             <div className="text-2xl font-mono font-bold text-slate-900">
-              {latestTi.toFixed(1)}{' '}
+              {format(latestTi, 1)}{' '}
               <span className="text-xs font-normal text-slate-500">°C</span>
             </div>
             <div className="text-[10px] font-mono text-slate-500 mt-1">
@@ -253,7 +258,7 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
               </span>
             </div>
             <div className="text-2xl font-mono font-bold text-slate-900">
-              {latestVi.toFixed(2)}{' '}
+              {format(latestVi, 2)}{' '}
               <span className="text-xs font-normal text-slate-500">mm/s</span>
             </div>
             <div className="text-[10px] font-mono text-slate-500 mt-1">
@@ -281,7 +286,7 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
               </span>
             </div>
             <div className="text-2xl font-mono font-bold text-slate-900">
-              {latestDps.toFixed(2)}{' '}
+              {format(latestDps, 2)}{' '}
               <span className="text-xs font-normal text-slate-500">bar</span>
             </div>
             <div className="text-[10px] font-mono text-slate-500 mt-1">
@@ -307,7 +312,7 @@ export const TelemetryMetricsCards: React.FC<TelemetryMetricsCardsProps> = ({
               </span>
             </div>
             <div className="text-2xl font-mono font-bold text-slate-900">
-              {latestPt.toFixed(2)}{' '}
+              {format(latestPt, 2)}{' '}
               <span className="text-xs font-normal text-slate-500">bar</span>
             </div>
             <div className="text-[10px] font-mono text-slate-500 mt-1">

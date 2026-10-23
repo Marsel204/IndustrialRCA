@@ -87,7 +87,7 @@ export interface TopologyNode {
     warning_limit?: number;
   }>;
   operating_specs: Record<string, any>;
-  status: 'HEALTHY' | 'TRIPPED' | 'ROOT_CAUSE';
+  status: 'HEALTHY' | 'TRIPPED' | 'ROOT_CAUSE' | 'UNKNOWN';
   position: { x: number; y: number };
 }
 
@@ -112,7 +112,7 @@ export interface TopologyData {
 export interface HypothesisResult {
   hypothesis_id: string;
   name: string;
-  status: 'CONFIRMED' | 'REFUTED' | 'SECONDARY_SYMPTOM' | 'INCONCLUSIVE';
+  status: 'CONFIRMED' | 'SUPPORTED' | 'REFUTED' | 'SECONDARY_SYMPTOM' | 'INCONCLUSIVE';
   confidence: number;
   evidence: Array<{
     check: string;
@@ -196,12 +196,12 @@ export interface SAPWorkOrder {
   order_number: string;
   order_type: string;
   order_category: string;
-  notification_number: string;
+  notification_number: string | null;
   equipment_id: string;
   equipment_name: string;
-  functional_location: string;
-  planner_group: string;
-  cost_center: string;
+  functional_location: string | null;
+  planner_group: string | null;
+  cost_center: string | null;
   priority: string;
   breakdown_indicator: boolean;
   short_text: string;
@@ -212,7 +212,7 @@ export interface SAPWorkOrder {
   operations: Array<{
     operation_number: string;
     work_center: string;
-    duration_hours: number;
+    duration_hours: number | null;
     description: string;
     details: string;
   }>;
@@ -222,10 +222,25 @@ export interface SAPWorkOrder {
     quantity: number;
     unit: string;
   }>;
-  total_estimated_hours: number;
+  total_estimated_hours: number | null;
+}
+
+export interface AgentObservation {
+  observation_id: string;
+  tool: string;
+  arguments: Record<string, unknown>;
+  source_type: 'measured' | 'simulated' | 'reference' | 'configured' | 'inferred' | 'unavailable';
+  asset_id: string;
+  dataset_id: string;
+  result: unknown;
+  error: string | null;
+  elapsed_ms: number;
 }
 
 export interface RCAState {
+  agent_observations?: AgentObservation[];
+  investigation_trace?: Array<Pick<AgentObservation, 'observation_id' | 'tool' | 'source_type' | 'error' | 'elapsed_ms'>>;
+  missing_evidence?: string[];
   thread_id: string;
   pipeline_status: string;
   current_step: number;
@@ -268,7 +283,7 @@ export interface RCAState {
     model: string;
     is_mock: boolean;
     content: string;
-    reasoning_content: string;
+    reasoning_content?: string;
     usage: Record<string, number>;
   } | null;
 }
