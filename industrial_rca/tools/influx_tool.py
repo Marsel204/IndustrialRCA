@@ -205,18 +205,6 @@ class InfluxDBTelemetryTool:
                     if "_time" in df.columns:
                         df.rename(columns={"_time": "timestamp"}, inplace=True)
 
-                for col, default in [
-                    ("f_out", 40.0),
-                    ("f_target", 40.0),
-                    ("current", 1.35),
-                    ("v_dc", 312.0),
-                    ("v_out", 220.0),
-                    ("rpm", 1160.0),
-                    ("fault_code", 0),
-                ]:
-                    if col not in df.columns:
-                        df[col] = default
-                
                 if "timestamp_sec" not in df.columns:
                     df["timestamp_sec"] = np.arange(len(df))
 
@@ -224,7 +212,6 @@ class InfluxDBTelemetryTool:
                 df._is_influx = True
                 df.attrs["_is_influx"] = True
 
-                self._enrich_rca_tags(df)
                 return df
         except Exception as e:
             logger.debug(f"InfluxDB query failed or unreachable: {e}.")
@@ -269,26 +256,8 @@ class InfluxDBTelemetryTool:
     def _generate_offline_dataframe(
         self, asset_id: str = VFD_EQUIPMENT_ID, count: int = 300
     ) -> pd.DataFrame:
-        """Generates a flat zeroed-out offline telemetry buffer when hardware is disconnected."""
-        now = time.time()
-        t_sec = np.arange(count)
-        df = pd.DataFrame({
-            "timestamp_sec": t_sec,
-            "timestamp": [now - (count - 1 - i) for i in range(count)],
-            "asset_id": asset_id,
-            "f_out": np.zeros(count),
-            "f_target": np.zeros(count),
-            "v_dc": np.zeros(count),
-            "v_out": np.zeros(count),
-            "current": np.zeros(count),
-            "rpm": np.zeros(count),
-            "torque": np.zeros(count),
-            "power": np.zeros(count),
-            "fault_code": np.zeros(count, dtype=int),
-            "status": ["OFFLINE"] * count,
-        })
-        self._enrich_rca_tags(df)
-        return df
+        """No measurements are available; do not manufacture an offline history."""
+        return pd.DataFrame()
 
     def _generate_fallback_live_dataframe(
         self, asset_id: str = VFD_EQUIPMENT_ID, count: int = 300
@@ -320,6 +289,7 @@ class InfluxDBTelemetryTool:
             "status": "RUNNING",
         })
         self._enrich_rca_tags(df)
+        df.attrs["is_simulated"] = True
         return df
 
     def is_mqtt_active(self, host: str = "127.0.0.1", port: int = 1883) -> bool:

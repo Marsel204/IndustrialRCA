@@ -10,6 +10,11 @@ Supports:
 
 import asyncio
 import json
+import math
+from html import escape
+from types import ModuleType
+import json
+import math
 import time
 import re
 from pathlib import Path
@@ -58,6 +63,26 @@ def _to_int(val: Any, default: int) -> int:
         return int(str(val))
     except (TypeError, ValueError):
         return default
+
+
+def format_telemetry_readings(latest):
+    """Format only provided values, without replacing missing channels."""
+    lines = []
+    for label, tag, precision, unit in [
+        ("Output Frequency", "f_out", 2, "Hz"), ("Frequency Setpoint", "f_target", 2, "Hz"),
+        ("DC Bus Voltage", "v_dc", 1, "V"), ("AC Output Voltage", "v_out", 1, "V AC"),
+        ("Motor Line Current", "current", 2, "A"), ("Motor Speed", "rpm", 0, "RPM"),
+        ("Torque", "torque", 1, "%"), ("Active Power", "power", 2, "kW"),
+    ]:
+        value = latest.get("v_bus", latest.get(tag)) if tag == "v_dc" else latest.get(tag)
+        try:
+            value = float(value)
+            separator = "" if unit == "%" else " "
+            rendered = f"{value:.{precision}f}{separator}{unit}" if math.isfinite(value) else "Unavailable"
+        except (ValueError, TypeError):
+            rendered = "Unavailable"
+        lines.append(f"{label}: {rendered}")
+    return "\n".join(lines)
 
 
 class TelegramBotService:
@@ -224,10 +249,16 @@ class TelegramBotService:
             snapshot = self._api_context.GLOBAL_RCA_GRAPH.get_state(config)
             vals = snapshot.values if snapshot else {}
 
-        fault_code = vals.get("fault_code") or 6
+        if not vals.get("winning_hypothesis"):
+            gaps = "; ".join(vals.get("missing_evidence") or ["No supported diagnosis is available"])
+            for chat_id in list(self.subscribers):
+                await self.client.send_message(chat_id=chat_id, text=f"Investigation inconclusive. {escape(gaps)}")
+            return
+
+        fault_code = vals.get("fault_code") or 0
         winning_hyp = vals.get("winning_hypothesis") or {}
-        root_cause_desc = vals.get("root_cause_description") or winning_hyp.get("name", "Rapid Deceleration Overvoltage")
-        confidence = winning_hyp.get("confidence", 0.95) * 100
+        root_cause_desc = vals.get("root_cause_description") or winning_hyp.get("name", "Unresolved")
+        confidence = winning_hyp.get("confidence", 0) * 100
 
         # Extract 5-Whys summary if available
         causal_chain = vals.get("causal_chain_5_whys") or []
@@ -244,13 +275,13 @@ class TelegramBotService:
         remediation_text = (
             proposed_actions[0]
             if proposed_actions
-            else "Increase deceleration time parameter P0.12 or install dynamic braking resistor."
+            else "No corrective action was supported by the investigation."
         )
 
         text = (
             f"📋 <b>RCA DIAGNOSIS COMPLETE (LangGraph + DeepSeek)</b>\n\n"
             f"• <b>Asset:</b> <code>{vals.get('asset_id', EQUIPMENT_ID)}</code>\n"
-            f"• <b>Fault:</b> Err0{fault_code}\n"
+            f"• <b>Fault:</b> Err{fault_code:02d}\n"
             f"• <b>Confidence:</b> <b>{confidence:.1f}%</b>\n"
             f"• <b>Diagnosis:</b> {root_cause_desc}"
             f"{why_text}\n\n"
@@ -368,77 +399,24 @@ class TelegramBotService:
 
     async def handle_status(self, chat_id: Union[int, str], message_id: Optional[int] = None):
         """Handles /status command: returns live telemetry metrics."""
-        f_out = 40.0
-        f_target = 40.0
-        v_dc = 182.0
-        v_out = 184.0
-        current = 1.20
-        rpm = 1200.0
-        torque = 5.0
-        power = 0.05
-        fault_code = 0
-        status_badge = "🟢 NORMAL / RUNNING"
-
+        latest = {}
         if self._api_context:
-            # Try TSDB
             tsdb = getattr(self._api_context, "GLOBAL_TSDB", None)
             if tsdb and hasattr(tsdb, "get_latest"):
-                latest = tsdb.get_latest(EQUIPMENT_ID)
-                if isinstance(latest, dict):
-                    f_out = _to_float(latest.get("f_out"), f_out)
-                    f_target = _to_float(latest.get("f_target"), f_out)
-                    v_dc = _to_float(latest.get("v_dc"), v_dc)
-                    v_out = _to_float(latest.get("v_out"), v_out)
-                    current = _to_float(latest.get("current"), current)
-                    rpm = _to_float(latest.get("rpm"), rpm)
-                    torque = _to_float(latest.get("torque"), torque)
-                    power = _to_float(latest.get("power"), power)
-                    fault_code = _to_int(latest.get("fault_code"), 0)
-
-            # Check latest incident
-            latest_hil = getattr(self._api_context, "LATEST_HIL_INCIDENT", {})
-            if isinstance(latest_hil, dict) and latest_hil.get("has_incident") and latest_hil.get("pipeline_status") != "COMPLETED":
-                inc_dict = latest_hil.get("incident_data")
-                if isinstance(inc_dict, dict):
-                    fault_code = _to_int(inc_dict.get("fault_code"), fault_code)
-                status_badge = f"🔴 TRIPPED (Err0{fault_code})"
-            elif fault_code > 0:
-                status_badge = f"🔴 TRIPPED (Err0{fault_code})"
-
-        fault_info = get_vfd_fault_info(fault_code) if fault_code else {}
-        fault_name = fault_info.get("name", "None")
-
-        text = (
-            f"📊 <b>TELEMETRY STATUS: {EQUIPMENT_ID} (6 Channels)</b>\n\n"
-            f"• <b>Operational State:</b> {status_badge}\n"
-            f"• <b>1. Frequency:</b> <code>{f_out:.2f} Hz</code> (Set: <code>{f_target:.1f} Hz</code>)\n"
-            f"• <b>2. DC Bus Voltage:</b> <code>{v_dc:.1f} V DC</code>\n"
-            f"• <b>3. Output Voltage:</b> <code>{v_out:.1f} V AC</code> (Rated: 220V)\n"
-            f"• <b>4. Phase Current:</b> <code>{current:.2f} A</code> (FLA: 1.15A, Trip: 2.50A)\n"
-            f"• <b>5. Motor Speed:</b> <code>{rpm:.0f} RPM</code> (Sync: 1,450 RPM)\n"
-            f"• <b>6. Torque & Power:</b> <code>{torque:.1f}%</code> · <code>{power:.2f} kW</code>\n"
-            f"• <b>Active Fault Code:</b> <code>{fault_code} ({fault_name})</code>\n"
-            f"• <b>Last Updated:</b> {time.strftime('%H:%M:%S UTC')}"
-        )
-
-        keyboard = TelegramClient.build_inline_keyboard([
-            [
-                {"text": "🔄 Refresh", "callback_data": "refresh_telemetry"},
-                {"text": "📈 View Waveform", "callback_data": "show_waveform:latest"},
-            ],
-            [
-                {"text": "🔗 Web App", "url": f"{self.dashboard_url}"},
-            ],
-        ])
-
+                candidate = tsdb.get_latest(EQUIPMENT_ID)
+                if isinstance(candidate, dict):
+                    latest = candidate
+        lines = [f"<b>TELEMETRY STATUS: {EQUIPMENT_ID}</b>"]
+        lines.append(escape(format_telemetry_readings(latest)))
+        lines.append("Freshness: " + escape(str(latest.get("timestamp", "Unknown; no current measurement verified"))))
+        text = "\n".join(lines)
         if message_id:
             try:
-                await self.client.edit_message_text(chat_id, message_id, text, reply_markup=keyboard)
-            except Exception as e:
-                logger.warning(f"Could not edit message {message_id} ({e}), sending fresh message")
-                await self.client.send_message(chat_id, text, reply_markup=keyboard)
-        else:
-            await self.client.send_message(chat_id, text, reply_markup=keyboard)
+                await self.client.edit_message_text(chat_id, message_id, text)
+                return
+            except Exception as exc:
+                logger.warning("Status message edit failed; sending a new message: %s", exc)
+        await self.client.send_message(chat_id, text)
 
     async def handle_alarms(self, chat_id: Union[int, str]):
         """Handles /alarms command."""
@@ -501,23 +479,23 @@ class TelegramBotService:
             await self.client.send_message(chat_id, text)
             return
 
-        fault_code = vals.get("fault_code") or 6
+        fault_code = vals.get("fault_code") or 0
         pipe_status = vals.get("pipeline_status", "COMPLETED")
         winning_hyp = vals.get("winning_hypothesis") or {}
-        root_cause = vals.get("root_cause_description") or winning_hyp.get("name", "Decel Overvoltage")
-        confidence = winning_hyp.get("confidence", 0.95) * 100
+        root_cause = vals.get("root_cause_description") or winning_hyp.get("name", "Unresolved")
+        confidence = winning_hyp.get("confidence", 0) * 100
 
         causal_chain = vals.get("causal_chain_5_whys") or []
         whys_str = ""
         for idx, item in enumerate(causal_chain[:3], 1):
-            whys_str += f"\n  {idx}. {item.get('why', '')}"
+            whys_str += f"\n  {idx}. {item.get('answer', '')}"
 
         proposed = winning_hyp.get("proposed_actions") or []
-        action_str = proposed[0] if proposed else "Inspect dynamic braking resistor and extend decel ramp time."
+        action_str = proposed[0] if proposed else "No corrective action was supported by the investigation."
 
         text = (
             f"🔍 <b>LANGGRAPH ROOT CAUSE ANALYSIS REPORT</b>\n\n"
-            f"• <b>Fault:</b> Err0{fault_code}\n"
+            f"• <b>Fault:</b> Err{fault_code:02d}\n"
             f"• <b>Pipeline Status:</b> <code>{pipe_status}</code>\n"
             f"• <b>Winning Diagnosis:</b> <b>{root_cause}</b> ({confidence:.1f}%)\n"
             f"• <b>Causal 5-Whys Chain:</b>{whys_str}\n\n"
@@ -526,7 +504,7 @@ class TelegramBotService:
         )
 
         buttons = []
-        if pipe_status in ("AWAITING_REVIEW", "TRIGGERED") and thread_id:
+        if winning_hyp and pipe_status in ("AWAITING_REVIEW", "CAUSAL_TRACE_COMPLETED") and thread_id:
             buttons.append([
                 {"text": "✅ Approve Remediation", "callback_data": f"approve_remediation:{thread_id}"},
                 {"text": "❌ Reject / Manual", "callback_data": f"reject_remediation:{thread_id}"},
@@ -609,85 +587,29 @@ class TelegramBotService:
         # Check if user explicitly asks for chart/plot
         wants_chart = any(term in user_query.lower() for term in ["chart", "plot", "graph", "trend", "waveform", "waveforms"])
 
-        # Construct domain context across all 6 telemetry channels
-        f_out = 40.0
-        f_target = 40.0
-        v_dc = 182.0
-        v_out = 184.0
-        current = 1.20
-        rpm = 1200.0
-        torque = 5.0
-        power = 0.05
-        fault_code = 0
-        active_incident_summary = "None (System is operating normally)."
+        from industrial_rca.agent.runtime import SYSTEM_PROMPT
+        from industrial_rca.data.oem_manuals import get_vfd_spec
 
+        latest = {}
+        incident = {}
         if self._api_context:
             tsdb = getattr(self._api_context, "GLOBAL_TSDB", None)
             if tsdb and hasattr(tsdb, "get_latest"):
-                latest = tsdb.get_latest(EQUIPMENT_ID)
-                if isinstance(latest, dict):
-                    f_out = _to_float(latest.get("f_out"), f_out)
-                    f_target = _to_float(latest.get("f_target"), f_out)
-                    v_dc = _to_float(latest.get("v_dc"), v_dc)
-                    v_out = _to_float(latest.get("v_out"), v_out)
-                    current = _to_float(latest.get("current"), current)
-                    rpm = _to_float(latest.get("rpm"), rpm)
-                    torque = _to_float(latest.get("torque"), torque)
-                    power = _to_float(latest.get("power"), power)
-                    fault_code = _to_int(latest.get("fault_code"), 0)
-
-            latest_hil = getattr(self._api_context, "LATEST_HIL_INCIDENT", {})
-            if isinstance(latest_hil, dict) and latest_hil.get("has_incident"):
-                inc = latest_hil.get("incident_data")
-                if isinstance(inc, dict):
-                    fc = _to_int(inc.get("fault_code"), fault_code)
-                    desc = str(inc.get("fault_description") or "")
-                    st = str(latest_hil.get("pipeline_status") or "")
-                    active_incident_summary = f"Active Trip Incident: Err0{fc} ({desc}), Pipeline Status: {st}."
-
-        fault_info = get_vfd_fault_info(fault_code) if fault_code else {}
-
-        # Domain envelope check for physical 220V rig vs simulation
-        is_physical_rig = (v_dc > 240.0)
-        v_trip = 380.0 if is_physical_rig else 220.0
-        v_nom = "270.0-290.0V" if is_physical_rig else "200.0-214.0V"
-
-        # ── 1. STATIC PREFIX (Invariant for DeepSeek server-side KV-cache reuse) ──
-        # ── 2. DYNAMIC SUFFIX (Appended at the end) ──
+                candidate = tsdb.get_latest(EQUIPMENT_ID)
+                if isinstance(candidate, dict):
+                    latest = candidate
+            candidate = getattr(self._api_context, "LATEST_HIL_INCIDENT", {})
+            if isinstance(candidate, dict):
+                incident = candidate
         system_prompt = (
-            f"You are the Senior SCADA & Reliability Engineer AI Copilot on Telegram for {EQUIPMENT_NAME} ({EQUIPMENT_ID}).\n"
-            f"Assist plant operators with concise, technically accurate, reassuring, and conversational answers.\n\n"
-            f"DOMAIN REFERENCE:\n"
-            f"• Continuous Monitored SCADA Telemetry (6 Channels):\n"
-            f"  1. Inverter Output Frequency (f_out, setpoint f_target; operational ceiling: 40.00 Hz)\n"
-            f"  2. DC Bus Link Voltage (v_dc; nominal ~270-290V on 220V grid, trip threshold 380V)\n"
-            f"  3. Inverter AC Output Voltage (v_out; nominal ~184V at 40Hz, rated 220V)\n"
-            f"  4. Stator Phase Current (I_out; rated FLA 1.15A, high trip limit 2.50A)\n"
-            f"  5. Rotor Shaft Speed (RPM; 4-pole synchronous speed 1,450 RPM)\n"
-            f"  6. Mechanical Torque (torque % of rated) & Active Power (power kW; rated 100% / 0.75kW)\n"
-            f"• WECON VM Inverter specifications & fault mechanisms:\n"
-            f"  - Err02 (Overcurrent acceleration): Motor instantaneous current spikes past 2.50A; enforce PLC ramp-down, check motor insulation (>50 M-Ohm).\n"
-            f"  - Err03 (Overcurrent deceleration): High rotational inertia during decel; tune parameter F0.18 >= 5.0s, install dynamic braking resistor (100 Ohm 200W).\n"
-            f"  - Err06 (Overvoltage deceleration): Kinetic back-EMF charges DC bus past trip limit; clamp F0.10 to 40.00 Hz, tune F0.18 >= 5.0s, connect dynamic braking resistor across terminals P+ and PB.\n"
-            f"  - Err11 (Motor thermal overload): Continuous current exceeds rated FLA (1.15A); inspect shaft mechanical binding and clear cooling airflow obstructions.\n"
-            f"  - Err13 (Output phase loss): Output current collapse on terminals U, V, or W; re-torque screw terminals (1.8 N-m), test 3-phase winding balance (<2% deviation), Megger test (>50 M-Ohm).\n"
-            f"• ISA-95 Asset Hierarchy: VFD_VM_01 powers the slurry feed train / pump test bench.\n\n"
-            f"STYLE & RESPONSE INSTRUCTIONS:\n"
-            f"1. BOTTOM LINE FIRST: For general health checks (e.g. 'is the system okay?'), start with a clear emoji verdict (e.g. '✅ System is operating normally within safe parameters.').\n"
-            f"2. CONCISE & CLEAN: Present key telemetry cleanly. Highlight numbers in code or bold.\n"
-            f"3. NO UNNECESSARY ALARM WARNINGS: If operating normally with no active fault, DO NOT list hypothetical trip codes (Err02, Err06, etc.) unless the user specifically asks about them.\n"
-            f"4. ACTIONABLE: Conclude with a brief 1-sentence operational takeaway.\n"
-            f"5. Keep responses concise (under 120 words), friendly, and professional.\n\n"
-            f"=== CURRENT ASSET TELEMETRY & INCIDENT STATE (DYNAMIC) ===\n"
-            f"• 1. Output Frequency: {f_out:.2f} Hz (Setpoint: {f_target:.1f} Hz)\n"
-            f"• 2. DC Bus Voltage: {v_dc:.1f} V (Nominal {v_nom}, Trip Limit: {v_trip:.0f}V)\n"
-            f"• 3. AC Output Voltage: {v_out:.1f} V AC (Nominal 184V @ 40Hz, Rated 220V)\n"
-            f"• 4. Motor Line Current: {current:.2f} A (Nominal FLA: 1.15A, High Trip Limit: 2.50A)\n"
-            f"• 5. Motor Speed: {rpm:.0f} RPM (Sync: 1,450 RPM)\n"
-            f"• 6. Torque & Active Power: {torque:.1f}% load · {power:.2f} kW (Rated: 100% / 0.75kW)\n"
-            f"• Active Fault Code: {fault_code} ({fault_info.get('name', 'None')})\n"
-            f"• Incident State: {active_incident_summary}"
+            SYSTEM_PROMPT + "\nOEM fault reference (not a diagnosis): " +
+            json.dumps(get_vfd_spec()["fault_codes"]) +
+            "\n=== CURRENT ASSET TELEMETRY & INCIDENT STATE (DYNAMIC) ===\n" +
+            format_telemetry_readings(latest) + "\n" + json.dumps({"telemetry": latest or None, "incident": incident or None,
+                        "notice": "Missing samples and unknown freshness do not establish normal operation"})
         )
+        if isinstance(self._api_context, ModuleType):
+            system_prompt = self._api_context.build_copilot_system_prompt()
 
         # Build message chain with memory
         messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
@@ -700,14 +622,14 @@ class TelegramBotService:
         try:
             if self._api_context and hasattr(self._api_context, "deepseek_client"):
                 client = self._api_context.deepseek_client
-                res = client.chat_completion(messages, model="deepseek-flash")
-                reply_text = res.get("content", "") if isinstance(res, dict) else str(res)
+                res = client.chat_completion(messages)
+                reply_text = res.get("content", "") or f"Copilot unavailable: {res.get('error', 'No answer returned')}" if isinstance(res, dict) else str(res)
                 usage = res.get("usage", {}) if isinstance(res, dict) else {}
             else:
                 from industrial_rca.tools.deepseek_client import DeepSeekClient
                 ds = DeepSeekClient()
-                res = ds.chat_completion(messages, model="deepseek-flash")
-                reply_text = res.get("content", "") if isinstance(res, dict) else str(res)
+                res = ds.chat_completion(messages)
+                reply_text = res.get("content", "") or f"Copilot unavailable: {res.get('error', 'No answer returned')}" if isinstance(res, dict) else str(res)
                 usage = res.get("usage", {}) if isinstance(res, dict) else {}
 
             latency_ms = (time.time() - t0_query) * 1000
@@ -719,7 +641,7 @@ class TelegramBotService:
             )
         except Exception as e:
             logger.warning(f"Copilot query failed: {e}")
-            reply_text = f"⚙️ <b>Copilot Diagnostic (6 Channels)</b>:\nCurrent Status: V_dc={v_dc:.1f}V, V_out={v_out:.1f}V, F_out={f_out:.2f}Hz, Current={current:.2f}A, Speed={rpm:.0f}RPM, Torque={torque:.1f}%, Power={power:.2f}kW, Fault Code={fault_code}.\n(Detailed LLM reasoning offline: {str(e)})"
+            reply_text = f"Copilot unavailable: {e}. Check the API configuration and try again."
 
         # Update sliding memory
         self.chat_memory[cid].append({"role": "user", "content": user_query})

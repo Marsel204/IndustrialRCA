@@ -26,8 +26,7 @@ export function useLiveTelemetry(
     activeScenarioId === 'exp_nominal' ||
     activeScenarioId === 'hil' ||
     Boolean(activeScenarioId?.startsWith('ds_hil')) ||
-    telemetry?.metadata?.asset_id === 'VFD_VM_01' ||
-    true;
+    telemetry?.metadata?.asset_id === 'VFD_VM_01';
 
   const [liveMetric, setLiveMetric] = useState<LiveMetric | null>(null);
   const [rollingTimestamps, setRollingTimestamps] = useState<number[]>([]);
@@ -68,22 +67,15 @@ export function useLiveTelemetry(
       .then((history) => {
         if (history && history.length > 0) {
           setRollingTimestamps(history.map((_, i) => i));
-          setRollingSeries({
-            f_out: history.map((p) => p.f_out ?? 40.0),
-            f_in: history.map((p) => p.f_in ?? p.f_target ?? p.f_out ?? 40.0),
-            v_dc: history.map((p) => p.v_dc ?? 276.0),
-            v_out: history.map((p) => p.v_out ?? 184.0),
-            current: history.map((p) => p.current ?? 0.0),
-            rpm: history.map((p) => p.rpm ?? 1199.0),
-            torque: history.map((p) => p.torque ?? 0.0),
-            power: history.map((p) => p.power ?? 0.0),
-            fault_code: history.map((p) => p.fault_code ?? 0),
-            'IT-30101': history.map((p) => (p['IT-30101'] !== undefined ? p['IT-30101'] : (p.current ?? 0) * 60.0)),
-            'PT-30101': history.map((p) => p['PT-30101'] ?? 2.40),
-            'DPS-30101': history.map((p) => p['DPS-30101'] ?? 0.12),
-            'VI-301-R': history.map((p) => p['VI-301-R'] ?? 1.80),
-            'TI-301-DE': history.map((p) => p['TI-301-DE'] ?? 48.50),
-          });
+          const observed: Record<string, number[]> = {};
+          const channels = ['f_out', 'f_in', 'f_target', 'v_dc', 'v_out', 'current', 'rpm', 'torque', 'power', 'fault_code', 'IT-30101', 'PT-30101', 'DPS-30101', 'VI-301-R', 'TI-301-DE'];
+          for (const tag of channels) {
+            observed[tag] = history.map((point) => {
+              const value = (point as unknown as Record<string, unknown>)[tag];
+              return typeof value === 'number' && Number.isFinite(value) ? value : Number.NaN;
+            });
+          }
+          setRollingSeries(observed);
         }
       })
       .catch(console.warn);
@@ -91,6 +83,7 @@ export function useLiveTelemetry(
     const unsubscribe = subscribeLiveTelemetryStream(
       (m: LiveMetric) => {
         setLiveMetric(m);
+        if (m.telemetry_connected === false || m.status === 'OFFLINE') return;
         setRollingTimestamps((prev) => {
           const nextSec = prev.length > 0 ? prev[prev.length - 1] + 1 : 0;
           const updated = [...prev, nextSec];
@@ -103,23 +96,12 @@ export function useLiveTelemetry(
             return nextArr.length > 300 ? nextArr.slice(-300) : nextArr;
           };
 
-          return {
-            ...prev,
-            f_out: appendVal('f_out', m.f_out),
-            f_in: appendVal('f_in', m.f_in ?? m.f_target ?? m.f_out),
-            v_dc: appendVal('v_dc', m.v_dc),
-            v_out: appendVal('v_out', m.v_out ?? 184.0),
-            current: appendVal('current', m.current),
-            rpm: appendVal('rpm', m.rpm),
-            torque: appendVal('torque', m.torque ?? 0.0),
-            power: appendVal('power', m.power ?? 0.0),
-            fault_code: appendVal('fault_code', m.fault_code),
-            'IT-30101': appendVal('IT-30101', m.current * 60.0),
-            'PT-30101': appendVal('PT-30101', m.fault_code > 0 ? 0.58 : 2.40),
-            'DPS-30101': appendVal('DPS-30101', m.fault_code > 0 ? 1.85 : 0.12),
-            'VI-301-R': appendVal('VI-301-R', m.fault_code > 0 ? 11.4 : 1.80),
-            'TI-301-DE': appendVal('TI-301-DE', m.fault_code > 0 ? 92.3 : 48.5),
-          };
+          const next = { ...prev };
+          for (const tag of ['f_out', 'f_in', 'f_target', 'v_dc', 'v_out', 'current', 'rpm', 'torque', 'power', 'fault_code', 'IT-30101', 'PT-30101', 'DPS-30101', 'VI-301-R', 'TI-301-DE']) {
+            const value = (m as unknown as Record<string, unknown>)[tag];
+            next[tag] = appendVal(tag, typeof value === 'number' && Number.isFinite(value) ? value : Number.NaN);
+          }
+          return next;
         });
       },
       (err) => {

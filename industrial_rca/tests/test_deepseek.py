@@ -1,36 +1,32 @@
-"""
-Unit tests for DeepSeek API integration.
-Verifies connection, chat completions, reasoning extraction, and deterministic mock mode.
-"""
+"""Provider behavior is verified offline; absent credentials cannot imply success."""
 
-import pytest
+from types import SimpleNamespace
 from industrial_rca.tools.deepseek_client import DeepSeekClient
 
 
 def test_deepseek_connection():
-    client = DeepSeekClient()
+    client = DeepSeekClient(api_key="mock")
     info = client.test_connection()
-    assert info["status"] == "ONLINE"
-    assert info["base_url"] is not None
-    assert info["model"] is not None
+    assert info["status"] == "UNAVAILABLE"
+    assert info["is_live"] is False
+    assert info["error"]
 
 
 def test_deepseek_chat_completion():
-    client = DeepSeekClient()
-    res = client.chat_completion([
-        {"role": "user", "content": "Ping"}
-    ], model="deepseek-chat", max_tokens=20)
-    assert res["success"] is True
-    assert len(res["content"]) > 0
+    message = SimpleNamespace(content="A grounded answer", reasoning_content="", tool_calls=[])
+    response = SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+    client = DeepSeekClient(api_key="mock")
+    client.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: response)))
+    client.is_live = True
+    result = client.chat_completion([{"role": "user", "content": "Ping"}])
+    assert result["success"] is True
+    assert result["content"] == "A grounded answer"
+    client.client = None
 
 
-def test_deepseek_mock_fallback():
-    # Test client with dummy key to force simulation mode
-    mock_client = DeepSeekClient(api_key="mock", default_model="deepseek-chat")
-    assert mock_client.is_live is False
-    res = mock_client.chat_completion([
-        {"role": "user", "content": "Evaluate 5-whys hypothesis"}
-    ])
-    assert res["success"] is True
-    assert res["is_mock"] is True
-    assert "five_whys" in res["content"] or "STR-301A" in res["content"] or len(res["reasoning_content"]) > 0
+def test_deepseek_no_mock_fallback():
+    client = DeepSeekClient(api_key="mock")
+    result = client.chat_completion([{"role": "user", "content": "Evaluate 5-whys hypothesis"}])
+    assert result["success"] is False
+    assert result["is_mock"] is False
+    assert result["content"] == ""

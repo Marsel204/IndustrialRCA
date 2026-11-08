@@ -86,7 +86,7 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-xs">
       {/* Live Hardware Incident Banner (100% Autonomous) */}
       {latestIncident?.has_incident && (
-        <div className="bg-rose-50 border-b border-rose-200 px-4 py-2 flex items-center justify-between">
+        <div className="bg-rose-50 border-b border-rose-200 px-4 py-2 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center space-x-3">
             <div className="relative flex h-3 w-3">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
@@ -94,10 +94,10 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div>
               <span className="font-mono text-xs font-bold text-rose-700 tracking-wider">
-                🚨 HARDWARE FAULT AUTOMATICALLY CAPTURED FROM EDGE BENCH
+                REPORTED INCIDENT
               </span>
               <span className="ml-2 font-mono text-xs text-rose-900">
-                Asset: {latestIncident.incident_data?.asset_id || 'VFD_VM_01'} | Code: {incFaultStr} ({latestIncident.incident_data?.fault_description || 'Deceleration Overvoltage'})
+                Asset: {latestIncident.incident_data?.asset_id || 'VFD_VM_01'} | Code: {incFaultStr} ({latestIncident.incident_data?.fault_description || 'Description not supplied'})
               </span>
             </div>
           </div>
@@ -105,9 +105,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="px-2.5 py-1 bg-rose-100 border border-rose-300 text-rose-800 font-mono text-xs font-semibold rounded shadow-xs flex items-center space-x-1.5">
               <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" />
               <span>
-                {latestIncident.pipeline_status === 'ANALYSIS_COMPLETE'
-                  ? '✓ AUTO-ANALYZED · DIAGNOSIS ACTIVE'
-                  : '⏳ AUTONOMOUS RCA IN PROGRESS...'}
+                {latestIncident.pipeline_status.replaceAll('_', ' ')}
               </span>
             </span>
           </div>
@@ -115,7 +113,7 @@ export const Header: React.FC<HeaderProps> = ({
       )}
 
       {/* Main Navigation Bar */}
-      <div className="max-w-[1720px] mx-auto px-4 py-2 flex items-center justify-between gap-3">
+      <div className="max-w-[1720px] mx-auto px-4 py-2 flex flex-wrap items-center justify-between gap-3 gap-3">
         {/* Left: Branding & Asset Chip */}
         <div className="flex items-center space-x-3 min-w-0">
           <div className="flex items-center space-x-2.5 flex-shrink-0">
@@ -152,7 +150,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right: Streamlined Status & Controls */}
-        <div className="flex items-center space-x-2 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           {/* Telemetry Stream & Simulation Control Indicator */}
           <div className="relative" ref={simMenuRef}>
             {isSimulated ? (

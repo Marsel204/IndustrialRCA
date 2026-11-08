@@ -20,6 +20,7 @@ from industrial_rca.data.telemetry_generator import (
     TelemetryStore,
 )
 from industrial_rca.graph.workflow import create_rca_graph
+from industrial_rca.tests.support_decisions import MeasuredDecisionClient
 
 
 def test_oem_manual_err13():
@@ -60,25 +61,23 @@ def test_rca_graph_err13_isolation_and_8d():
     ds_id = TelemetryStore.register(ds, "pytest_exp_err13_test")
     config = {"configurable": {"thread_id": "pytest-err13-thread"}}
 
-    graph = create_rca_graph()
+    graph = create_rca_graph(decision_client=MeasuredDecisionClient(tag="current", hypothesis_id="H_FIELD_CURRENT", name="Observed current change", actions=["Inspect motor phase continuity before attributing the protection event"]))
 
     # Step 1: Run to human-in-the-loop review interrupt
     list(graph.stream({"dataset_id": ds_id, "asset_id": EQUIPMENT_ID}, config=config))
     state = graph.get_state(config)
 
     assert state.values.get("has_active_trip") is True
-    assert state.values.get("winning_hypothesis", {}).get("hypothesis_id") == "H_VFD_ERR13"
+    assert state.values.get("winning_hypothesis", {}).get("hypothesis_id") == "H_FIELD_CURRENT"
 
     evals = state.values.get("falsification_summary", [])
-    err13_eval = next((e for e in evals if e.get("hypothesis_id") == "H_VFD_ERR13"), None)
+    err13_eval = next((e for e in evals if e.get("hypothesis_id") == "H_FIELD_CURRENT"), None)
     assert err13_eval is not None
-    assert err13_eval["status"] == "CONFIRMED"
+    assert err13_eval["status"] == "SUPPORTED"
 
-    # Verify 5-Whys trace for phase loss
-    whys = state.values.get("causal_chain_5_whys", [])
-    assert len(whys) >= 3
-    assert any("phase loss" in w["answer"].lower() or "err13" in w["answer"].lower() for w in whys)
-    assert any("u, v, w" in w["answer"].lower() or "terminal" in w["answer"].lower() or "winding" in w["answer"].lower() for w in whys)
+    # A protection event does not prove an upstream cause or force five steps.
+    assert state.values.get("causal_chain_5_whys") == []
+    assert state.values.get("missing_evidence")
 
     # Step 2: Resume with engineer authorization
     resume_cmd = Command(resume={"action": "approve", "reviewer": "Reliability Lead", "notes": "Authorized"})
@@ -87,6 +86,6 @@ def test_rca_graph_err13_isolation_and_8d():
 
     report = final_state.values.get("incident_report_8d")
     assert report is not None
-    assert "Err13" in report["d2_problem_description"]["what"]
+    assert "13" in report["d2_problem_description"]["what"]
     pcas = report["d5_permanent_corrective_actions"]
     assert any("U, V, W" in p or "winding" in p.lower() or "phase" in p.lower() for p in pcas)

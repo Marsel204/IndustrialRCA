@@ -77,7 +77,11 @@ def test_api_topology(client):
     assert len(graph["edges"]) > 0
 
 
-def test_api_rca_workflow_lifecycle(client):
+def test_api_rca_workflow_lifecycle(client, monkeypatch):
+    from industrial_rca import api
+    from industrial_rca.graph.workflow import create_rca_graph
+    from industrial_rca.tests.support_decisions import MeasuredDecisionClient
+    monkeypatch.setattr(api, "GLOBAL_RCA_GRAPH", create_rca_graph(decision_client=MeasuredDecisionClient()))
     thread_id = "test-api-lifecycle-thread"
 
     # 1. Check initial state before run
@@ -90,22 +94,23 @@ def test_api_rca_workflow_lifecycle(client):
         "dataset_id": "exp_err06",
         "asset_id": "VFD_VM_01",
         "thread_id": thread_id,
-        "use_deepseek": False,
+        "use_deepseek": True,
     })
     assert resp_run.status_code == 200
     data_run = resp_run.json()
     assert data_run["status"] == "SUCCESS"
     assert data_run["is_paused_at_hitl"] is True
     assert data_run["current_step"] == 6
-    assert data_run["winning_hypothesis"]["hypothesis_id"] == "H_VFD_ERR06"
+    assert data_run["winning_hypothesis"]["hypothesis_id"] == "H_FIELD_TRANSIENT"
 
     # 3. Fetch state after pause
     resp_state = client.get(f"/api/v1/rca/state/{thread_id}")
     assert resp_state.status_code == 200
     state_data = resp_state.json()
     assert state_data["is_paused_at_hitl"] is True
-    assert len(state_data["hypothesis_results"]) >= 4
-    assert len(state_data["causal_chain_5_whys"]) == 5
+    assert len(state_data["hypothesis_results"]) == 1
+    assert state_data["causal_chain_5_whys"] == []
+    assert state_data["missing_evidence"]
 
     # 4. Submit Human Review Approval
     resp_review = client.post("/api/v1/rca/human-review", json={
@@ -120,7 +125,8 @@ def test_api_rca_workflow_lifecycle(client):
     assert review_data["current_step"] == 7
     assert "incident_report_8d" in review_data
     assert "sap_work_order" in review_data
-    assert review_data["sap_work_order"]["equipment_id"] == "10049201"
+    assert review_data["sap_work_order"]["equipment_id"] == "VFD_VM_01"
+    assert review_data["sap_work_order"]["system_status"] == "LOCAL_DRAFT"
 
 
 def test_api_copilot_chat_stream(client):
@@ -145,7 +151,8 @@ def test_api_copilot_chat_stream(client):
         assert len(chunks) > 0
         all_content = "".join([c.get("content", "") for c in chunks])
         all_reasoning = "".join([c.get("reasoning_content", "") for c in chunks])
-        assert len(all_content) > 0 or len(all_reasoning) > 0
+        assert any(chunk.get("error") for chunk in chunks)
+        assert all_content == all_reasoning == ""
 
 
 def test_api_hil_incident_and_latest(client):

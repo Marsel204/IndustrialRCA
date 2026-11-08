@@ -1,293 +1,130 @@
-# Industrial Root Cause Analysis (RCA) System Prototype
+# IndustrialRCA
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+An industrial root cause investigation prototype using FastAPI, LangGraph,
+DeepSeek tool calling, and a React dashboard.
 
-Production-grade industrial RCA system built with **Python 3.11+**, **LangGraph**, and **DeepSeek AI**. Grounded in **ISA-95** asset hierarchies, **ISO 14224 / FMEA** failure taxonomies, and **ISO 10816 Class III** vibration standards.
+The diagnostic agent chooses what to inspect, executes read-only tools, observes
+results, and revises hypotheses. It can propose a new failure hypothesis without
+adding a fault-code branch. Investigations stop for human review when a supported
+assessment is available, or end inconclusively with the evidence still needed.
 
----
+## Run locally
 
-## 📸 Visual Showcase & System Tour
+Python 3.11+ and Node.js compatible with the frontend's Vite version are required.
 
-Experience the system from continuous plant monitoring down to mobile remediation in the field.
-
-### 1. Real-Time SCADA Telemetry & Autonomous Agent Monitoring
-![Real-Time SCADA Telemetry & Baseline Ingestion](docs/assets/images/01_dashboard_overview.png)
-> **The Operator Cockpit:** 
-> - **Live High-Frequency Streaming:** 1 Hz continuous telemetry streamed via Modbus RTU / SSE, rendered at 60 FPS on ECharts canvas with calibrated ISO 10816 / ISA-95 alarm envelopes (red dashed trip thresholds).
-> - **LangGraph 7-Step Diagnostic Stepper:** The AI agent actively tracks the baseline operational envelope (Ingest ➔ Anomaly ➔ Hypotheses ➔ Falsify ➔ 5-Whys ➔ HITL Gate ➔ Deliverables).
-> - **Embedded DeepSeek AI Copilot:** Natural language prompt assistant directly grounded in real-time sensor metrics and physical equipment models.
-
----
-
-### 2. Edge Hardware Trip Ingestion & Multi-Agent Root Cause Deduction
-![Hardware Trip Ingestion & Multi-Agent Diagnosis](docs/assets/images/02_hitl_active_incident.png)
-> **Incident Response in Action:**
-> - **Instantaneous Hardware Alert:** When a field VFD trips (e.g. `Err06` Deceleration Overvoltage), the edge gateway immediately captures pre-fault and fault waveforms. The dashboard triggers an alert banner with live diagnostics.
-> - **Autonomous Multi-Agent Investigation:** LangGraph orchestrates specialized diagnostic tools:
->   - `ChangePointDetector`: Isolates the transient DC bus surge ($182\text{ V} \to 202.5\text{ V}$).
->   - `TopologyTracer`: Resolves electrical and control relationships (`PLC_LX_01` ➔ `VFD_VM_01`).
->   - `FMEAEngine`: Evaluates failure mode hypotheses against OEM specifications.
->   - `CMMSConnector`: Prepares formal SAP PM01 work order and Global 8D deliverables.
-> - **98% Confidence Root Cause Synthesis:** Pinpoints the exact causal chain—unclamped frequency setpoint ramp and lack of dynamic braking resistor on terminals `P+`/`PB`.
-
----
-
-### 3. Human-in-the-Loop (HITL) Safety Authorization Gate
-![Human-in-the-Loop Review & Authorize Modal](docs/assets/images/03_review_signoff_modal.png)
-> **Engineering Accountability:**
-> - **Strict Safety Gate:** In compliance with industrial safety protocols, no automated corrective actions or ERP work orders are finalized without human sign-off.
-> - **Digital Signature & Professional Stamp:** The Lead Reliability Engineer inspects the diagnosed root cause, validates engineering notes, and inputs digital sign-off (`J. Reynolds, PE #84920`).
-> - **One-Click Dispatch:** Engineers can `[✓ Approve]`, `[⚠️ Override]`, or `[❌ Reject]` directly from the workstation or remotely via Telegram.
-
----
-
-### 4. Automated Enterprise Deliverables: Global 8D Incident Report & SAP PM01 Work Order
-![Completed Global 8D Report](docs/assets/images/04_completed_8d_report.png)
-> **Standardized Industrial Documentation:**
-> - **Full Global 8D Disciplines:** Formally documents D1 (Team), D2 (Problem Description), D3 (Interim Containment Actions), D4 (Root Cause Analysis with ISO 14224 failure mechanisms), D5 (Permanent Corrective Actions), D6 (Validation Protocol), D7 (Systemic Prevention), and D8 (Sign-Off).
-> - **SAP S/4HANA PM01 Maintenance Integration:** Generates production-ready PM01 work orders with detailed operation lines, safety lockout/tagout procedures, and required replacement parts.
-
----
-
-### 5. Plant Floor Mobile Operations via Two-Way Telegram Bot
-The system extends full SCADA oversight and incident remediation to mobile devices via an interactive Telegram Bot. Technicians can respond to plant emergencies anywhere in the facility without a desktop workstation.
-
-| Push Trip Alert with Waveform Plot | Remote One-Tap HITL Authorization | Conversational AI Copilot in Field |
-| :---: | :---: | :---: |
-| ![Telegram Trip Alert](docs/assets/images/telegram/01_telegram_trip_alert.png) | ![Telegram HITL Buttons](docs/assets/images/telegram/02_telegram_hitl_buttons.png) | ![Telegram AI Copilot](docs/assets/images/telegram/03_telegram_ai_copilot.png) |
-| **Instant Incident Dispatch:** In-memory dual-axis Matplotlib waveforms generated and pushed directly to Telegram with trip severity. | **Mobile HITL Gate:** Technicians review root cause findings and approve/reject remediation directly with inline buttons. | **Conversational Copilot:** Ask questions in plain English (*"is the system okay?"*, *"why did the motor trip?"*) grounded in live telemetry. |
-
-#### In-App Telegram Bot Configuration
-![Telegram Settings Modal](docs/assets/images/05_telegram_settings_modal.png)
-> **Zero-Friction Setup:** Connect any Telegram bot in seconds using the in-app configuration modal. Manage bot API tokens, monitor active channel subscribers, send instant test alerts, and view command references (`/status`, `/rca`, `/chart`, `/alarms`).
-
----
-
-## ⚡ Quickstart
-
-### 🚀 One-Click Launch (Windows)
-Double-click **`launch.bat`** (or **`start_system.bat`**) in the project root:
-```cmd
-launch.bat
-```
-> Automatically verifies environment, launches the local MQTT broker (`1883`), starts the FastAPI backend (`8000`), starts the React Vite frontend (`5173`), and opens your default browser to [http://localhost:5173](http://localhost:5173).
-> To cleanly stop all services, double-click **`stop_system.bat`**.
-
-### 1. Manual Service Launch
-
-#### A. Launch FastAPI Backend Server
 ```bash
-python -m uvicorn industrial_rca.api:api_app --host 0.0.0.0 --port 8000
+python -m venv .venv
+source .venv/bin/activate
+pip install -r industrial_rca/requirements.txt
+cp .env.example .env
 ```
-> - **API Docs & OpenAPI Schema:** Open [http://localhost:8000/docs](http://localhost:8000/docs)
-> - **Health Endpoint:** Open [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
 
-#### B. Launch Modern React 19 Frontend
+Set `DEEPSEEK_API_KEY` and `DEEPSEEK_MODEL` in `.env`, then start the backend:
+
+```bash
+python -m uvicorn industrial_rca.api:api_app --host 127.0.0.1 --port 8000
+```
+
+Start the frontend in another terminal:
+
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
-> - **Web Application:** Open [http://localhost:5173](http://localhost:5173) (Vite Dev Server)
 
-### 2. Run Interactive Terminal CLI (Rich TUI)
+Open [the dashboard](http://localhost:5173) or [API documentation](http://localhost:8000/docs).
+The Windows launch scripts remain available.
+
+Without valid provider credentials, telemetry and analytics remain available;
+AI investigation ends `INCONCLUSIVE`. Provider errors are reported explicitly.
+There is no canned successful diagnosis or automatic mock fallback.
+
+## Investigation flow
+
+Ingestion preserves supplied readings, historical fault transitions and incident
+identity. Missing samples/channels/waveforms remain missing. Nominal telemetry
+can complete screening without involving the model.
+
+For an incident, LangGraph checkpoints a repeating decision/tool loop. The model
+receives native tool schemas and selects its next action from previous observations:
+
+| Tool | Observation |
+| --- | --- |
+| `profile_telemetry` | Statistics over a measured channel and sample-index window |
+| `detect_change_points` | Changes in a measured channel |
+| `trace_topology` | Configured upstream/downstream relationships |
+| `lookup_oem` | OEM and FMEA reference knowledge |
+| `lookup_maintenance` | Explicitly simulated fixtures, or unavailable live history |
+| `submit_diagnosis` | A structured conclusion referencing collected observation IDs |
+
+Tools cannot access arbitrary datasets, run code, write equipment registers, or
+publish maintenance work. Arguments, evidence references, confidence bounds and
+response sizes are validated. The default investigation budget is eight model
+turns, four calls per turn, and 120 seconds checked between calls; each provider
+request has a 30-second timeout. `create_rca_graph(decision_client=...,
+max_agent_iterations=...)` supports injected decision clients and a different turn
+budget. Higher turn budgets require a corresponding LangGraph `recursion_limit`.
+
+Observations distinguish measured, simulated, configured, reference and inferred
+information. Configured topology does not verify component condition; an OEM
+fault description does not establish an upstream cause. Causal explanations may
+contain fewer than five steps. Confidence is a model assessment, not a calibrated
+probability. Citation validation checks provenance and structure; engineers must
+still assess whether the evidence supports the claims.
+
+## Review and maintenance drafts
+
+Supported diagnoses pause at the LangGraph human-review interrupt. Explicit
+approval and an identified reviewer are required before creating local 8D and PM01
+drafts. Rejection creates no maintenance artifacts. Override requires a replacement
+statement. Resume continues from the checkpoint without rerunning completed calls.
+
+Draft operations come from the reviewed actions. Parts, estimated labor, ERP
+identifiers and inspection findings are not fabricated. The CMMS connector is a
+prototype with simulation fixtures; it does not submit or release orders in SAP.
+
+The dashboard displays actual backend observations and evidence gaps. The
+conversational copilot explains current context; it does not invent tool executions.
+Telegram uses the same investigation results and reports missing diagnoses explicitly.
+
+## Telemetry sources
+
+Hardware incidents are accepted at `POST /api/v1/telemetry/incident` with
+`asset_id`, `fault_code`, optional `incident_id`, and `pre_fault_telemetry` rows.
+An absent history stays empty. Unknown fault codes remain unknown rather than
+being converted to a known diagnosis. Samples preserve acquisition order; tool
+windows and derived slopes use sample indices, not an assumed sampling interval.
+
+Synthetic presets and user-enabled simulation are labelled as simulated. The live
+loader returns an empty history when no readings are available. Operational limits
+are installation configuration in `industrial_rca/config.py`; calibrate them for
+the equipment. Limits are never inferred from the magnitude of a reading.
+
+## Verification
+
 ```bash
-# Autonomous investigation with DeepSeek V4.1 Flash
-python main.py --auto-approve --use-deepseek --deepseek-model deepseek-flash
+python -m pytest industrial_rca/tests -q
+cd frontend
+npm run build
+npm run lint
 ```
 
-### 4. Run Automated Test Suite
-```bash
-python -m pytest industrial_rca/tests -v
-```
+Tests inject offline decision clients and fake provider responses; they do not
+require paid LLM calls or Telegram delivery. The approved 25-test proposal is
+preserved unchanged under `industrial_rca/tests/agentic/`, with its hash manifest.
+See [the implementation report](docs/agentic-refactor-report.md) for validation,
+changed legacy expectations, and limitations.
 
----
-
-## 🏭 Hardware-in-the-Loop (HIL) Test Bench Integration Guide
-
-This platform supports real physical industrial hardware (HMI touch screen, WECON VM Series VFD, 3-phase induction motor, and V-Box IoT Gateway) streaming live telemetry into the LangGraph root cause engine.
-
-### 1. End-to-End System Architecture
-
-```
-[HMI Touch Screen / V-Box] 
-      │ (Touch Slider / Start-Stop Commands over RS-485 Modbus RTU)
-      ▼
-[WECON VM Series VFD] ──────(3-Phase PWM)─────> [Induction Motor]
-      │
-      │ (RS-485 Port S+, S- / Modbus Slave ID 1, 9600 8-N-1)
-      ▼
-[V-Box Edge Gateway / Modbus Bridge]
-      │ (MQTT JSON stream: factory/bench01/vfd/telemetry)
-      ▼
-[Mosquitto MQTT Broker] (Port 1883)
-      ├── (Continuous 1 Hz stream) ──> [InfluxDB 2.7] (Port 8086, Bucket: telemetry)
-      └── (Trip condition: Reg 700BH > 0 / HTTP POST or direct MQTT subscription)
-                  │
-                  ▼
-      [IndustrialRCA FastAPI Backend: industrial_rca/api.py] (Port 8000)
-                  │
-                  ├──> [LangGraph RCA Engine: workflow.py]
-                  │      ├── telemetry_analytics.py (Voltage spikes, decel trends)
-                  │      ├── topology_tracer.py (Asset linking via asset_topology.json)
-                  │      ├── oem_manuals.py (WECON VM Err codes: Err02, Err03, Err06, Err11)
-                  │      └── deepseek_client.py (Root cause deduction & remediation)
-                  │
-                  └── (Live SSE Streaming) ──> [React 19 Frontend: frontend/] (Port 5173)
-```
-
----
-
-### 2. Edge Transport Middleware Deployment (`docker-compose.infra.yml`)
-
-The infrastructure stack runs Eclipse Mosquitto and InfluxDB 2.7 in Docker:
+CLI examples:
 
 ```bash
-# Start edge transport middleware
-docker compose -f docker-compose.infra.yml up -d
-
-# Check container status
-docker compose -f docker-compose.infra.yml ps
+python main.py --use-deepseek
+python main.py --no-deepseek --reject
+python main.py --test-deepseek
 ```
 
-- **Mosquitto MQTT Broker:** `mqtt://<HOST_IP>:1883` (Anonymous access enabled)
-- **InfluxDB 2.7:** `http://<HOST_IP>:8086` (Org: `factory`, Bucket: `telemetry`, Token: `rca_super_secret_token_123`)
+CLI telemetry examples are simulated. `--auto-approve` explicitly approves local
+simulation drafts; it does not operate equipment or submit orders externally.
 
----
-
-### 3. WECON VM Series VFD Keypad Parameter Configuration
-
-Configure these parameters on the VFD front keypad:
-
-| Parameter | Function Name | Required Setting | Description |
-| :--- | :--- | :--- | :--- |
-| **`F9.00`** | Communication Station / Slave ID | **`1`** | Modbus Slave ID = 1 |
-| **`F9.01`** | Modbus Baud Rate | **`3`** | `9600 bps` |
-| **`F9.02`** | Modbus Data Format | **`0`** | `8-N-1` (8 data bits, no parity, 1 stop bit) |
-| **`F0.02`** | Run Command Source | **`2`** | RS-485 Communication control |
-| **`F0.03`** | Frequency Reference Source | **`2`** | RS-485 Communication setting |
-| **`F0.17`** | Acceleration Time | **`5.0s`** | Normal acceleration ramp |
-| **`F0.18`** | Deceleration Time | **`5.0s`** (Normal) | Baseline ramp. *(Set to `0.2s` for `Err06` trip test)* |
-| **`F2.03`** | Motor Rated Current | Motor FLA | True motor nameplate current. *(Set to `0.3A` for `Err11` trip test)* |
-
----
-
-### 4. WECON VM Modbus Register Mapping Table
-
-| Register (Hex) | Register (Dec) | Modbus Function | Data Type | Engineering Unit | Scale Factor | Access | Description |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`2000H`** | `8192` (`4x8192`) | `0x06` / `0x10` | 16-bit Int | Enum | `1` | Write | Control Command (`1`=FWD Run, `2`=REV, `5`=Decel Stop, `6`=Coast Stop, `7`=Fault Reset) |
-| **`2001H`** | `8193` (`4x8193`) | `0x06` / `0x10` | 16-bit Int | Hz | `Value / 100` | Write | Target Frequency Command ($0 - 10000 = 0.00 - 100.00\text{ Hz}$) |
-| **`3000H`** | `12288` (`4x12288`) | `0x03` | 16-bit Int | Hz | `Value / 100` | Read | Output Operating Frequency (`f_out`) |
-| **`3001H`** | `12289` (`4x12289`) | `0x03` | 16-bit Int | Hz | `Value / 100` | Read | Commanded Target Frequency (`f_target`) |
-| **`3002H`** | `12290` (`4x12290`) | `0x03` | 16-bit Int | A | `Value / 100` | Read | Output Motor Line Current (`current`) |
-| **`3003H`** | `12291` (`4x12291`) | `0x03` | 16-bit Int | V | `Value * 1` | Read | Output Voltage (`v_out`) |
-| **`3004H`** | `12292` (`4x12292`) | `0x03` | 16-bit Int | V | `Value / 10` | Read | DC Bus Voltage (`v_dc`) |
-| **`700BH`** | `28683` (`4x28683`) | `0x03` | 16-bit Int | Code | `1` | Read | Active Trip Code (`0`=Normal, `2`=Err02, `3`=Err03, `6`=Err06, `11`=Err11) |
-
----
-
-### 5. HMI Screen Widget Addressing (PIStudio / Weinview / Modbus HMI)
-
-Configure your HMI screen controls using the following mappings:
-
-| HMI Widget Type | Display Label | Modbus Register Address (Hex) | Modbus Address (Dec) | Data Format | Multiplier | Read / Write |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Numeric Input / Slider** | **Target Frequency Setpoint** | **`2001H`** | **`4x8193`** (`8193`) | 16-bit Unsigned | `0.01` ($5000 = 50.00\text{ Hz}$) | **Read / Write** |
-| **Momentary / Toggle Button** | **START (Forward Run)** | **`2000H`** | **`4x8192`** (`8192`) | 16-bit Int | Constant value **`1`** | **Write Only** |
-| **Momentary / Toggle Button** | **STOP (Decel to Stop)** | **`2000H`** | **`4x8192`** (`8192`) | 16-bit Int | Constant value **`5`** | **Write Only** |
-| **Momentary Button** | **EMERGENCY COAST STOP** | **`2000H`** | **`4x8192`** (`8192`) | 16-bit Int | Constant value **`6`** | **Write Only** |
-| **Momentary Button** | **FAULT RESET** | **`2000H`** | **`4x8192`** (`8192`) | 16-bit Int | Constant value **`7`** | **Write Only** |
-| **Meter / Numeric Display** | **Running Frequency** | **`1001H`** | **`4x4098`** (`4097`) | 16-bit Unsigned | `0.01` (2 decimals: $4500 = 45.00\text{ Hz}$) | **Read Only** |
-| **Numeric Display** | **Set Frequency** | **`1002H`** | **`4x4099`** (`4098`) | 16-bit Unsigned | `0.01` (2 decimals: $4500 = 45.00\text{ Hz}$) | **Read Only** |
-| **Meter / Numeric Display** | **DC Bus Voltage** | **`1003H`** | **`4x4100`** (`4099`) | 16-bit Unsigned | `0.1` (1 decimal: $3120 = 312.0\text{ V}$) | **Read Only** |
-| **Numeric Display** | **Output Voltage** | **`1004H`** | **`4x4101`** (`4100`) | 16-bit Unsigned | `0.1` (1 decimal: $2200 = 220.0\text{ V}$) | **Read Only** |
-| **Meter / Numeric Display** | **Output Current** | **`1005H`** | **`4x4102`** (`4101`) | 16-bit Unsigned | `0.01` (2 decimals: $142 = 1.42\text{ A}$) | **Read Only** |
-| **Numeric Display** | **IGBT Temperature** | **`100DH`** | **`4x4110`** (`4109`) | 16-bit Unsigned | `0.1` (1 decimal: $425 = 42.5^\circ\text{C}$) | **Read Only** |
-| **Numeric Display** | **Motor RPM** | **`100FH`** | **`4x4112`** (`4111`) | 16-bit Unsigned | `0.1` (1 decimal: $13800 = 1380.0\text{ RPM}$) | **Read Only** |
-| **Alarm / Text Display** | **Active Fault Code** | **`700BH` / `1013H`** | **`4x28683`** / **`4x4116`** | 16-bit Unsigned | `1` (`0`=No Error, `6`=Err06, `11`=Err11) | **Read Only** |
-
----
-
-### 6. V-Box Edge Gateway MQTT Publisher Settings
-
-In the V-Box / HMI cloud configurator:
-- **Serial Connection:** RS-485 to VFD `S+`, `S-`, Baud `9600`, `8-N-1`, Slave ID `1`.
-- **Polling Interval:** `1000 ms` (1 Hz).
-- **MQTT Server:** `<HOST_IP>` (Port `1883`, anonymous).
-- **Publish Topic:** `factory/bench01/vfd/telemetry`.
-- **Payload Schema:**
-  ```json
-  {
-    "f_out": 45.00,
-    "f_target": 45.00,
-    "current": 1.42,
-    "v_out": 220,
-    "v_dc": 311.5,
-    "fault_code": 0
-  }
-  ```
-
----
-
-### 7. Incident Reporting Destination (Edge Gateway ➔ IndustrialRCA)
-
-When a trip is detected (`fault_code > 0`), the Edge Gateway / ingestion bridge posts the incident payload directly to FastAPI:
-
-- **Target URL (from Docker):** `http://host.docker.internal:8000/api/v1/telemetry/incident`
-- **Target URL (from external LAN):** `http://<HOST_IP>:8000/api/v1/telemetry/incident`
-- **HTTP Method:** `POST`
-- **Headers:** `Content-Type: application/json`
-- **Payload Schema:**
-  ```json
-  {
-    "asset_id": "VFD_VM_01",
-    "fault_code": 6,
-    "fault_description": "Deceleration Overvoltage (Err06) - DC link regeneration surge",
-    "incident_id": "INC-HIL-1726041200",
-    "pre_fault_telemetry": [
-      {
-        "timestamp": 1726041140,
-        "f_out": 45.00,
-        "f_target": 45.00,
-        "current": 1.42,
-        "v_out": 220,
-        "v_dc": 311.5,
-        "fault_code": 0
-      },
-      {
-        "timestamp": 1726041200,
-        "f_out": 12.50,
-        "f_target": 0.00,
-        "current": 3.85,
-        "v_out": 180,
-        "v_dc": 745.2,
-        "fault_code": 6
-      }
-    ]
-  }
-  ```
-
----
-
-### 8. Safe Software Fault Injection Recipes
-
-#### 1. Deceleration Overvoltage (`Err06`)
-1. On the VFD keypad, set parameter **`F0.18 = 0.2`** (0.2s deceleration ramp). Verify that no dynamic braking resistor is connected to terminals `P+` and `PB`.
-2. On the HMI screen, set target frequency to **`45.00 Hz`** and tap **START**.
-3. Once running at steady speed, drag the frequency slider to **`0.00 Hz`** or tap **STOP**.
-4. The motor regenerates kinetic energy into the DC bus; DC voltage (`3004H`) surges past $700\text{ V DC}$ and trips **`Err06`** (`fault_code = 6`).
-5. V-Box / Bridge captures the trip condition $\to$ POSTs incident to IndustrialRCA or publishes to MQTT broker.
-
-#### 2. Motor Thermal Overload (`Err11`)
-1. On the VFD keypad, set parameter **`F2.03 = 0.3`** (lowered below idle motor current, e.g. 0.3A).
-2. On the HMI screen, set target frequency to **`50.00 Hz`** and tap **START**.
-3. With the motor drawing ~1.0A–1.5A, the VFD's internal thermal accumulator ($I^2t$) charges rapidly.
-4. After ~20–60 seconds, the VFD trips on **`Err11`** (`fault_code = 11`).
-
----
-
-## 📄 License
-
-This project is open-source software licensed under the **[MIT License](LICENSE)**.
-Copyright (c) 2026 Marsel (Marsel204) and IndustrialRCA contributors.
+MIT licensed. See [LICENSE](LICENSE).

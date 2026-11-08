@@ -7,13 +7,14 @@ import {
   Sliders,
   Layers,
 } from 'lucide-react';
-import { TopologyData } from '../../types';
+import { RCAState, TopologyData } from '../../types';
 
 interface TopologyTabProps {
   topology: TopologyData | null;
+  rcaState?: RCAState | null;
 }
 
-export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
+export const TopologyTab: React.FC<TopologyTabProps> = ({ topology, rcaState }) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string>('VFD_VM_01');
   const [treeExpanded, setTreeExpanded] = useState<Record<string, boolean>>({
     enterprise: true,
@@ -40,7 +41,7 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
   // Drive & Motion Power Branch
   const vfdPowerOrder = [
     { id: 'VFD_VM_01', label: 'Wecon VM VFD', sub: '0.75kW Inverter' },
-    { id: 'DC_BUS_LINK', label: 'DC Bus Link', sub: '182V nom · 195V trip' },
+    { id: 'DC_BUS_LINK', label: 'DC Bus Link', sub: 'Configured DC link' },
     { id: 'BRK_RESISTOR_01', label: 'Braking Resistor', sub: 'P+/PB Terminals' },
     { id: 'IND_MOTOR_01', label: 'Induction Motor', sub: '4-Pole 1440 RPM' },
   ];
@@ -65,10 +66,10 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
 
         <div className="flex items-center space-x-2 text-[11px] font-mono">
           <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
-            Root Origin: <strong>PLC_LX_01</strong>
+            Assessed origin: <strong>{rcaState?.root_cause_asset || 'Unresolved'}</strong>
           </span>
           <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
-            Tripped Asset: <strong>VFD_VM_01</strong>
+            Target asset: <strong>{topology?.target_asset?.id || 'Unavailable'}</strong>
           </span>
         </div>
       </div>
@@ -92,7 +93,7 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
           <div className="flex flex-wrap items-center gap-2">
             {controlSupplyOrder.map((item, idx) => {
               const isSelected = selectedNodeId === item.id;
-              const isRoot = item.id === 'PLC_LX_01';
+              const isRoot = item.id === rcaState?.root_cause_asset;
               return (
                 <React.Fragment key={item.id}>
                   <button
@@ -201,7 +202,7 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
                   : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
               }`}
             >
-              {selectedNode?.status || 'HEALTHY'}
+              {selectedNode?.status || 'UNKNOWN'}
             </span>
           </div>
 
@@ -221,21 +222,7 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
             <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
               <span className="text-slate-500 block text-[10px]">Role in Incident</span>
               <span className="font-bold text-slate-900">
-                {selectedNode?.id === 'PLC_LX_01'
-                  ? 'Upstream Root Trigger (PLC Ladder / D-Register)'
-                  : selectedNode?.id === 'VFD_VM_01'
-                  ? 'Tripped Asset (Latched Hardware Fault)'
-                  : selectedNode?.id === 'DC_BUS_LINK'
-                  ? 'DC Link Intermediate Bus'
-                  : selectedNode?.id === 'BRK_RESISTOR_01'
-                  ? 'Dynamic Braking Circuit'
-                  : selectedNode?.id === 'IND_MOTOR_01'
-                  ? 'Coupled Induction Motor'
-                  : selectedNode?.id === 'STR-301A'
-                  ? 'Primary Root Cause'
-                  : selectedNode?.id === 'P-301A'
-                  ? 'Tripped Machinery'
-                  : 'Component'}
+                {selectedNode?.id === rcaState?.root_cause_asset ? 'Assessed origin (review required)' : 'Configured component; incident role unverified'}
               </span>
             </div>
           </div>
@@ -369,7 +356,7 @@ export const TopologyTab: React.FC<TopologyTabProps> = ({ topology }) => {
                                 >
                                   <span>•</span>
                                   <span className="font-bold text-slate-800">DC_BUS_LINK:</span>
-                                  <span className="text-slate-600">DC Bus Link (182V nom · 195V trip)</span>
+                                  <span className="text-slate-600">DC Bus Link (Configured DC link)</span>
                                 </div>
                                 <div
                                   onClick={() => setSelectedNodeId('BRK_RESISTOR_01')}

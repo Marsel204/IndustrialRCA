@@ -120,7 +120,7 @@ export function App() {
                   state.pipeline_status === 'CAUSAL_TRACE_COMPLETED' ||
                   state.pipeline_status === 'ANALYSIS_COMPLETE' ||
                   state.pipeline_status === 'COMPLETED' ||
-                  state.pipeline_status === 'AWAITING_REVIEW'
+                  ['AWAITING_REVIEW', 'INCONCLUSIVE', 'REJECTED', 'NORMAL_STABLE'].includes(state.pipeline_status)
                 ) {
                   setIsPipelineRunning(false);
                 }
@@ -195,7 +195,7 @@ export function App() {
                 state.pipeline_status === 'CAUSAL_TRACE_COMPLETED' ||
                 state.pipeline_status === 'ANALYSIS_COMPLETE' ||
                 state.pipeline_status === 'COMPLETED' ||
-                state.pipeline_status === 'AWAITING_REVIEW'
+                ['AWAITING_REVIEW', 'INCONCLUSIVE', 'REJECTED', 'NORMAL_STABLE'].includes(state.pipeline_status)
               ) {
                 setIsPipelineRunning(false);
               }
@@ -306,12 +306,12 @@ export function App() {
           const thId = eventData.thread_id || latestIncidentRef.current?.incident_data?.thread_id || activeThreadIdRef.current;
           setIsPipelineRunning(false);
           setLatestIncident((prev) =>
-            prev ? { ...prev, pipeline_status: 'ANALYSIS_COMPLETE' } : null
+            prev ? { ...prev, pipeline_status: eventData.status || 'INCONCLUSIVE' } : null
           );
           // Auto-load full RCA state from LangGraph checkpoint and update UI
           try {
             const state = await fetchRCAState(thId);
-            const activeFc = latestIncidentRef.current?.incident_data?.fault_code || state?.fault_code || 2;
+            const activeFc = latestIncidentRef.current?.incident_data?.fault_code || state?.fault_code || 0;
             setRcaState(state ? { ...state, fault_code: activeFc } : null);
             // Only auto-switch to hypotheses tab if the user hasn't explicitly clicked another tab
             if (!userSelectedTabRef.current) {
@@ -328,7 +328,7 @@ export function App() {
           );
           try {
             const state = await fetchRCAState(thId);
-            const activeFc = latestIncidentRef.current?.incident_data?.fault_code || state?.fault_code || 2;
+            const activeFc = latestIncidentRef.current?.incident_data?.fault_code || state?.fault_code || 0;
             setRcaState(state ? { ...state, fault_code: activeFc } : null);
             setInspectorTab('deliverables');
           } catch (e) {
@@ -684,7 +684,7 @@ export function App() {
       {/* Agent-First Split Workspace Layout */}
       <main className="flex-1 max-w-[1720px] w-full mx-auto p-4 flex flex-col lg:flex-row gap-4 min-h-0">
         {/* Left Pane: Agent Workspace (~48-50% width) */}
-        <section className="w-full lg:w-[48%] flex flex-col h-auto lg:h-[calc(100vh-140px)] min-h-[620px] lg:min-h-0">
+        <section className="min-w-0 w-full lg:w-[48%] flex flex-col h-auto lg:h-[calc(100vh-140px)] min-h-[620px] lg:min-h-0">
           <AgentWorkspace
             rcaState={rcaState}
             latestIncident={latestIncident}
@@ -700,7 +700,7 @@ export function App() {
         </section>
 
         {/* Right Pane: Artifact Inspector (~50-52% width) */}
-        <section className="w-full lg:w-[52%] flex flex-col h-auto lg:h-[calc(100vh-140px)] min-h-[620px] lg:min-h-0">
+        <section className="min-w-0 w-full lg:w-[52%] flex flex-col h-auto lg:h-[calc(100vh-140px)] min-h-[620px] lg:min-h-0">
           <ArtifactInspector
             activeTab={inspectorTab}
             onSelectTab={handleSelectTab}

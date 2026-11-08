@@ -207,7 +207,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         base_url: baseUrl,
         model: selectedModel,
         is_live: false,
-        status: 'SIMULATION',
+        status: 'UNAVAILABLE',
       });
       setStatusNotification({
         type: 'info',
